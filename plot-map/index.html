@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+  <title>Build91 · Interactive Plot Map</title>
+  <meta name="description"
+    content="Interactive township plot map — clickable, status-coloured plots over an aerial render, linking to 3DVista walkthroughs." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+  <!-- ─── Top bar ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">B91</span>
+      <div class="brand-text">
+        <strong>Build91</strong>
+        <span>Interactive Plot Map</span>
+      </div>
+    </div>
+
+    <div class="legend" id="legend" role="group" aria-label="Status legend and filters">
+      <!-- legend / filter chips injected by app.js -->
+    </div>
+
+    <div class="sync">
+      <span class="sync-meta" id="syncMeta" aria-live="polite">Loading…</span>
+      <button class="btn btn-ghost" id="refreshBtn" type="button" title="Re-load plot data">
+        <span class="ico" aria-hidden="true">⟳</span> Refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- ─── Map stage (360° panorama viewer) ──────────────────────────────────── -->
+  <main class="stage" id="stage">
+    <!-- WebGL canvas (equirectangular sphere + projected plot overlay) mounts here -->
+    <div class="pano" id="pano" role="img" aria-label="Interactive 360° aerial site panorama with selectable plots">
+    </div>
+
+    <!-- look-around / zoom controls -->
+    <div class="zoom-controls" role="group" aria-label="View controls">
+      <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false"
+        aria-label="Show plot numbers" title="Show plot numbers">#</button>
+      <button class="btn btn-icon" id="zoomIn" type="button" aria-label="Zoom in">+</button>
+      <button class="btn btn-icon" id="zoomOut" type="button" aria-label="Zoom out">−</button>
+      <button class="btn btn-icon" id="zoomReset" type="button" aria-label="Recenter on plots"
+        title="Recenter on plots">⊡</button>
+    </div>
+
+    <!-- hint -->
+    <div class="pano-hint" id="panoHint">Drag to look around · scroll to zoom</div>
+
+    <!-- hover tooltip -->
+    <div class="tooltip" id="tooltip" role="status" aria-hidden="true"></div>
+
+    <!-- non-blocking notice (e.g. data-load fallback) -->
+    <div class="notice" id="notice" role="alert" hidden></div>
+  </main>
+
+  <!-- ─── Admin alignment toolbar (revealed only in ?admin=1) ───────────────── -->
+  <section class="adminbar" id="adminBar" aria-label="Overlay alignment controls" hidden>
+    <header class="adminbar-head">
+      <span class="admin-tag">ADMIN</span>
+      <strong>Align overlay</strong>
+      <p>Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.</p>
+    </header>
+    <div class="ax-mode" role="group" aria-label="Drag mode">
+      <button class="ax-modebtn is-on" id="axModeLook" type="button" title="Drag to look around">Look around</button>
+      <button class="ax-modebtn" id="axModeMove" type="button" title="Drag to reposition the whole layout">Move
+        layout</button>
+    </div>
+    <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
+      Import / Trace plots…</button>
+    <div class="ax-scale">
+      <div class="ax-scale-head">
+        <span>Scale</span>
+        <div class="ax-stepper" role="group" aria-label="Scale value">
+          <button class="ax-stepbtn" id="axScaleDown" type="button" aria-label="Decrease scale">−</button>
+          <input class="ax-num" id="axScaleNum" type="number" min="0.05" max="3" step="0.01" value="1.00" inputmode="decimal" aria-label="Scale (×)" />
+          <button class="ax-stepbtn" id="axScaleUp" type="button" aria-label="Increase scale">+</button>
+        </div>
+      </div>
+      <input type="range" id="axScale" min="0.05" max="3" step="0.01" value="1" />
+    </div>
+    <div class="ax-scale">
+      <div class="ax-scale-head">
+        <span>Rotate</span>
+        <div class="ax-stepper" role="group" aria-label="Rotation value (degrees)">
+          <button class="ax-stepbtn" id="axRotDown" type="button" aria-label="Rotate −0.1°">−</button>
+          <input class="ax-num" id="axRotNum" type="number" min="-180" max="180" step="0.1" value="0.0" inputmode="decimal" aria-label="Rotation in degrees" />
+          <button class="ax-stepbtn" id="axRotUp" type="button" aria-label="Rotate +0.1°">+</button>
+        </div>
+      </div>
+      <input type="range" id="axRot" min="-180" max="180" step="0.1" value="0" />
+    </div>
+    <label class="ax-row">Opacity
+      <input type="range" id="axOpacity" min="0.15" max="1" step="0.05" value="0.5" />
+      <output id="axOpacityVal">50%</output>
+    </label>
+    <label class="ax-row" id="axPlanRow" hidden>Plan image
+      <input type="range" id="axPlanOpacity" min="0" max="1" step="0.05" value="1" />
+      <output id="axPlanOpacityVal">100%</output>
+    </label>
+    <div class="adminbar-actions">
+      <button class="btn btn-ghost" id="axReset" type="button">Reset</button>
+      <button class="btn btn-ghost" id="axLoad" type="button">Load…</button>
+      <input type="file" id="axFile" accept="application/json,.json" hidden />
+      <button class="btn btn-primary" id="axSave" type="button">Save As…</button>
+    </div>
+    <div class="adminbar-actions">
+      <button class="btn btn-ghost" id="axExport" type="button"
+        title="Write plots.svg + plots.csv + alignment.json (+ plan image) into a folder">⤓ Export site files…</button>
+    </div>
+    <div class="adminbar-actions ax-session">
+      <button class="btn btn-ghost" id="axSessionSave" type="button"
+        title="Save the whole in-progress session — traced plots, plan image and alignment — in this browser so a reload or crash won't lose it">⟳ Save working session</button>
+      <button class="btn btn-ghost" id="axSessionClear" type="button"
+        title="Discard the working session stored in this browser">Discard</button>
+    </div>
+    <p class="adminbar-sess" id="axSessionStatus" aria-live="polite">Work auto-saves in this browser as you go.</p>
+    <p class="adminbar-foot" id="axStatus">Drag/scale/rotate, then <strong>Save file</strong> → drop it in
+      <code>sample/alignment.json</code> for the client view.</p>
+  </section>
+
+  <!-- ─── Info panel ──────────────────────────────────────────────────────── -->
+  <aside class="panel" id="panel" aria-hidden="true" aria-labelledby="panelTitle" tabindex="-1">
+    <button class="panel-close btn btn-icon" id="panelClose" type="button" aria-label="Close panel">×</button>
+    <div class="panel-head">
+      <span class="status-badge" id="panelBadge">—</span>
+      <h2 class="panel-title" id="panelTitle">Plot</h2>
+      <p class="panel-block" id="panelBlock"></p>
+    </div>
+    <dl class="panel-grid">
+      <div>
+        <dt>Area</dt>
+        <dd id="panelSize">—</dd>
+      </div>
+      <div>
+        <dt>Price</dt>
+        <dd id="panelPrice">—</dd>
+      </div>
+      <div>
+        <dt>Facing</dt>
+        <dd id="panelFacing">—</dd>
+      </div>
+      <div>
+        <dt>Dimensions</dt>
+        <dd id="panelDimensions">—</dd>
+      </div>
+    </dl>
+    <p class="panel-notes" id="panelNotes"></p>
+    <button class="btn btn-primary panel-cta" id="walkBtn" type="button" disabled>
+      Walk through this plot
+    </button>
+    <p class="panel-hint" id="walkHint"></p>
+  </aside>
+
+  <!-- ─── Tour modal ──────────────────────────────────────────────────────── -->
+  <div class="modal" id="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-bar">
+        <h3 class="modal-title" id="modalTitle">Walkthrough</h3>
+        <div class="modal-actions">
+          <a class="btn btn-ghost" id="modalOpenNew" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+          <button class="btn btn-icon" id="modalClose" type="button" aria-label="Close walkthrough">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="modal-spinner" id="modalSpinner">Loading walkthrough…</div>
+        <iframe class="modal-iframe" id="tourFrame" title="3DVista walkthrough"
+          allow="fullscreen; xr-spatial-tracking; gyroscope; accelerometer" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Trace editor (admin: PNG / DXF → plot polygons) ───────────────────── -->
+  <div class="tracewin" id="traceWin" aria-hidden="true">
+    <header class="tracewin-bar">
+      <span class="admin-tag">ADMIN</span>
+      <strong>Import &amp; Trace</strong>
+      <span class="trace-hint" id="traceHint">Load a site-plan image, then click inside each plot to capture it.</span>
+      <div class="tracewin-actions">
+        <label class="btn btn-ghost" title="PNG/JPG site plan">Load image
+          <input type="file" id="traceFile" accept="image/png,image/jpeg,image/webp,image/*" hidden /></label>
+        <label class="btn btn-ghost" title="DXF export of a DWG/CAD plan">Load DXF
+          <input type="file" id="traceDxf" accept=".dxf,application/dxf,image/vnd.dxf,text/plain" hidden /></label>
+        <button class="btn btn-primary" id="traceFinish" type="button">Use these plots →</button>
+        <button class="btn btn-icon" id="traceClose" type="button" aria-label="Close trace editor">×</button>
+      </div>
+    </header>
+    <div class="tracewin-body">
+      <aside class="trace-tools">
+        <div class="ax-mode" role="group" aria-label="Trace mode">
+          <button class="ax-modebtn is-on" id="traceModeAuto" type="button"
+            title="Click inside a plot to auto-detect it">Auto</button>
+          <button class="ax-modebtn" id="traceModeManual" type="button"
+            title="Click corners to draw a plot">Manual</button>
+          <button class="ax-modebtn" id="traceModeEdit" type="button" title="Drag corners · delete plots">Edit</button>
+        </div>
+        <label class="trace-row">Colour match
+          <input type="range" id="traceThresh" min="6" max="140" step="1" value="36" />
+          <output id="traceThreshVal">36</output></label>
+        <label class="trace-row">Smoothing
+          <input type="range" id="traceSimplify" min="0" max="14" step="0.5" value="3" />
+          <output id="traceSimplifyVal">3</output></label>
+        <label class="trace-check"><input type="checkbox" id="traceSnap" checked /> Snap to shared corners</label>
+        <div class="trace-tool-actions">
+          <button class="btn btn-ghost" id="traceUndo" type="button">Undo last</button>
+          <button class="btn btn-ghost" id="traceClear" type="button">Clear all</button>
+        </div>
+        <p class="trace-dxflayer" id="traceDxfLayer" hidden>Layer:
+          <select id="traceLayerSel"></select>
+        </p>
+        <p class="trace-count" id="traceCount">0 plots</p>
+        <ul class="trace-list" id="traceList" aria-label="Captured plots"></ul>
+      </aside>
+      <div class="trace-stage" id="traceStage">
+        <canvas id="traceCanvas"></canvas>
+        <p class="trace-empty" id="traceEmpty">Load a PNG/JPG site plan — or a DXF — to begin. Scroll to zoom · drag to
+          pan.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- cache-busted import so code edits always take effect on reload (no hard-refresh needed) -->
+  <script type="module">import(`./app.js?v=${Date.now()}`);</script>
+</body>
+
+</html>
