@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4096 4065" class="plot-overlay" preserveAspectRatio="xMidYMid meet">
+  <!-- Exported by the Build91 admin trace tool. -->
+  <g class="plots">
+    <g class="plot-group">
+      <polygon id="Plot-A105" class="plot" points="1133,1164 1151,1166 1150,1272 1085,1272 1085,1239 1150,1238 1085,1236 1085,1205 1150,1204 1085,1202 1085,1165 1099,1165 1115,1175 1124,1171 1125,1165 1132,1165" />
+      <text class="plot-label" x="1114.9" y="1200.3">A105</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A106" class="plot" points="1085,1272 1150,1272 1150,1413 1085,1412 1085,1380 1150,1379 1085,1377 1085,1345 1150,1344 1085,1342 1085,1309 1150,1308 1085,1306 1085,1272" />
+      <text class="plot-label" x="1108.2" y="1337.9">A106</text>
+    </g>
+  </g>
+</svg>

@@ -8,12 +8,14 @@ is projected onto that same sphere, so each plot **sits on its ground pixels and
 tracks the view**. Every plot is **clickable**, **colour-coded by sales status**
 (Available / Reserved / Sold). Hovering a plot pops an **info-card tooltip** beside
 it (number, status, and any Area / Price / Facing / Dimensions), and clicking one
-opens a **compact info popover anchored at the plot** (it tracks the plot as you
-look around; click-away or Esc to dismiss). A selected plot **keeps its status
-colour** — a gold outline marks the selection — so availability stays readable. The
-popover carries a **"Walk through this plot"**
-button that launches the matching **3DVista virtual tour** in a modal, deep-linked
-to that plot.
+opens a **beautiful compact popover anchored at the plot** — a rounded card with a
+status pill, the plot number, a gold-accented **Price**, and a little caret pointing
+back at the plot; it tracks the plot as you look around (click-away or Esc to
+dismiss). **Blank fields are hidden** (no empty "—" rows): a plot with no data shows
+just its number and status. A selected plot **keeps its status colour** — a gold
+outline marks the selection — so availability stays readable. When a walkthrough URL
+is present the popover shows a **"Walk through this plot"** button that launches the
+matching **3DVista virtual tour** in a modal, deep-linked to that plot.
 Plot-**number annotations** over the parcels are an optional toggle (the **#** button
 in the on-screen controls) — **off by default**, remembered per browser.
 
@@ -120,6 +122,13 @@ uses. Open `index.html?admin=1`:
 - **Scale / Rotate / Opacity:** sliders resize/spin/fade the layout as one unit.
   Scale and **Rotate** each pair the slider with a **−/＋ stepper + editable number
   field** for fine work; rotation is in **0.1° increments** (fractional, e.g. `12.4°`).
+- **🖼 Background pano…:** pick the 360° panorama the viewer wraps onto the sphere.
+  The image is auto-resized to a texture-safe copy (`<name>.web.jpg`, ≤ the GPU cap),
+  swapped in live, and remembered — **Export site files…** then writes that JPEG and
+  records `"panoImage": { "file": "sample/<name>.web.jpg" }` in `alignment.json`, so
+  the client loads it automatically (falling back to the built-in default if absent).
+  *Switching panos changes the scene, so re-align the layout to the new pano before
+  exporting.*
 - **Save As…:** opens a native save dialog (Chromium `showSaveFilePicker`; falls
   back to a download elsewhere). Save it as `sample/alignment.json` and the
   **client view applies it automatically** on load.
@@ -166,6 +175,9 @@ up (WYSIWYG) rather than re-deriving its own framing:
 - `alignment.json` may also carry an optional `"groundImage": { "file": "sample/plan.png", "opacity": 1 }`
   — see *Import & Trace* below. Persisted paths are always `sample/…` (never a
   transient `blob:` URL), and a missing image is skipped, not fatal.
+- `alignment.json` may also carry an optional `"panoImage": { "file": "sample/aerial.web.jpg" }`
+  set via **🖼 Background pano…** — the client loads this as the 360° background instead
+  of the built-in `CONFIG.renderUrl` default (missing ⇒ falls back to the default).
 
 ---
 
@@ -213,8 +225,36 @@ so you align them with the usual Scale/Rotate/Move tools. (Plot data is typed, b
 design, not OCR'd from the picture.)
 
 **Export site files…** writes `plots.svg`, `plots.csv`, `alignment.json` (and the
-plan image) into a folder you pick — point it at `sample/` and reload the client.
-(Falls back to individual downloads where the directory picker isn't supported.)
+plan image, pano image, and `landmarks.json` when present) into a folder you pick —
+point it at `sample/` and reload the client. (Falls back to individual downloads
+where the directory picker isn't supported.)
+
+---
+
+## Admin: landmarks (`?admin=1` → **Landmarks** tab)
+
+Points of interest on the horizon — a styled **banner** (icon + label + distance +
+drive time) tied by a **connector line** to a **pin** you place anywhere in the scene.
+The admin bar has two tabs — **Align** and **Landmarks** — to keep the two workflows
+separate.
+
+- **＋ Add landmark** drops a new one at the centre of your current view. Select it in
+  the list to edit **Label / Distance / Drive time / Icon** (a category picker:
+  airport, school, hospital, mall, train…).
+- **Both the pin and the banner are anchored to fixed directions in the panorama**, so
+  they stay on their part of the scene as you look around. **Drag the pin** onto the
+  spot it marks; **drag the banner** to position it — the connector line stretches to
+  keep them joined. Placement is pixel-exact (drag lands under the cursor).
+- Add **any number** of landmarks; edit or delete them anytime.
+- **Save landmarks… / Load…** write/read a `landmarks.json`; **Export site files…**
+  also writes it, and it's kept in the auto-saved working session.
+- **Client is view-only.** Landmarks are **off by default**; the **📍 toggle** in the
+  on-screen controls shows/hides them (remembered per browser, like the plot-number
+  toggle). Anchoring is scene-relative, so landmarks belong to a given pano — if you
+  swap the background pano, re-place them.
+
+`landmarks.json` shape: `{ "version":1, "landmarks":[ { "label","distance","driveTime",
+"icon", "hotspot":{"lonDeg","latDeg"}, "banner":{"lonDeg","latDeg"} } ] }`.
 
 ---
 

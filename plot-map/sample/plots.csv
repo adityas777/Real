@@ -1,3 +1,8 @@
 plot_id,status,facing,size,dimensions,price,block,tour_url,notes
-Plot-A105,available,,,,,,,
-Plot-A106,available,,,,,,,
+Plot-57,sold,East,1500,,Rs 6500/sqft,,,Corner plot with East and North sides
+Plot-61,available,,,,Rs 6200/sqft,,,
+Plot-28,available,West,1250,,Rs 6200/sqft,,,
+Plot-117,sold,East,1350,,Rs 6200/sqft,,,
+Plot-36,available,West,1200,,Rs 6200/sqft,,,
+Plot-17,sold,East,1200,,Rs 6500/sqft,,,
+Plot-69,reserved,West,1500,,Rs 6200/sqft,,,Corner plot facing West and South

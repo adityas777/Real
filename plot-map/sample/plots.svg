@@ -1,13 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4096 4065" class="plot-overlay" preserveAspectRatio="xMidYMid meet">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 938 1677" class="plot-overlay" preserveAspectRatio="xMidYMid meet">
   <!-- Exported by the Build91 admin trace tool. -->
   <g class="plots">
     <g class="plot-group">
-      <polygon id="Plot-A105" class="plot" points="1133,1164 1151,1166 1150,1272 1085,1272 1085,1239 1150,1238 1085,1236 1085,1205 1150,1204 1085,1202 1085,1165 1099,1165 1115,1175 1124,1171 1125,1165 1132,1165" />
-      <text class="plot-label" x="1114.9" y="1200.3">A105</text>
+      <polygon id="Plot-57" class="plot" points="494,616 510,616 510,679 459,679 459,617 493,617" />
+      <text class="plot-label" x="487.5" y="637.3">57</text>
     </g>
     <g class="plot-group">
-      <polygon id="Plot-A106" class="plot" points="1085,1272 1150,1272 1150,1413 1085,1412 1085,1380 1150,1379 1085,1377 1085,1345 1150,1344 1085,1342 1085,1309 1150,1308 1085,1306 1085,1272" />
-      <text class="plot-label" x="1108.2" y="1337.9">A106</text>
+      <polygon id="Plot-61" class="plot" points="459,803 509,803 510,840 461,840 460,804" />
+      <text class="plot-label" x="479.8" y="818">61</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-28" class="plot" points="513,722 575,722 575,759 513,760 512,723" />
+      <text class="plot-label" x="537.6" y="737.2">28</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-117" class="plot" points="299,964 358,964 359,1001 298,1001 298,965" />
+      <text class="plot-label" x="322.4" y="979">117</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-36" class="plot" points="567.2,333.4 567.5,341.2 567.5,353.5 567.5,361.3 567.5,372.3 501.9,375.6 501.6,335.5 567.2,333.4" />
+      <text class="plot-label" x="551" y="350.8">36</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-17" class="plot" points="618,1070 680,1070 680,1107 619,1107 618,1071" />
+      <text class="plot-label" x="643" y="1085">17</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-69" class="plot" points="362,1083 419,1083 418,1121 362,1121 362,1084" />
+      <text class="plot-label" x="384.6" y="1098.4">69</text>
     </g>
   </g>
 </svg>

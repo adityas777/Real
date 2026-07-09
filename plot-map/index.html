@@ -7,7 +7,11 @@
   <title>Build91 · Interactive Plot Map</title>
   <meta name="description"
     content="Interactive township plot map — clickable, status-coloured plots over an aerial render, linking to 3DVista walkthroughs." />
-  <link rel="stylesheet" href="styles.css" />
+  <!-- cache-busted so CSS edits always take effect on reload (mirrors the app.js import at the bottom) -->
+  <script>document.write('<link rel="stylesheet" href="styles.css?v=' + Date.now() + '">');</script>
+  <noscript>
+    <link rel="stylesheet" href="styles.css" />
+  </noscript>
 </head>
 
 <body>
@@ -37,12 +41,16 @@
   <main class="stage" id="stage">
     <!-- WebGL canvas (equirectangular sphere + projected plot overlay) mounts here -->
     <div class="pano" id="pano" role="img" aria-label="Interactive 360° aerial site panorama with selectable plots">
+      <!-- landmark banners + connector lines + pins, projected from the 3D scene each frame -->
+      <div class="landmarks" id="landmarks" aria-hidden="true"></div>
     </div>
 
     <!-- look-around / zoom controls -->
     <div class="zoom-controls" role="group" aria-label="View controls">
       <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false"
         aria-label="Show plot numbers" title="Show plot numbers">#</button>
+      <button class="btn btn-icon" id="landmarkToggle" type="button" aria-pressed="false"
+        aria-label="Show landmarks" title="Show landmarks">📍</button>
       <button class="btn btn-icon" id="zoomIn" type="button" aria-label="Zoom in">+</button>
       <button class="btn btn-icon" id="zoomOut" type="button" aria-label="Zoom out">−</button>
       <button class="btn btn-icon" id="zoomReset" type="button" aria-label="Recenter on plots"
@@ -63,9 +71,14 @@
   <section class="adminbar" id="adminBar" aria-label="Overlay alignment controls" hidden>
     <header class="adminbar-head">
       <span class="admin-tag">ADMIN</span>
-      <strong>Align overlay</strong>
-      <p>Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.</p>
+      <strong id="axTitle">Align overlay</strong>
+      <p id="axSubtitle">Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.</p>
     </header>
+    <div class="ax-tabs" role="tablist">
+      <button class="ax-tab-btn is-on" id="axTabBtnAlign" type="button" role="tab" aria-selected="true">Align</button>
+      <button class="ax-tab-btn" id="axTabBtnLandmarks" type="button" role="tab" aria-selected="false">Landmarks</button>
+    </div>
+    <div class="ax-tab" id="axTabAlign">
     <div class="ax-mode" role="group" aria-label="Drag mode">
       <button class="ax-modebtn is-on" id="axModeLook" type="button" title="Drag to look around">Look around</button>
       <button class="ax-modebtn" id="axModeMove" type="button" title="Drag to reposition the whole layout">Move
@@ -73,6 +86,12 @@
     </div>
     <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
       Import / Trace plots…</button>
+    <div class="ax-pano">
+      <button class="btn btn-ghost" id="axPano" type="button"
+        title="Choose the 360° background panorama the client view uses (exported with the site files)">🖼 Background pano…</button>
+      <input type="file" id="axPanoFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+      <p class="ax-pano-name" id="axPanoName">Using the default panorama.</p>
+    </div>
     <div class="ax-scale">
       <div class="ax-scale-head">
         <span>Scale</span>
@@ -109,9 +128,25 @@
       <input type="file" id="axFile" accept="application/json,.json" hidden />
       <button class="btn btn-primary" id="axSave" type="button">Save As…</button>
     </div>
+    </div><!-- /axTabAlign -->
+
+    <div class="ax-tab" id="axTabLandmarks" hidden>
+      <p class="ax-lm-intro">Add points of interest on the horizon — a banner (label, distance &amp; drive time)
+        connected by a line to a pin you place in the scene. Drag the <strong>pin</strong> onto a spot and drag the
+        <strong>banner</strong> to position it.</p>
+      <button class="btn btn-import" id="axLmAdd" type="button">＋ Add landmark</button>
+      <p class="ax-lm-empty" id="axLmEmpty">No landmarks yet.</p>
+      <ul class="ax-lm-list" id="axLmList" aria-label="Landmarks"></ul>
+      <div class="adminbar-actions">
+        <button class="btn btn-ghost" id="axLmLoad" type="button">Load…</button>
+        <input type="file" id="axLmFile" accept="application/json,.json" hidden />
+        <button class="btn btn-primary" id="axLmSave" type="button">Save landmarks…</button>
+      </div>
+    </div><!-- /axTabLandmarks -->
+
     <div class="adminbar-actions">
       <button class="btn btn-ghost" id="axExport" type="button"
-        title="Write plots.svg + plots.csv + alignment.json (+ plan image) into a folder">⤓ Export site files…</button>
+        title="Write plots.svg + plots.csv + alignment.json (+ plan &amp; pano images + landmarks.json) into a folder">⤓ Export site files…</button>
     </div>
     <div class="adminbar-actions ax-session">
       <button class="btn btn-ghost" id="axSessionSave" type="button"
@@ -128,31 +163,17 @@
   <aside class="panel" id="panel" aria-hidden="true" aria-labelledby="panelTitle" tabindex="-1">
     <button class="panel-close btn btn-icon" id="panelClose" type="button" aria-label="Close panel">×</button>
     <div class="panel-head">
-      <span class="status-badge" id="panelBadge">—</span>
+      <div class="panel-head-top">
+        <span class="status-badge" id="panelBadge">—</span>
+        <p class="panel-block" id="panelBlock"></p>
+      </div>
       <h2 class="panel-title" id="panelTitle">Plot</h2>
-      <p class="panel-block" id="panelBlock"></p>
     </div>
-    <dl class="panel-grid">
-      <div>
-        <dt>Area</dt>
-        <dd id="panelSize">—</dd>
-      </div>
-      <div>
-        <dt>Price</dt>
-        <dd id="panelPrice">—</dd>
-      </div>
-      <div>
-        <dt>Facing</dt>
-        <dd id="panelFacing">—</dd>
-      </div>
-      <div>
-        <dt>Dimensions</dt>
-        <dd id="panelDimensions">—</dd>
-      </div>
-    </dl>
+    <dl class="panel-grid" id="panelGrid"></dl>
     <p class="panel-notes" id="panelNotes"></p>
     <button class="btn btn-primary panel-cta" id="walkBtn" type="button" disabled>
-      Walk through this plot
+      <span>Walk through this plot</span>
+      <span class="panel-cta-arrow" aria-hidden="true">→</span>
     </button>
     <p class="panel-hint" id="walkHint"></p>
   </aside>

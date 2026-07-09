@@ -24,6 +24,7 @@ const CONFIG = {
   plotsSvgUrl: 'sample/plots.svg',             // plot geometry (polygons in image-pixel space)
   plotsCsvUrl: 'sample/plots.csv',             // local data source (wired & live)
   alignmentUrl: 'sample/alignment.json',       // overlay transform (admin saves it here)
+  landmarksUrl: 'sample/landmarks.json',       // horizon landmark hotspots (banner + pin + connector)
 
   TOUR_BASE_URL: 'https://demo.build91.in/Eleganza', // 3DVista deep-link base
 
@@ -48,10 +49,14 @@ const els = {
   stage: $('stage'), pano: $('pano'), panoHint: $('panoHint'),
   legend: $('legend'), syncMeta: $('syncMeta'), refreshBtn: $('refreshBtn'),
   tooltip: $('tooltip'), notice: $('notice'),
-  zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'),
+  zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'),
+  landmarks: $('landmarks'),
+  // admin tabs + landmarks
+  axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'),
+  axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'),
+  axLmAdd: $('axLmAdd'), axLmList: $('axLmList'), axLmEmpty: $('axLmEmpty'), axLmLoad: $('axLmLoad'), axLmFile: $('axLmFile'), axLmSave: $('axLmSave'),
   panel: $('panel'), panelClose: $('panelClose'), panelBadge: $('panelBadge'),
-  panelTitle: $('panelTitle'), panelBlock: $('panelBlock'), panelSize: $('panelSize'),
-  panelPrice: $('panelPrice'), panelFacing: $('panelFacing'), panelDimensions: $('panelDimensions'),
+  panelTitle: $('panelTitle'), panelBlock: $('panelBlock'), panelGrid: $('panelGrid'),
   panelNotes: $('panelNotes'), walkBtn: $('walkBtn'), walkHint: $('walkHint'),
   modal: $('modal'), modalClose: $('modalClose'), modalTitle: $('modalTitle'),
   modalOpenNew: $('modalOpenNew'), modalSpinner: $('modalSpinner'), tourFrame: $('tourFrame'),
@@ -61,6 +66,7 @@ const els = {
   axReset: $('axReset'), axLoad: $('axLoad'), axFile: $('axFile'), axSave: $('axSave'), axStatus: $('axStatus'),
   axSessionSave: $('axSessionSave'), axSessionClear: $('axSessionClear'), axSessionStatus: $('axSessionStatus'),
   axExport: $('axExport'), axModeLook: $('axModeLook'), axModeMove: $('axModeMove'), axImport: $('axImport'),
+  axPano: $('axPano'), axPanoFile: $('axPanoFile'), axPanoName: $('axPanoName'),
   axPlanRow: $('axPlanRow'), axPlanOpacity: $('axPlanOpacity'), axPlanOpacityVal: $('axPlanOpacityVal'),
   // trace editor
   traceWin: $('traceWin'), traceHint: $('traceHint'), traceFile: $('traceFile'), traceDxf: $('traceDxf'),
@@ -87,10 +93,14 @@ const state = {
   transform: IDENTITY(),
   groundImage: null,                    // { file, opacity } — PNG site-plan draped on the ground (shares the transform)
   planBlob: null, planName: null,       // raw imported plan PNG (kept so the working session survives a reload pre-export)
+  panoImage: null,                      // { file } — admin-chosen 360° background pano (exported + referenced in alignment.json)
+  panoBlob: null, panoName: null,       // resized texture-safe pano JPEG kept for export / session restore
   plots: new Map(), selectedId: null, hoverId: null,
   activeFilters: new Set(STATUS_ORDER),
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
+  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') === '1'; } catch { return false; } })(), // landmark banners: optional, default off
+  landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   view: { lon: 0, lat: 0, fov: 70 }, home: { lon: 0, lat: 0, fov: 70 },
   savedView: null,                      // camera view stored in the alignment (WYSIWYG); null ⇒ auto-frame
   adminMode: 'look',                    // 'look' = drag rotates view; 'move' = drag repositions layout
@@ -189,25 +199,61 @@ function dir(px, py) {
 // desktop ones, so we downscale to a texture-safe, power-of-two size on load.
 // wrapS = Repeat makes the lon=0/2π seam blend (no visible vertical stitch line);
 // wrapT stays clamped (top/bottom are the poles, they don't wrap).
-async function loadPanoTexture(url) {
-  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
-  let src;
-  try {
-    const bmp = await createImageBitmap(await (await fetch(`${url}?v=${Date.now()}`, { cache: 'no-store' })).blob());
-    if (bmp.width > cap) {
-      const W = cap, H = Math.round(bmp.height * cap / bmp.width);
-      const c = document.createElement('canvas'); c.width = W; c.height = H;
-      c.getContext('2d').drawImage(bmp, 0, 0, W, H); if (bmp.close) bmp.close(); src = c;
-    } else src = bmp;
-  } catch {
-    const t = await new THREE.TextureLoader().loadAsync(url);   // fallback: no downscale
-    t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 16; t.needsUpdate = true; return t;
-  }
-  const tex = new THREE.Texture(src);
+function panoTextureFromSource(source) {                 // source = canvas | ImageBitmap | HTMLImage (already sized)
+  const tex = new THREE.Texture(source);
   tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false; tex.wrapS = THREE.RepeatWrapping;
   tex.anisotropy = 16;   // ← sharpens the nadir/zenith convergence (Three clamps to the GPU max); default 1 = the fuzzy "swirl"
   tex.needsUpdate = true;
   return tex;
+}
+async function loadPanoTexture(src) {                    // src = URL string OR a Blob/File
+  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
+  try {
+    const blob = (src instanceof Blob) ? src : await (await fetch(`${src}?v=${Date.now()}`, { cache: 'no-store' })).blob();
+    const bmp = await createImageBitmap(blob);
+    let source = bmp;
+    if (bmp.width > cap) {
+      const W = cap, H = Math.round(bmp.height * cap / bmp.width);
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      c.getContext('2d').drawImage(bmp, 0, 0, W, H); if (bmp.close) bmp.close(); source = c;
+    }
+    return panoTextureFromSource(source);
+  } catch {
+    if (typeof src === 'string') {                        // fallback: let Three decode the URL (no downscale)
+      const t = await new THREE.TextureLoader().loadAsync(src);
+      t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 16; t.needsUpdate = true; return t;
+    }
+    throw new Error('Could not decode panorama image');
+  }
+}
+function swapPano(tex) {                                  // live-replace the sphere's background texture
+  if (!three?.pano || !tex) return;
+  three.pano.material.map?.dispose(); three.pano.material.map = tex; three.pano.material.needsUpdate = true; requestRender();
+}
+// Admin: pick a 360° pano image → downscale to a texture-safe JPEG, swap it live,
+// and keep the resized blob + reference so "Export site files…" ships it.
+async function setPanoFromFile(file) {
+  if (!file) return;
+  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
+  let bmp;
+  try { bmp = await createImageBitmap(file); }
+  catch { setAxStatus('Could not read that image as a panorama — use a JPG/PNG equirectangular.'); return; }
+  const scale = Math.min(1, cap / bmp.width);
+  const W = Math.round(bmp.width * scale), H = Math.round(bmp.height * scale);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  c.getContext('2d').drawImage(bmp, 0, 0, W, H); if (bmp.close) bmp.close();
+  const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9));
+  const name = file.name.replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_') + '.web.jpg';
+  swapPano(panoTextureFromSource(c));
+  state.panoBlob = blob; state.panoName = name; state.panoImage = { file: `sample/${name}` };
+  updatePanoName(); onAlignmentChanged();
+  setAxStatus(`Background pano set to <code>${name}</code>${scale < 1 ? ` (resized to ${W}×${H} for the browser)` : ''}. <strong>Export site files…</strong> to ship it with the client.`);
+}
+function updatePanoName() {
+  if (!els.axPanoName) return;
+  const f = state.panoImage?.file;
+  els.axPanoName.textContent = f ? `Client pano: ${f.replace(/^sample\//, '')}` : 'Using the default panorama.';
+  els.axPanoName.classList.toggle('is-set', !!f);
 }
 
 // ─── Pano sphere (custom geometry so UVs match dir() exactly) ─────────────────
@@ -387,6 +433,7 @@ function renderLoop() {
   updateCamera();
   three.renderer.render(three.scene, three.camera);
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
+  if (els.landmarks && !els.landmarks.hidden) renderLandmarks();  // keep banners/pins/lines glued to the scene
 }
 function updateCamera() {
   const cam = three.camera;
@@ -462,6 +509,12 @@ function wireViewControls() {
     applyLabelVisibility();
   });
   applyLabelVisibility();                            // sync sprite visibility + button state to the saved preference
+  els.landmarkToggle?.addEventListener('click', () => {
+    state.showLandmarks = !state.showLandmarks;
+    try { localStorage.setItem('b91-show-landmarks', state.showLandmarks ? '1' : '0'); } catch {}
+    applyLandmarkVisibility();
+  });
+  applyLandmarkVisibility();
   new ResizeObserver(debounce(onResize, 120)).observe(els.pano);
 }
 function onResize() {
@@ -583,14 +636,21 @@ function openPanel(id, keepScroll = false) {
   state.selectedId = id;
   const p = state.plots.get(id);
   if (p) { applySelectStyle(p, status); requestRender(); }
+  els.panel.dataset.status = status;
   els.panelBadge.textContent = STATUS_META[status].label; els.panelBadge.className = `status-badge ${STATUS_META[status].cls}`;
-  els.panelTitle.textContent = id.replace('Plot-', 'Plot '); els.panelBlock.textContent = row.block ? `Block ${row.block}` : '';
-  els.panelSize.textContent = row.size || '—'; els.panelPrice.textContent = row.price || '—';
-  els.panelFacing.textContent = row.facing || '—'; els.panelDimensions.textContent = row.dimensions || '—';
-  els.panelNotes.textContent = row.notes || '';
-  const hasTour = !!(row.tour_url && row.tour_url.trim());
-  els.walkBtn.disabled = !hasTour; els.walkBtn.onclick = hasTour ? () => openModal(row) : null;
-  els.walkHint.textContent = hasTour ? '' : (status === 'sold' ? 'This plot is sold — walkthrough unavailable.' : 'No walkthrough linked yet.');
+  els.panelTitle.textContent = id.replace('Plot-', 'Plot ');
+  const block = (row.block || '').trim(); els.panelBlock.textContent = block ? `Block ${block}` : ''; els.panelBlock.hidden = !block;
+  // Only render fields that actually have a value — blanks are hidden, not shown as "—".
+  const val = (v) => (v != null && String(v).trim()) ? String(v).trim() : '';
+  const price = val(row.price), rest = [['Area', row.size], ['Facing', row.facing], ['Dimensions', row.dimensions]].filter(([, v]) => val(v));
+  els.panelGrid.innerHTML =
+    (price ? `<div class="panel-price"><dt>Price</dt><dd>${esc(price)}</dd></div>` : '') +
+    rest.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(val(v))}</dd></div>`).join('');
+  els.panelGrid.hidden = !price && rest.length === 0;
+  const notes = val(row.notes); els.panelNotes.textContent = notes; els.panelNotes.hidden = !notes;
+  const hasTour = !!val(row.tour_url);
+  els.walkBtn.hidden = !hasTour; els.walkBtn.disabled = !hasTour; els.walkBtn.onclick = hasTour ? () => openModal(row) : null;
+  els.walkHint.hidden = true; els.walkHint.textContent = '';
   els.panel.classList.add('open'); els.panel.setAttribute('aria-hidden', 'false');
   panelDims = { w: els.panel.offsetWidth, h: els.panel.offsetHeight };  // measure once per open (content height varies)
   placePanel();
@@ -618,6 +678,11 @@ function placePanel() {
   let y = ay - ph / 2;                                 // vertically centred on the plot
   y = Math.max(M, Math.min(y, vh - ph - M));
   pop.style.left = Math.round(x) + 'px'; pop.style.top = Math.round(y) + 'px';
+  // a little caret pointing back at the plot, on whichever side the popover ended up
+  let side = 'none';
+  if (ax <= x - 2) side = 'left'; else if (ax >= x + pw + 2) side = 'right';
+  pop.dataset.side = side;
+  if (side !== 'none') pop.style.setProperty('--caret-y', Math.max(18, Math.min(ph - 18, ay - y)) + 'px');
 }
 function restorePlotStyle(id) {
   const p = state.plots.get(id); if (!p) return; const c = STATUS_META[p.status || 'unknown'].color;
@@ -667,7 +732,8 @@ function parseAlignment(d) {
   if (d && d.view) { const v = d.view; view = { lon: (v.lonDeg != null ? v.lonDeg * Math.PI / 180 : +v.lon || 0), lat: (v.latDeg != null ? v.latDeg * Math.PI / 180 : +v.lat || 0), fov: +v.fov || 70 }; }
   const opacity = (d && d.opacity != null) ? +d.opacity : null;
   const gi = d && d.groundImage; const groundImage = (gi && gi.file) ? { file: gi.file, opacity: gi.opacity != null ? +gi.opacity : 1 } : null;
-  return { transform, view, opacity, groundImage, savedAt: (d && d.savedAt) || '' };
+  const pi = d && d.panoImage; const panoImage = (pi && pi.file) ? { file: pi.file } : null;
+  return { transform, view, opacity, groundImage, panoImage, savedAt: (d && d.savedAt) || '' };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
   try { const res = await fetch(`${CONFIG.alignmentUrl}?t=${Date.now()}`, { cache: 'no-store' }); if (!res.ok) return null; return parseAlignment(await res.json()); }
@@ -679,7 +745,8 @@ function alignmentData() {
     transform: { tx: +state.transform.tx.toFixed(4), ty: +state.transform.ty.toFixed(4), scale: +state.transform.scale.toFixed(4), rotationDeg: +(state.transform.rotation * 180 / Math.PI).toFixed(2) },
     view: { lonDeg: +(state.view.lon * 180 / Math.PI).toFixed(2), latDeg: +(state.view.lat * 180 / Math.PI).toFixed(2), fov: Math.round(state.view.fov) },
     opacity: +state.overlayOpacity.toFixed(2),
-    ...(state.groundImage ? { groundImage: { file: state.groundImage.file, opacity: +(+state.groundImage.opacity).toFixed(2) } } : {}) };
+    ...(state.groundImage ? { groundImage: { file: state.groundImage.file, opacity: +(+state.groundImage.opacity).toFixed(2) } } : {}),
+    ...(state.panoImage ? { panoImage: { file: state.panoImage.file } } : {}) };
 }
 function onAlignmentChanged() { if (!state.admin) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify(alignmentData())); } catch {} scheduleSessionSave(); setAxStatus('Unsaved changes — click Save file to export.'); }
 function setAxStatus(msg) { if (els.axStatus) els.axStatus.innerHTML = msg; }
@@ -722,6 +789,8 @@ function buildSession() {                                // a complete snapshot 
     geom: state.geom.map((g) => ({ id: g.id, pts: g.pts.map((p) => ({ x: p.x, y: p.y })) })),
     rows: [...state.rows.values()],                     // per-plot status/data filled so far
     plan: state.planBlob ? { name: state.planName || 'plan.web.png', blob: state.planBlob, opacity: state.groundImage?.opacity ?? 1 } : null,
+    pano: state.panoBlob ? { name: state.panoName || 'pano.web.jpg', blob: state.panoBlob } : null,
+    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
   };
 }
 let sessionTimer = null;
@@ -825,14 +894,18 @@ function buildPlotsCSV() {
 // to locked/changed files (retry once, then download the stragglers) and falls
 // back to plain downloads where the directory picker isn't supported.
 async function exportSite() {
-  if (!state.geom.length) { setAxStatus('Nothing to export yet — Import / Trace plots first.'); return; }
+  if (!state.geom.length && !state.landmarks.length) { setAxStatus('Nothing to export yet — Import / Trace plots or add landmarks first.'); return; }
   const planBlob = trace.planBlob || state.planBlob || (trace.objURL ? await (await fetch(trace.objURL)).blob() : null);
   const planName = trace.srcName || state.planName || 'plan.web.png';
+  // ship the resized pano only when it's a freshly-set blob; an existing referenced file is already on disk
+  const panoBlob = state.panoBlob, panoName = state.panoName || state.panoImage?.file?.replace(/^sample\//, '');
   const files = [
     ['plots.svg', buildPlotsSVG(), 'image/svg+xml'],
     ['plots.csv', buildPlotsCSV(), 'text/csv'],
     ['alignment.json', JSON.stringify(alignmentData(), null, 2), 'application/json'],
     ...(planBlob ? [[planName, planBlob, 'image/png']] : []),
+    ...(panoBlob && panoName ? [[panoName, panoBlob, 'image/jpeg']] : []),
+    ...(state.landmarks.length ? [['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json']] : []),
   ];
   const download = (n, data, mime) => { const a = document.createElement('a'); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: mime })); a.download = n; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
   const tag = (arr) => arr.map((f) => `<code>${f[0]}</code>`).join(', ');
@@ -882,6 +955,15 @@ function wireAdmin() {
   els.axReset.addEventListener('click', () => { state.transform = IDENTITY(); state.savedView = null; state.overlayOpacity = 0.5; updateAdminUI(); colorPlots(); computeHome(); Object.assign(state.view, state.home); requestRender(true); try { localStorage.removeItem(DRAFT_KEY); } catch {} clearSession(); setAxStatus('Reset to generated placement.'); });
   els.axSessionSave.addEventListener('click', () => saveSession(true));
   els.axSessionClear.addEventListener('click', clearSession);
+  els.axPano.addEventListener('click', () => els.axPanoFile.click());
+  els.axPanoFile.addEventListener('change', () => { const f = els.axPanoFile.files?.[0]; if (f) setPanoFromFile(f); els.axPanoFile.value = ''; });
+  els.axTabBtnAlign.addEventListener('click', () => setAdminTab('align'));
+  els.axTabBtnLandmarks.addEventListener('click', () => setAdminTab('landmarks'));
+  els.axLmAdd.addEventListener('click', addLandmark);
+  els.axLmSave.addEventListener('click', saveLandmarksAs);
+  els.axLmLoad.addEventListener('click', () => els.axLmFile.click());
+  els.axLmFile.addEventListener('change', async () => { const f = els.axLmFile.files?.[0]; if (f) { try { setLandmarks(parseLandmarks(JSON.parse(await f.text()))); onLandmarksChanged(); setAxStatus(`Loaded ${state.landmarks.length} landmark(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that landmarks file (${err.message}).`); } } els.axLmFile.value = ''; });
+  setAdminTab('align');
   els.axSave.addEventListener('click', saveAlignmentAs);
   els.axExport.addEventListener('click', exportSite);
   els.axLoad.addEventListener('click', () => els.axFile.click());
@@ -892,6 +974,7 @@ function wireAdmin() {
       state.transform = a.transform;
       if (a.opacity != null) state.overlayOpacity = a.opacity;
       if (a.groundImage) { loadGroundImage(a.groundImage.file, a.groundImage.opacity, a.groundImage.file); els.axPlanRow.hidden = false; els.axPlanOpacity.value = a.groundImage.opacity; els.axPlanOpacityVal.textContent = `${Math.round(a.groundImage.opacity * 100)}%`; }
+      if (a.panoImage?.file) { state.panoImage = a.panoImage; state.panoBlob = null; state.panoName = null; loadPanoTexture(a.panoImage.file).then(swapPano).catch(() => {}); updatePanoName(); }
       computeHome(); Object.assign(state.view, a.view || state.home); clampView(); // restore saved view (kept off the pole)
       updateAdminUI(); colorPlots(); requestRender(true); onAlignmentChanged(); setAxStatus(`Loaded ${f.name}.`);
     } catch (err) { setAxStatus(`Could not read that file (${err.message}).`); }
@@ -1284,6 +1367,190 @@ new ResizeObserver(syncTopbarH).observe(topbar); syncTopbarH();
 // release the WebGL context on unload (avoids leaking contexts across reloads/navigations)
 window.addEventListener('pagehide', () => { try { three?.renderer?.forceContextLoss(); three?.renderer?.dispose(); } catch {} });
 
+// ═══ Landmarks (horizon banners + connector line + pin) ═══════════════════════
+// A landmark = { label, distance, driveTime, icon, hotspot{lon,lat}, banner{lon,lat} }.
+// Both the pin (hotspot) and the banner are anchored to fixed directions on the
+// sphere, so they stay put in the scene as you look around; an SVG line connects
+// them and stretches as the admin drags either end. Rendered as a projected HTML/SVG
+// overlay (so the banner can be nicely styled). Client is view-only.
+const LM_ICONS = { place: '📍', airport: '✈️', train: '🚆', metro: '🚇', bus: '🚌', highway: '🛣️', school: '🎓', college: '🏛️', hospital: '🏥', mall: '🛍️', market: '🏪', restaurant: '🍽️', park: '🌳', lake: '🌊', temple: '🛕', stadium: '🏟️', office: '🏢', hotel: '🏨', bank: '🏦' };
+const LM_ICON_ORDER = ['place', 'airport', 'train', 'metro', 'bus', 'highway', 'school', 'college', 'hospital', 'mall', 'market', 'restaurant', 'park', 'lake', 'temple', 'stadium', 'office', 'hotel', 'bank'];
+const SVGNS = 'http://www.w3.org/2000/svg';
+let lmSeq = 0, lmSvg = null, lmDrag = null;
+const lmDom = new Map();                                  // id → { line, pin, banner }
+
+function dirFromLonLat(lonDeg, latDeg) {                  // matches the pano's dir(): sphere viewed from inside (X reflected)
+  const lon = lonDeg * Math.PI / 180, lat = latDeg * Math.PI / 180, cl = Math.cos(lat);
+  return new THREE.Vector3(-cl * Math.sin(lon), Math.sin(lat), cl * Math.cos(lon));
+}
+function lonLatFromDir(v) {                               // inverse of dirFromLonLat
+  const n = v.clone().normalize();
+  return { lon: Math.atan2(-n.x, n.z) * 180 / Math.PI, lat: Math.asin(Math.max(-1, Math.min(1, n.y))) * 180 / Math.PI };
+}
+function lmBannerHTML(lm) {
+  const ico = LM_ICONS[lm.icon] || LM_ICONS.place;
+  const label = (lm.label || '').trim() ? esc(lm.label) : '<span class="lm-empty-label">New landmark</span>';
+  const dist = (lm.distance || '').trim() ? `<span><span class="lm-ic">📏</span>${esc(lm.distance)}</span>` : '';
+  const time = (lm.driveTime || '').trim() ? `<span><span class="lm-ic">🚗</span>${esc(lm.driveTime)}</span>` : '';
+  const meta = (dist || time) ? `<span class="lm-meta">${dist}${time}</span>` : '';
+  return `<span class="lm-ico">${ico}</span><div class="lm-text"><span class="lm-label">${label}</span>${meta}</div>`;
+}
+function ensureLmSvg() {
+  if (lmSvg && lmSvg.isConnected) return lmSvg;
+  lmSvg = document.createElementNS(SVGNS, 'svg'); lmSvg.setAttribute('class', 'lm-lines');
+  els.landmarks.appendChild(lmSvg); return lmSvg;
+}
+function rebuildLandmarkDOM() {
+  if (!els.landmarks) return;
+  const svg = ensureLmSvg(); svg.innerHTML = '';
+  [...els.landmarks.querySelectorAll('.lm-pin, .lm-banner')].forEach((n) => n.remove());
+  lmDom.clear();
+  state.landmarks.forEach((lm) => {
+    const line = document.createElementNS(SVGNS, 'line'); svg.appendChild(line);
+    const pin = document.createElement('div'); pin.className = 'lm-pin'; els.landmarks.appendChild(pin);
+    const banner = document.createElement('div'); banner.className = 'lm-banner'; banner.innerHTML = lmBannerHTML(lm); els.landmarks.appendChild(banner);
+    pin.addEventListener('pointerdown', (e) => startLmDrag(e, lm.id, 'hotspot'));
+    banner.addEventListener('pointerdown', (e) => startLmDrag(e, lm.id, 'banner'));
+    const sel = lm.id === state.lmSel; pin.classList.toggle('is-sel', sel); banner.classList.toggle('is-sel', sel); line.classList.toggle('is-sel', sel);
+    lmDom.set(lm.id, { line, pin, banner });
+  });
+  renderLandmarks();
+}
+function projectDir(dir, cam, W, H) {
+  const p = dir.clone().multiplyScalar(R).project(cam);
+  if (p.z > 1) return null;                               // behind the camera → hide
+  return { x: (p.x * 0.5 + 0.5) * W, y: (-p.y * 0.5 + 0.5) * H };
+}
+function renderLandmarks() {
+  if (!three || !els.landmarks || els.landmarks.hidden) return;
+  const rect = els.pano.getBoundingClientRect(), W = rect.width, H = rect.height, cam = three.camera;
+  for (const lm of state.landmarks) {
+    const d = lmDom.get(lm.id); if (!d) continue;
+    const hp = projectDir(dirFromLonLat(lm.hotspot.lon, lm.hotspot.lat), cam, W, H);
+    const bp = projectDir(dirFromLonLat(lm.banner.lon, lm.banner.lat), cam, W, H);
+    const show = hp && bp;
+    d.line.style.display = d.pin.style.display = d.banner.style.display = show ? '' : 'none';
+    if (!show) continue;
+    d.line.setAttribute('x1', hp.x); d.line.setAttribute('y1', hp.y); d.line.setAttribute('x2', bp.x); d.line.setAttribute('y2', bp.y);
+    d.pin.style.left = hp.x + 'px'; d.pin.style.top = hp.y + 'px';
+    d.banner.style.left = bp.x + 'px'; d.banner.style.top = bp.y + 'px';
+  }
+}
+function applyLandmarkVisibility() {
+  if (!els.landmarks) return;
+  const editing = state.admin && state.adminTab === 'landmarks';
+  const visible = state.showLandmarks || editing;
+  els.landmarks.hidden = !visible;
+  els.landmarks.classList.toggle('is-editing', editing);
+  if (els.landmarkToggle) { els.landmarkToggle.setAttribute('aria-pressed', String(state.showLandmarks)); els.landmarkToggle.title = state.showLandmarks ? 'Hide landmarks' : 'Show landmarks'; }
+  if (visible) renderLandmarks();
+}
+function onLandmarksChanged() { if (state.admin) scheduleSessionSave(); }
+
+function startLmDrag(e, id, part) {
+  if (!(state.admin && state.adminTab === 'landmarks')) return;
+  e.preventDefault(); e.stopPropagation();
+  lmDrag = { id, part }; selectLandmark(id);
+  window.addEventListener('pointermove', onLmDragMove);
+  window.addEventListener('pointerup', endLmDrag, { once: true });
+}
+function onLmDragMove(e) {
+  if (!lmDrag || !three) return;
+  three.raycaster.setFromCamera(ndcOf(e), three.camera);
+  const ll = lonLatFromDir(three.raycaster.ray.direction);   // where the pointer points, in world dir
+  const lm = state.landmarks.find((l) => l.id === lmDrag.id); if (!lm) return;
+  if (lmDrag.part === 'hotspot') lm.hotspot = ll; else lm.banner = ll;
+  renderLandmarks();
+}
+function endLmDrag() { window.removeEventListener('pointermove', onLmDragMove); lmDrag = null; onLandmarksChanged(); }
+
+function selectLandmark(id) {
+  state.lmSel = id;
+  lmDom.forEach((d, lid) => { const on = lid === id; d.pin.classList.toggle('is-sel', on); d.banner.classList.toggle('is-sel', on); d.line.classList.toggle('is-sel', on); });
+  refreshLmList();
+}
+function addLandmark() {
+  const fwd = three ? new THREE.Vector3(0, 0, -1).applyQuaternion(three.camera.quaternion) : new THREE.Vector3(0, 0, 1);
+  const hs = lonLatFromDir(fwd);
+  const lm = { id: 'lm' + (++lmSeq), label: '', distance: '', driveTime: '', icon: 'place', hotspot: hs, banner: { lon: hs.lon, lat: Math.max(-80, Math.min(80, hs.lat + 12)) } };
+  state.landmarks.push(lm); rebuildLandmarkDOM(); selectLandmark(lm.id); onLandmarksChanged();
+  setAxStatus('Landmark added — drag its pin onto a spot, drag the banner to place it, and fill the label/distance/time.');
+}
+function deleteLandmark(id) {
+  state.landmarks = state.landmarks.filter((l) => l.id !== id);
+  if (state.lmSel === id) state.lmSel = null;
+  rebuildLandmarkDOM(); refreshLmList(); onLandmarksChanged();
+}
+function refreshLmList() {
+  if (!els.axLmList) return;
+  els.axLmEmpty.hidden = state.landmarks.length > 0;
+  els.axLmList.innerHTML = '';
+  state.landmarks.forEach((lm) => {
+    const li = document.createElement('li'); li.className = 'ax-lm-li' + (lm.id === state.lmSel ? ' is-sel' : '');
+    const head = document.createElement('div'); head.className = 'ax-lm-li-head';
+    const ico = document.createElement('span'); ico.className = 'ax-lm-ico-sel'; ico.textContent = LM_ICONS[lm.icon] || LM_ICONS.place;
+    const title = document.createElement('span'); title.className = 'ax-lm-title'; title.textContent = (lm.label || '').trim() || 'New landmark';
+    const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete landmark';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteLandmark(lm.id); });
+    head.append(ico, title, del); li.appendChild(head);
+    li.addEventListener('click', (e) => { if (e.target.closest('.ax-lm-edit,.ax-lm-del')) return; selectLandmark(lm.id === state.lmSel ? null : lm.id); });
+    if (lm.id === state.lmSel) {
+      const ed = document.createElement('div'); ed.className = 'ax-lm-edit';
+      const sync = () => { const d = lmDom.get(lm.id); if (d) d.banner.innerHTML = lmBannerHTML(lm); ico.textContent = LM_ICONS[lm.icon] || LM_ICONS.place; title.textContent = (lm.label || '').trim() || 'New landmark'; onLandmarksChanged(); };
+      const field = (label, key, ph) => {
+        const w = document.createElement('label'); w.className = 'ax-lm-field'; w.append(document.createTextNode(label));
+        const inp = document.createElement('input'); inp.type = 'text'; inp.value = lm[key] || ''; if (ph) inp.placeholder = ph;
+        inp.addEventListener('input', () => { lm[key] = inp.value; sync(); });
+        w.appendChild(inp); return w;
+      };
+      const iconField = () => {
+        const w = document.createElement('label'); w.className = 'ax-lm-field'; w.append(document.createTextNode('Icon'));
+        const sel = document.createElement('select');
+        LM_ICON_ORDER.forEach((k) => { const o = document.createElement('option'); o.value = k; o.textContent = `${LM_ICONS[k]}  ${k}`; if (k === lm.icon) o.selected = true; sel.appendChild(o); });
+        sel.addEventListener('change', () => { lm.icon = sel.value; sync(); });
+        w.appendChild(sel); return w;
+      };
+      ed.append(field('Label', 'label', 'e.g. Kempegowda Airport'), field('Distance', 'distance', 'e.g. 12 km'), field('Drive time', 'driveTime', 'e.g. 20 min'), iconField());
+      li.appendChild(ed);
+    }
+    els.axLmList.appendChild(li);
+  });
+}
+function setAdminTab(tab) {
+  state.adminTab = tab;
+  els.axTabAlign.hidden = tab !== 'align'; els.axTabLandmarks.hidden = tab !== 'landmarks';
+  els.axTabBtnAlign.classList.toggle('is-on', tab === 'align'); els.axTabBtnLandmarks.classList.toggle('is-on', tab === 'landmarks');
+  els.axTabBtnAlign.setAttribute('aria-selected', String(tab === 'align')); els.axTabBtnLandmarks.setAttribute('aria-selected', String(tab === 'landmarks'));
+  if (els.axTitle) els.axTitle.textContent = tab === 'landmarks' ? 'Landmarks' : 'Align overlay';
+  if (els.axSubtitle) els.axSubtitle.textContent = tab === 'landmarks' ? 'Add banners on the horizon; drag the pin and the banner to place them.' : 'Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.';
+  applyLandmarkVisibility(); refreshLmList();
+}
+// persistence
+function normLL(o) { if (!o) return null; const lon = o.lonDeg != null ? +o.lonDeg : +o.lon, lat = o.latDeg != null ? +o.latDeg : +o.lat; return (isFinite(lon) && isFinite(lat)) ? { lon, lat } : null; }
+function parseLandmarks(d) {
+  const arr = (d && Array.isArray(d.landmarks)) ? d.landmarks : (Array.isArray(d) ? d : []);
+  return arr.map((l, i) => ({ id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot) })).filter((l) => l.hotspot && l.banner);
+}
+function buildLandmarksData() {
+  return { version: 1, note: 'Build91 landmark hotspots', savedAt: new Date().toISOString(),
+    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, hotspot: { lonDeg: +l.hotspot.lon.toFixed(2), latDeg: +l.hotspot.lat.toFixed(2) }, banner: { lonDeg: +l.banner.lon.toFixed(2), latDeg: +l.banner.lat.toFixed(2) } })) };
+}
+async function loadLandmarksFile() {
+  try { const r = await fetch(`${CONFIG.landmarksUrl}?t=${Date.now()}`, { cache: 'no-store' }); if (!r.ok) return null; return parseLandmarks(await r.json()); } catch { return null; }
+}
+function setLandmarks(list) {
+  state.landmarks = list || []; state.lmSel = null;
+  lmSeq = state.landmarks.reduce((m, l) => { const n = parseInt(String(l.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(n) ? n : 0); }, 0);
+  rebuildLandmarkDOM(); refreshLmList(); applyLandmarkVisibility();
+}
+async function saveLandmarksAs() {
+  const text = JSON.stringify(buildLandmarksData(), null, 2);
+  if (window.showSaveFilePicker) {
+    try { const h = await window.showSaveFilePicker({ suggestedName: 'landmarks.json', types: [{ description: 'Landmarks JSON', accept: { 'application/json': ['.json'] } }] }); const w = await h.createWritable(); await w.write(text); await w.close(); setAxStatus(`Saved <code>${h.name}</code> — put it in <code>sample/</code> for the client.`); }
+    catch (e) { if (e.name !== 'AbortError') setAxStatus(`Save failed: ${e.message}`); }
+  } else { const b = new Blob([text], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'landmarks.json'; a.click(); URL.revokeObjectURL(a.href); setAxStatus('Downloaded <code>landmarks.json</code> → move it into <code>sample/</code>.'); }
+}
+
 // ─── Boot ───────────────────────────────────────────────────────────────────
 (async function init() {
   try {
@@ -1304,9 +1571,16 @@ window.addEventListener('pagehide', () => { try { three?.renderer?.forceContextL
       chosen = draft;
     }
     if (chosen) { state.transform = chosen.transform; state.savedView = chosen.view; if (chosen.opacity != null) state.overlayOpacity = chosen.opacity; }
-    const texture = await loadPanoTexture(CONFIG.renderUrl);
+    // background pano: session blob > alignment's panoImage reference > built-in default
+    let panoSrc = CONFIG.renderUrl;
+    if (restored?.pano?.blob) { state.panoBlob = restored.pano.blob; state.panoName = restored.pano.name; state.panoImage = { file: `sample/${restored.pano.name}` }; panoSrc = restored.pano.blob; }
+    else if (chosen?.panoImage?.file) { state.panoImage = chosen.panoImage; panoSrc = chosen.panoImage.file; }
+    let texture;
+    try { texture = await loadPanoTexture(panoSrc); }
+    catch { texture = await loadPanoTexture(CONFIG.renderUrl); }   // referenced pano missing → fall back to default
     initThree(texture);
     wireAdmin();
+    updatePanoName();
     if (restored?.plan?.blob) {                           // imported plan image, recovered from the session blob (survives reload pre-export)
       state.planBlob = restored.plan.blob; state.planName = restored.plan.name;
       const url = URL.createObjectURL(restored.plan.blob);
@@ -1319,6 +1593,11 @@ window.addEventListener('pagehide', () => { try { three?.renderer?.forceContextL
     const src = await loadData();
     if (restored && Array.isArray(restored.rows)) state.rows = new Map(restored.rows.map((r) => [r.plot_id, r])); // session's edited statuses win over the sample CSV
     applyData(); setSync(src);
+    // landmarks: session (freshest) > committed landmarks.json > none
+    let lms = [];
+    if (restored?.landmarks?.length) lms = parseLandmarks({ landmarks: restored.landmarks });
+    else { const lmFile = await loadLandmarksFile(); if (lmFile) lms = lmFile; }
+    setLandmarks(lms);
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
   } catch (err) {
     console.error(err);

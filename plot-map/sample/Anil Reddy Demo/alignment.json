@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "note": "Build91 plot-map overlay alignment",
+  "savedAt": "2026-07-08T13:00:34.677Z",
+  "transform": {
+    "tx": -0.4449,
+    "ty": -0.8403,
+    "scale": 0.85,
+    "rotationDeg": -0.9
+  },
+  "view": {
+    "lonDeg": 202.76,
+    "latDeg": -13.3,
+    "fov": 38
+  },
+  "opacity": 0.75,
+  "groundImage": {
+    "file": "sample/Untitled - July 08, 2026 at 17.02.04.web.png",
+    "opacity": 1
+  },
+  "panoImage": {
+    "file": "sample/DJI_20251106132132_0055_D.web.jpg"
+  }
+}
