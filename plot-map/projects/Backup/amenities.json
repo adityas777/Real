@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "note": "Build91 in-layout amenities",
+  "savedAt": "2026-07-11T10:32:33.463Z",
+  "amenities": [
+    {
+      "id": "am1",
+      "name": "Temple",
+      "icon": "temple",
+      "facing": "",
+      "size": "220 sqft",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-temple.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -97.94,
+        "latDeg": -49.32
+      }
+    }
+  ]
+}

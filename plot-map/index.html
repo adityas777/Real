@@ -18,10 +18,40 @@
   <!-- ─── Top bar ─────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark">B91</span>
+      <span class="brand-mark" id="brandMark">B91</span>
       <div class="brand-text">
-        <strong>Build91</strong>
-        <span>Interactive Plot Map</span>
+        <strong id="brandName">Build91</strong>
+        <span id="brandTagline">Interactive Plot Map</span>
+      </div>
+    </div>
+
+    <!-- project switcher + (admin) manage menu -->
+    <div class="proj" id="proj" hidden>
+      <span class="proj-label">Project</span>
+      <select class="proj-select" id="projSelect" aria-label="Switch project"></select>
+      <div class="proj-tools" id="projTools" hidden>
+        <button class="btn btn-primary proj-save" id="projSave" type="button"
+          title="Save all project files (plots, alignment, landmarks, amenities, images) into this project">💾
+          Save</button>
+        <button class="btn btn-icon proj-menu-btn" id="projMenuBtn" type="button" aria-haspopup="true"
+          aria-expanded="false" title="Project actions">⋯</button>
+        <div class="proj-menu" id="projMenu" role="menu" hidden>
+          <button type="button" role="menuitem" data-act="new">＋ New project…</button>
+          <button type="button" role="menuitem" data-act="saveas">Duplicate as…</button>
+          <button type="button" role="menuitem" data-act="bundle"
+            title="Download a self-contained folder that runs on any static host / embeds via iframe">⬇ Export
+            standalone site…</button>
+          <button type="button" role="menuitem" data-act="rename">Rename…</button>
+          <button type="button" role="menuitem" data-act="delete" class="is-danger">Delete…</button>
+        </div>
+        <!-- inline naming / confirm row (reused by new / duplicate / rename / delete) -->
+        <div class="proj-name" id="projName" hidden>
+          <input type="text" id="projNameInput" placeholder="project-id" maxlength="64" autocapitalize="off"
+            autocomplete="off" spellcheck="false" />
+          <button class="btn btn-primary" id="projNameOk" type="button">OK</button>
+          <button class="btn btn-icon" id="projNameCancel" type="button" aria-label="Cancel">✕</button>
+          <p class="proj-name-hint" id="projNameHint"></p>
+        </div>
       </div>
     </div>
 
@@ -43,14 +73,18 @@
     <div class="pano" id="pano" role="img" aria-label="Interactive 360° aerial site panorama with selectable plots">
       <!-- landmark banners + connector lines + pins, projected from the 3D scene each frame -->
       <div class="landmarks" id="landmarks" aria-hidden="true"></div>
+      <!-- in-layout amenity icon-pins (clickable → info card + render lightbox), projected each frame -->
+      <div class="amenities" id="amenities" aria-hidden="true"></div>
     </div>
 
     <!-- look-around / zoom controls -->
     <div class="zoom-controls" role="group" aria-label="View controls">
-      <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false"
-        aria-label="Show plot numbers" title="Show plot numbers">#</button>
-      <button class="btn btn-icon" id="landmarkToggle" type="button" aria-pressed="false"
-        aria-label="Show landmarks" title="Show landmarks">📍</button>
+      <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false" aria-label="Show plot numbers"
+        title="Show plot numbers">#</button>
+      <button class="btn btn-icon" id="landmarkToggle" type="button" aria-pressed="false" aria-label="Show landmarks"
+        title="Show landmarks">📍</button>
+      <button class="btn btn-icon" id="amenityToggle" type="button" aria-pressed="true" aria-label="Show amenities"
+        title="Hide amenities">🏛️</button>
       <button class="btn btn-icon" id="zoomIn" type="button" aria-label="Zoom in">+</button>
       <button class="btn btn-icon" id="zoomOut" type="button" aria-label="Zoom out">−</button>
       <button class="btn btn-icon" id="zoomReset" type="button" aria-label="Recenter on plots"
@@ -58,7 +92,7 @@
     </div>
 
     <!-- hint -->
-    <div class="pano-hint" id="panoHint">Drag to look around · scroll to zoom</div>
+
 
     <!-- hover tooltip -->
     <div class="tooltip" id="tooltip" role="status" aria-hidden="true"></div>
@@ -76,64 +110,103 @@
     </header>
     <div class="ax-tabs" role="tablist">
       <button class="ax-tab-btn is-on" id="axTabBtnAlign" type="button" role="tab" aria-selected="true">Align</button>
-      <button class="ax-tab-btn" id="axTabBtnLandmarks" type="button" role="tab" aria-selected="false">Landmarks</button>
+      <button class="ax-tab-btn" id="axTabBtnLandmarks" type="button" role="tab"
+        aria-selected="false">Landmarks</button>
+      <button class="ax-tab-btn" id="axTabBtnAmenities" type="button" role="tab"
+        aria-selected="false">Amenities</button>
     </div>
     <div class="ax-tab" id="axTabAlign">
-    <div class="ax-mode" role="group" aria-label="Drag mode">
-      <button class="ax-modebtn is-on" id="axModeLook" type="button" title="Drag to look around">Look around</button>
-      <button class="ax-modebtn" id="axModeMove" type="button" title="Drag to reposition the whole layout">Move
-        layout</button>
-    </div>
-    <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
-      Import / Trace plots…</button>
-    <div class="ax-pano">
-      <button class="btn btn-ghost" id="axPano" type="button"
-        title="Choose the 360° background panorama the client view uses (exported with the site files)">🖼 Background pano…</button>
-      <input type="file" id="axPanoFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
-      <p class="ax-pano-name" id="axPanoName">Using the default panorama.</p>
-    </div>
-    <div class="ax-scale">
-      <div class="ax-scale-head">
-        <span>Scale</span>
-        <div class="ax-stepper" role="group" aria-label="Scale value">
-          <button class="ax-stepbtn" id="axScaleDown" type="button" aria-label="Decrease scale">−</button>
-          <input class="ax-num" id="axScaleNum" type="number" min="0.05" max="3" step="0.01" value="1.00" inputmode="decimal" aria-label="Scale (×)" />
-          <button class="ax-stepbtn" id="axScaleUp" type="button" aria-label="Increase scale">+</button>
+      <div class="ax-mode" role="group" aria-label="Drag mode">
+        <button class="ax-modebtn is-on" id="axModeLook" type="button" title="Drag to look around">Look around</button>
+        <button class="ax-modebtn" id="axModeMove" type="button" title="Drag to reposition the whole layout">Move
+          layout</button>
+      </div>
+      <div class="ax-brand">
+        <p class="ax-brand-head">Site branding <span>· shown in the client title bar</span></p>
+        <label class="ax-brand-field">Project name
+          <input type="text" id="axBrandName" placeholder="e.g. Dholera Greens" maxlength="60" /></label>
+        <label class="ax-brand-field">Tagline
+          <input type="text" id="axBrandTagline" placeholder="e.g. Interactive Plot Map" maxlength="60" /></label>
+        <div class="ax-brand-logo">
+          <button class="btn btn-ghost" id="axBrandLogo" type="button"
+            title="Upload a builder/site logo shown in the title bar">🏷 Logo…</button>
+          <input type="file" id="axBrandLogoFile" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*"
+            hidden />
+          <span class="ax-brand-logo-name" id="axBrandLogoName">no logo</span>
+          <button class="btn btn-ghost ax-brand-logo-clear" id="axBrandLogoClear" type="button" title="Remove the logo"
+            hidden>Clear</button>
         </div>
       </div>
-      <input type="range" id="axScale" min="0.05" max="3" step="0.01" value="1" />
-    </div>
-    <div class="ax-scale">
-      <div class="ax-scale-head">
-        <span>Rotate</span>
-        <div class="ax-stepper" role="group" aria-label="Rotation value (degrees)">
-          <button class="ax-stepbtn" id="axRotDown" type="button" aria-label="Rotate −0.1°">−</button>
-          <input class="ax-num" id="axRotNum" type="number" min="-180" max="180" step="0.1" value="0.0" inputmode="decimal" aria-label="Rotation in degrees" />
-          <button class="ax-stepbtn" id="axRotUp" type="button" aria-label="Rotate +0.1°">+</button>
+      <div class="ax-data">
+        <p class="ax-brand-head">Plot data <span>· live status from a Google Sheet</span></p>
+        <label class="ax-data-toggle"><input type="checkbox" id="axSheetOn" /> Pull plot status &amp; details from a
+          Google Sheet</label>
+        <div class="ax-data-body" id="axSheetBody" hidden>
+          <label class="ax-brand-field">Sheet link
+            <input type="text" id="axSheetUrl" placeholder="Paste the Google Sheet share / “Publish to web” link"
+              spellcheck="false" /></label>
+          <div class="ax-data-actions">
+            <button class="btn btn-ghost" id="axSheetTest" type="button" title="Fetch the sheet and check it">Test</button>
+            <span class="ax-data-note" id="axSheetMsg">The sheet must be public — Share → “Anyone with the link”, or
+              File → Share → Publish to web. Header row must match <code>plots.csv</code> (needs a
+              <code>plot_id</code> column).</span>
+          </div>
         </div>
       </div>
-      <input type="range" id="axRot" min="-180" max="180" step="0.1" value="0" />
-    </div>
-    <label class="ax-row">Opacity
-      <input type="range" id="axOpacity" min="0.15" max="1" step="0.05" value="0.5" />
-      <output id="axOpacityVal">50%</output>
-    </label>
-    <label class="ax-row" id="axPlanRow" hidden>Plan image
-      <input type="range" id="axPlanOpacity" min="0" max="1" step="0.05" value="1" />
-      <output id="axPlanOpacityVal">100%</output>
-    </label>
-    <div class="adminbar-actions">
-      <button class="btn btn-ghost" id="axReset" type="button">Reset</button>
-      <button class="btn btn-ghost" id="axLoad" type="button">Load…</button>
-      <input type="file" id="axFile" accept="application/json,.json" hidden />
-      <button class="btn btn-primary" id="axSave" type="button">Save As…</button>
-    </div>
+      <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
+        Import / Trace plots…</button>
+      <div class="ax-pano">
+        <button class="btn btn-ghost" id="axPano" type="button"
+          title="Choose the 360° background panorama the client view uses (exported with the site files)">🖼 Background
+          pano…</button>
+        <input type="file" id="axPanoFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+        <p class="ax-pano-name" id="axPanoName">Using the default panorama.</p>
+      </div>
+      <div class="ax-scale">
+        <div class="ax-scale-head">
+          <span>Scale</span>
+          <div class="ax-stepper" role="group" aria-label="Scale value">
+            <button class="ax-stepbtn" id="axScaleDown" type="button" aria-label="Decrease scale">−</button>
+            <input class="ax-num" id="axScaleNum" type="number" min="0.05" max="3" step="0.01" value="1.00"
+              inputmode="decimal" aria-label="Scale (×)" />
+            <button class="ax-stepbtn" id="axScaleUp" type="button" aria-label="Increase scale">+</button>
+          </div>
+        </div>
+        <input type="range" id="axScale" min="0.05" max="3" step="0.01" value="1" />
+      </div>
+      <div class="ax-scale">
+        <div class="ax-scale-head">
+          <span>Rotate</span>
+          <div class="ax-stepper" role="group" aria-label="Rotation value (degrees)">
+            <button class="ax-stepbtn" id="axRotDown" type="button" aria-label="Rotate −0.1°">−</button>
+            <input class="ax-num" id="axRotNum" type="number" min="-180" max="180" step="0.1" value="0.0"
+              inputmode="decimal" aria-label="Rotation in degrees" />
+            <button class="ax-stepbtn" id="axRotUp" type="button" aria-label="Rotate +0.1°">+</button>
+          </div>
+        </div>
+        <input type="range" id="axRot" min="-180" max="180" step="0.1" value="0" />
+      </div>
+      <label class="ax-row">Opacity
+        <input type="range" id="axOpacity" min="0.15" max="1" step="0.05" value="0.5" />
+        <output id="axOpacityVal">50%</output>
+      </label>
+      <label class="ax-row" id="axPlanRow" hidden>Plan image
+        <input type="range" id="axPlanOpacity" min="0" max="1" step="0.05" value="1" />
+        <output id="axPlanOpacityVal">100%</output>
+      </label>
+      <div class="adminbar-actions">
+        <button class="btn btn-ghost" id="axReset" type="button">Reset</button>
+        <button class="btn btn-ghost" id="axLoad" type="button">Load…</button>
+        <input type="file" id="axFile" accept="application/json,.json" hidden />
+        <button class="btn btn-primary" id="axSave" type="button">Save As…</button>
+      </div>
     </div><!-- /axTabAlign -->
 
     <div class="ax-tab" id="axTabLandmarks" hidden>
       <p class="ax-lm-intro">Add points of interest on the horizon — a banner (label, distance &amp; drive time)
         connected by a line to a pin you place in the scene. Drag the <strong>pin</strong> onto a spot and drag the
-        <strong>banner</strong> to position it.</p>
+        <strong>banner</strong> to position it.
+      </p>
       <button class="btn btn-import" id="axLmAdd" type="button">＋ Add landmark</button>
       <p class="ax-lm-empty" id="axLmEmpty">No landmarks yet.</p>
       <ul class="ax-lm-list" id="axLmList" aria-label="Landmarks"></ul>
@@ -144,19 +217,37 @@
       </div>
     </div><!-- /axTabLandmarks -->
 
+    <div class="ax-tab" id="axTabAmenities" hidden>
+      <p class="ax-lm-intro">Mark amenities inside the layout — a clubhouse, temple, pool, park… Each is an
+        <strong>icon pin</strong> with a name (its label) and the usual details, plus a <strong>render image</strong>
+        that opens full-screen when clicked. Drag the pin to place it. No status/colour — these aren't for sale.
+      </p>
+      <button class="btn btn-import" id="axAmAdd" type="button">＋ Add amenity</button>
+      <p class="ax-lm-empty" id="axAmEmpty">No amenities yet.</p>
+      <ul class="ax-lm-list" id="axAmList" aria-label="Amenities"></ul>
+      <div class="adminbar-actions">
+        <button class="btn btn-ghost" id="axAmLoad" type="button">Load…</button>
+        <input type="file" id="axAmFile" accept="application/json,.json" hidden />
+        <button class="btn btn-primary" id="axAmSave" type="button">Save amenities…</button>
+      </div>
+    </div><!-- /axTabAmenities -->
+
     <div class="adminbar-actions">
       <button class="btn btn-ghost" id="axExport" type="button"
-        title="Write plots.svg + plots.csv + alignment.json (+ plan &amp; pano images + landmarks.json) into a folder">⤓ Export site files…</button>
+        title="Write plots.svg + plots.csv + alignment.json (+ plan/pano/logo images + landmarks.json + amenities.json &amp; all render images) into a folder">⤓
+        Export site files…</button>
     </div>
     <div class="adminbar-actions ax-session">
       <button class="btn btn-ghost" id="axSessionSave" type="button"
-        title="Save the whole in-progress session — traced plots, plan image and alignment — in this browser so a reload or crash won't lose it">⟳ Save working session</button>
+        title="Save the whole in-progress session — traced plots, plan image and alignment — in this browser so a reload or crash won't lose it">⟳
+        Save working session</button>
       <button class="btn btn-ghost" id="axSessionClear" type="button"
         title="Discard the working session stored in this browser">Discard</button>
     </div>
     <p class="adminbar-sess" id="axSessionStatus" aria-live="polite">Work auto-saves in this browser as you go.</p>
     <p class="adminbar-foot" id="axStatus">Drag/scale/rotate, then <strong>Save file</strong> → drop it in
-      <code>sample/alignment.json</code> for the client view.</p>
+      <code>sample/alignment.json</code> for the client view.
+    </p>
   </section>
 
   <!-- ─── Info panel ──────────────────────────────────────────────────────── -->
@@ -177,6 +268,38 @@
     </button>
     <p class="panel-hint" id="walkHint"></p>
   </aside>
+
+  <!-- ─── Amenity info card (name + details + render thumbnail) ─────────────── -->
+  <aside class="panel am-card" id="amCard" aria-hidden="true" aria-labelledby="amCardTitle" tabindex="-1">
+    <button class="panel-close btn btn-icon" id="amCardClose" type="button" aria-label="Close amenity card">×</button>
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <span class="am-card-ico" id="amCardIco" aria-hidden="true">🏛️</span>
+        <p class="panel-block" id="amCardBlock"></p>
+      </div>
+      <h2 class="panel-title" id="amCardTitle">Amenity</h2>
+    </div>
+    <button class="am-card-thumb" id="amCardThumb" type="button" hidden title="View full render">
+      <img id="amCardImg" alt="" />
+      <span class="am-card-thumb-hint"> ⤢</span>
+    </button>
+    <dl class="panel-grid" id="amCardGrid"></dl>
+    <p class="panel-notes" id="amCardNotes"></p>
+    <button class="btn btn-primary panel-cta" id="amCardWalk" type="button" hidden>
+      <span>Walk through</span>
+      <span class="panel-cta-arrow" aria-hidden="true">→</span>
+    </button>
+  </aside>
+
+  <!-- ─── Full-render lightbox ─────────────────────────────────────────────── -->
+  <div class="modal lightbox" id="lightbox" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="lightbox-inner" role="dialog" aria-modal="true" aria-label="Amenity render">
+      <button class="btn btn-icon lightbox-close" id="lightboxClose" type="button" aria-label="Close render">×</button>
+      <img class="lightbox-img" id="lightboxImg" alt="" />
+      <p class="lightbox-cap" id="lightboxCap"></p>
+    </div>
+  </div>
 
   <!-- ─── Tour modal ──────────────────────────────────────────────────────── -->
   <div class="modal" id="modal" aria-hidden="true">

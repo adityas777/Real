@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 landmark hotspots",
-  "savedAt": "2026-07-08T14:20:42.460Z",
+  "savedAt": "2026-07-10T07:32:58.292Z",
   "landmarks": [
     {
       "id": "lm1",
@@ -46,6 +46,21 @@
       "banner": {
         "lonDeg": 139.42,
         "latDeg": 6.86
+      }
+    },
+    {
+      "id": "lm4",
+      "label": "New Landmark",
+      "distance": "12 km",
+      "driveTime": "25 min",
+      "icon": "college",
+      "hotspot": {
+        "lonDeg": 173.45,
+        "latDeg": -2.6
+      },
+      "banner": {
+        "lonDeg": 173.44,
+        "latDeg": 9.54
       }
     }
   ]

@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "note": "Build91 landmark hotspots",
+  "savedAt": "2026-07-11T19:21:08.909Z",
+  "landmarks": [
+    {
+      "id": "lm4",
+      "label": "Dholera International Airport ",
+      "distance": "15.7",
+      "driveTime": "25 min",
+      "icon": "airport",
+      "render": {
+        "file": "sample/landmark-dholera-international-airport.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -119.2,
+        "latDeg": -2.33
+      },
+      "banner": {
+        "lonDeg": -119.24,
+        "latDeg": 4.58
+      }
+    },
+    {
+      "id": "lm5",
+      "label": "ABCD Building ",
+      "distance": "24.4km",
+      "driveTime": "30min",
+      "icon": "place",
+      "render": {
+        "file": "sample/landmark-abcd-building.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -94.96,
+        "latDeg": -2.36
+      },
+      "banner": {
+        "lonDeg": -95.07,
+        "latDeg": 5.61
+      }
+    },
+    {
+      "id": "lm6",
+      "label": "Activation Zone Dholera ",
+      "distance": "23.7km",
+      "driveTime": "30min",
+      "icon": "place",
+      "render": {
+        "file": "sample/landmark-activation-zone-dholera.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -64.6,
+        "latDeg": -2.48
+      },
+      "banner": {
+        "lonDeg": -64.4,
+        "latDeg": 4.24
+      }
+    },
+    {
+      "id": "lm7",
+      "label": "Bhavnagar ",
+      "distance": "90.5km",
+      "driveTime": "1hr32min",
+      "icon": "place",
+      "hotspot": {
+        "lonDeg": -17.42,
+        "latDeg": -0.51
+      },
+      "banner": {
+        "lonDeg": -17.53,
+        "latDeg": 10.14
+      }
+    },
+    {
+      "id": "lm8",
+      "label": "BlackBuck National Park",
+      "distance": "60.7km",
+      "driveTime": "1hr8min",
+      "icon": "park",
+      "render": {
+        "file": "sample/landmark-blackbuck-national-park.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 8.22,
+        "latDeg": -3.21
+      },
+      "banner": {
+        "lonDeg": 8.69,
+        "latDeg": 8.25
+      }
+    },
+    {
+      "id": "lm10",
+      "label": "Vadodara ",
+      "distance": "132km ",
+      "driveTime": "2hr40min",
+      "icon": "place",
+      "hotspot": {
+        "lonDeg": -137.33,
+        "latDeg": -0.08
+      },
+      "banner": {
+        "lonDeg": -137.37,
+        "latDeg": 12.6
+      }
+    },
+    {
+      "id": "lm11",
+      "label": "Artificial River Fornt ",
+      "distance": "7km",
+      "driveTime": "12min ",
+      "icon": "lake",
+      "render": {
+        "file": "sample/landmark-artificial-river-fornt.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -145.87,
+        "latDeg": -3.68
+      },
+      "banner": {
+        "lonDeg": -145.86,
+        "latDeg": 3.61
+      }
+    },
+    {
+      "id": "lm12",
+      "label": "Dholera SIR ",
+      "distance": "5km ",
+      "driveTime": "10min",
+      "icon": "place",
+      "render": {
+        "file": "sample/landmark-dholera-sir.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 115.4,
+        "latDeg": -6.61
+      },
+      "banner": {
+        "lonDeg": 115.16,
+        "latDeg": 1.62
+      }
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" class="plot-overlay" preserveAspectRatio="xMidYMid meet">
+  <!-- Exported by the Build91 admin trace tool. -->
+  <g class="plots">
+    <g class="plot-group">
+      <polygon id="Plot-65" class="plot" points="447.3,659.7 472.5,659.6 473,723.7 447.2,724.1 447.3,659.7" />
+      <text class="plot-label" x="457.5" y="685.4">65</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-23" class="plot" points="368,324 401.6,323.9 400.6,386.4 368,386 368,325" />
+      <text class="plot-label" x="381.2" y="349.1">23</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-120" class="plot" points="709.6,996.6 722.3,996.5 722.6,1060 697,1060 698.1,996.6" />
+      <text class="plot-label" x="709.9" y="1021.9">120</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-184" class="plot" points="434.5,1321.9 445.5,1321.9 445.2,1375.4 424,1375 424.5,1321.8" />
+      <text class="plot-label" x="434.7" y="1343.2">184</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-154" class="plot" points="336.4,1165 348.5,1165 348.3,1223 327.1,1223.4 327.1,1165" />
+      <text class="plot-label" x="337.5" y="1188.3">154</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-43" class="plot" points="664.9,490.9 680.1,490.8 679.7,555.9 648.3,555.6 647.7,491.1" />
+      <text class="plot-label" x="664.1" y="516.9">43</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-92" class="plot" points="606.2,827.8 605.9,892 592.3,892.2 570.8,892.5 570.8,850.3 574,839 580.8,831.8 590.7,827.7" />
+      <text class="plot-label" x="586.4" y="856.7">92</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-97" class="plot" points="366.6,827.8 384.7,827.7 384.7,892.5 358.5,892.5 359.5,827.8" />
+      <text class="plot-label" x="370.8" y="853.7">97</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-172" class="plot" points="643.5,1228.2 654.5,1227.9 654.5,1284.5 633,1284 633,1228" />
+      <text class="plot-label" x="643.7" y="1250.5">172</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-216" class="plot" points="491.2,1488.8 502.5,1495.6 509.3,1506.2 509.3,1542 473.8,1542 473.8,1488.8" />
+      <text class="plot-label" x="493.3" y="1510.6">216</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-230" class="plot" points="310.9,1545.9 322.4,1545.6 321.7,1599 311.1,1599.3 300.4,1599.5 300.3,1545.7" />
+      <text class="plot-label" x="311.1" y="1572.5">230</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-242" class="plot" points="692.2,1541.9 703.4,1541.6 703.1,1599.5 682.4,1599.9 682,1541.7" />
+      <text class="plot-label" x="692.6" y="1564.9">242</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-266" class="plot" points="387,1698 418.6,1698.6 418.6,1757.4 387.7,1757.1 387,1698 418.6,1698.6 388,1698" />
+      <text class="plot-label" x="400.8" y="1715.1">266</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-14" class="plot" points="765.8,323.8 792.4,323.4 793.1,381.2 793.2,387.1 779.3,387 755,387 755.4,323.7" />
+      <text class="plot-label" x="776.3" y="359">14</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-181" class="plot" points="591.7,1322.6 604.9,1322.6 604.2,1380.1 569.8,1380.2 569.6,1341.3 575.7,1331.1 583.4,1324.9" />
+      <text class="plot-label" x="585.6" y="1343.3">181</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-251" class="plot" points="643.8,1636.2 654.3,1636 653.7,1695.4 632.5,1695.4 632.6,1636" />
+      <text class="plot-label" x="643.4" y="1659.8">251</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-274" class="plot" points="685.6,1699.1 692.5,1699.1 698.4,1699.1 703.3,1699.1 702.6,1757.3 681,1757 681,1699" />
+      <text class="plot-label" x="692.1" y="1715.7">274</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-76" class="plot" points="351.3,1379.6 351.2,1433.2 371.3,1433.6 371.7,1379.9 361.8,1379.8" />
+      <text class="plot-label" x="361.5" y="1401.2">76</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-148" class="plot" points="486.7,1165.2 498.8,1168.3 507.3,1176.3 511.4,1186.6 511.2,1222.6 475.6,1222.6 475.9,1164.7" />
+      <text class="plot-label" x="495.3" y="1186.6">148</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-78" class="plot" points="389,727.8 414.5,727.4 414.1,791.5 388,791 389,727.8" />
+      <text class="plot-label" x="398.9" y="753.1">78</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-17" class="plot" points="663.3,323.9 678.4,323.8 678.3,387.1 648,387.2 648.6,323.8" />
+      <text class="plot-label" x="663.3" y="349.2">17</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-48" class="plot" points="295,491 337.2,490.9 336.8,555.7 296,555 295,492" />
+      <text class="plot-label" x="312" y="516.9">48</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-89" class="plot" points="678,827.8 694.8,828.1 694.3,892 669.4,892 668.7,827.6" />
+      <text class="plot-label" x="681" y="853.5">89</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-139" class="plot" points="788.5,1064.8 788.5,1066.1 788.7,1075.7 789.3,1102.1 790,1128.1 781.1,1128.1 769.7,1128.2 757,1128 756.5,1064.8 763.6,1064.8" />
+      <text class="plot-label" x="777.3" y="1095.1">139</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-33" class="plot" points="477.6,392.7 513.6,392.7 514,420.8 514,435.9 506.8,445.5 500.9,450.3 494.8,452.7 485.5,453.7 476.6,453" />
+      <text class="plot-label" x="498.2" y="433">33</text>
+    </g>
+  </g>
+</svg>

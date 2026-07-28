@@ -120,9 +120,57 @@ body {
   background: linear-gradient(135deg, var(--gold-soft), var(--gold));
   box-shadow: 0 4px 14px rgba(212,175,55,.25);
 }
+/* when a site logo is set, the mark becomes a plain image frame (no gold tile) */
+.brand-mark.has-logo { background: none; box-shadow: none; padding: 0; overflow: hidden; }
+.brand-mark .brand-logo { width: 100%; height: 100%; object-fit: contain; display: block; }
 .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-text strong { font-size: 15px; letter-spacing: .2px; }
 .brand-text span { font-size: 11px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .8px; }
+.brand-text span:empty { display: none; }
+
+/* ─── Header project switcher + manage menu ─────────────────────────────────── */
+.proj { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; position: relative; }
+.proj[hidden] { display: none; }
+.proj-label { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--text-mute); }
+.proj-select {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 8px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; max-width: 200px;
+}
+.proj-select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+.proj-tools { position: relative; display: flex; align-items: center; gap: 6px; }
+.proj-save { padding: 6px 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.proj-save:disabled { opacity: .7; cursor: default; }
+.proj-menu-btn { width: 30px; height: 30px; font-size: 16px; line-height: 1; }
+.proj-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; min-width: 180px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 2px;
+}
+.proj-menu[hidden] { display: none; }
+.proj-menu button {
+  text-align: left; background: transparent; border: 0; border-radius: 7px; padding: 8px 10px;
+  color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.proj-menu button:hover { background: var(--bg); }
+.proj-menu button.is-danger { color: var(--reserved); }
+.proj-menu button.is-danger:hover { background: rgba(210,97,90,.12); }
+.proj-name {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 51; width: 260px; max-width: 78vw;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px;
+  box-shadow: var(--shadow); display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center;
+}
+.proj-name[hidden] { display: none; }
+.proj-name input {
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 7px;
+  padding: 6px 8px; font: inherit; font-size: 12.5px;
+}
+.proj-name input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+.proj-name input.is-bad { border-color: var(--reserved); }
+.proj-name .btn { padding: 6px 10px; font-size: 12px; }
+.proj-name .btn.is-danger { background: var(--reserved); color: #fff; border-color: var(--reserved); }
+.proj-name .btn:disabled { opacity: .45; cursor: not-allowed; }
+.proj-name-hint { grid-column: 1 / -1; margin: 0; font-size: 11px; line-height: 1.4; color: var(--text-mute); }
+.proj-name-hint .is-bad { color: var(--reserved); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 auto; justify-content: center; }
 .chip {
@@ -195,6 +243,10 @@ body {
   position: fixed;
   left: 14px; top: calc(var(--topbar-h) + 14px);
   width: 268px; max-width: calc(100vw - 28px);
+  /* bound to the viewport and scroll internally — long landmark/amenity lists must not
+     run off the bottom of the screen with no scrollbar */
+  max-height: calc(100vh - var(--topbar-h) - 28px);
+  overflow-y: auto; overscroll-behavior: contain;
   z-index: 45;
   background: linear-gradient(180deg, var(--panel), var(--bg-2));
   border: 1px solid var(--line);
@@ -276,7 +328,7 @@ body {
 .ax-lm-field input:focus-visible, .ax-lm-field select:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
 
 @media (max-width: 720px) {
-  .adminbar { left: 8px; right: 8px; width: auto; top: calc(var(--topbar-h) + 8px); }
+  .adminbar { left: 8px; right: 8px; width: auto; top: calc(var(--topbar-h) + 8px); max-height: calc(100vh - var(--topbar-h) - 16px); }
 }
 
 /* ─── Zoom controls ───────────────────────────────────────────────────────── */
@@ -345,6 +397,86 @@ body {
 .landmarks.is-editing .lm-pin:active, .landmarks.is-editing .lm-banner:active { cursor: grabbing; }
 .lm-banner.is-sel { border-color: var(--gold); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 2px var(--gold); }
 .lm-pin.is-sel { box-shadow: 0 0 0 4px rgba(212,175,55,.5), 0 2px 7px rgba(0,0,0,.55); }
+/* a landmark with a render image is interactive in the client: hover (desktop) / tap
+   (mobile) pops its card. A small badge hints there's an image to view. */
+.lm-banner.has-render { pointer-events: auto; cursor: pointer; }
+.lm-banner.has-render:hover { border-color: var(--gold); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 1px var(--gold-soft); }
+.lm-banner.has-render::after {
+  content: "🖼"; position: absolute; top: -7px; right: -7px;
+  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 10px; background: var(--gold); box-shadow: 0 2px 6px rgba(0,0,0,.5);
+}
+
+/* ─── Amenity overlay (in-layout icon pins) ─────────────────────────────────── */
+.amenities { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 7; }
+.amenities[hidden] { display: none; }
+/* 0-size anchor sits exactly on the hotspot; its children (pin + label) position off it */
+.am-marker { position: absolute; width: 0; height: 0; pointer-events: none; }
+/* the pin dot marks the exact spot (mirrors the landmark pin) */
+.am-pin {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--gold); border: 2px solid #fff;
+  box-shadow: 0 0 0 3px rgba(212,175,55,.3), 0 2px 7px rgba(0,0,0,.55);
+  pointer-events: auto; cursor: pointer;
+}
+.am-pin::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: #fff; }
+/* the label bubble floats just above the pin, with a caret pointing down at it */
+.am-chip {
+  position: absolute; left: 0; bottom: 13px; transform: translateX(-50%);
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px 5px 7px; border-radius: 999px; white-space: nowrap;
+  background: linear-gradient(180deg, #1d212b, #14161d);
+  border: 1px solid var(--gold-soft);
+  box-shadow: 0 8px 22px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+  pointer-events: auto; cursor: pointer;                 /* clickable in the client (opens the info card) */
+  transition: transform .12s var(--ease), box-shadow .12s var(--ease);
+}
+.am-chip::after {
+  content: ""; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%) rotate(45deg);
+  width: 9px; height: 9px; background: #14161d;
+  border-right: 1px solid var(--gold-soft); border-bottom: 1px solid var(--gold-soft);
+}
+.am-chip:hover { transform: translateX(-50%) scale(1.05); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 1px var(--gold-soft); }
+.am-ico { font-size: 18px; line-height: 1; flex: none; }
+.am-label { font-weight: 700; font-size: 12.5px; color: #fff; letter-spacing: .2px; }
+.am-empty-label { color: var(--text-mute); font-weight: 600; font-style: italic; }
+.am-marker.is-sel .am-chip { border-color: var(--gold); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 2px var(--gold); }
+.am-marker.is-sel .am-pin { box-shadow: 0 0 0 4px rgba(212,175,55,.5), 0 2px 7px rgba(0,0,0,.55); }
+.amenities.is-editing .am-pin, .amenities.is-editing .am-chip { cursor: grab; }
+.amenities.is-editing .am-pin:active, .amenities.is-editing .am-chip:active { cursor: grabbing; }
+
+/* amenity info card = the plot popover styling, with a render thumbnail and no status badge */
+.am-card-ico { font-size: 22px; line-height: 1; }
+.am-card-thumb {
+  display: block; width: 100%; margin: 2px 0 12px; padding: 0; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--bg); overflow: hidden; cursor: zoom-in; position: relative;
+}
+.am-card-thumb[hidden] { display: none; }
+.am-card-thumb img { display: block; width: 100%; max-height: 168px; object-fit: cover; }
+.am-card-thumb-hint {
+  position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 999px;
+  background: rgba(8,10,14,.72); color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .3px;
+}
+.am-card-thumb:hover { border-color: var(--gold-soft); }
+
+/* admin: render-image picker row inside an amenity's edit block */
+.ax-am-render { display: flex; align-items: center; gap: 8px; }
+.ax-am-render .btn { padding: 5px 9px; font-size: 12px; }
+.ax-am-render-name { font-size: 11px; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Full-render lightbox ──────────────────────────────────────────────────── */
+.lightbox { z-index: 110; }
+.lightbox-inner {
+  position: absolute; inset: 3vh 3vw; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; animation: pop .22s var(--ease);
+}
+.lightbox-img {
+  max-width: 100%; max-height: 88%; object-fit: contain; border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.7); background: #0a0b0f;
+}
+.lightbox-cap { margin: 0; color: #fff; font-size: 13px; font-weight: 600; letter-spacing: .2px; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+.lightbox-cap:empty { display: none; }
+.lightbox-close { position: absolute; top: 0; right: 0; width: 34px; height: 34px; background: rgba(8,10,14,.7); color: #fff; }
 
 /* ─── Notice ──────────────────────────────────────────────────────────────── */
 .notice {
@@ -504,6 +636,30 @@ body {
 .ax-pano .btn { width: 100%; justify-content: center; }
 .ax-pano-name { margin: 6px 0 0; font-size: 11px; line-height: 1.4; color: var(--text-mute); word-break: break-all; }
 .ax-pano-name.is-set { color: var(--gold-soft); }
+
+/* admin: site branding (project name + tagline + logo) */
+.ax-brand { margin: 0 0 12px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg); display: grid; gap: 8px; }
+.ax-brand-head { margin: 0; font-size: 11px; font-weight: 700; color: var(--text); text-transform: uppercase; letter-spacing: .5px; }
+.ax-brand-head span { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-mute); }
+.ax-brand-field { display: grid; gap: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-mute); }
+.ax-brand-field input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12.5px; text-transform: none; letter-spacing: 0; }
+.ax-brand-field input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+.ax-brand-logo { display: flex; align-items: center; gap: 8px; }
+.ax-brand-logo .btn { padding: 5px 9px; font-size: 12px; }
+.ax-brand-logo-name { flex: 1; font-size: 11px; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ax-brand-logo-name.is-set { color: var(--gold-soft); }
+
+/* ─── Plot data source (Google Sheet) ──────────────────────────────────────── */
+.ax-data { margin: 0 0 12px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg); display: grid; gap: 8px; }
+.ax-data-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text); cursor: pointer; }
+.ax-data-toggle input { accent-color: var(--gold); width: 14px; height: 14px; }
+.ax-data-body { display: grid; gap: 8px; }
+.ax-data-actions { display: flex; align-items: flex-start; gap: 8px; }
+.ax-data-actions .btn { padding: 5px 12px; font-size: 12px; flex: none; }
+.ax-data-note { flex: 1; font-size: 10.5px; line-height: 1.4; color: var(--text-mute); }
+.ax-data-note code { font-size: 10px; background: var(--panel-2); border-radius: 3px; padding: 0 3px; }
+.ax-data-note.is-ok { color: var(--status-available, #34c77b); }
+.ax-data-note.is-err { color: var(--status-sold, #d2615a); }
 
 /* ─── Trace editor (PNG / DXF → polygons) ──────────────────────────────────── */
 .tracewin { position: fixed; inset: 0; z-index: 110; display: none; flex-direction: column; background: var(--bg); }

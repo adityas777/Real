@@ -4,7 +4,7 @@
     {
       "name": "plot-map",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8731"],
+      "runtimeArgs": ["server.py", "8731"],
       "port": 8731
     }
   ]

@@ -58,19 +58,31 @@ no CDN) — a real 360° viewer needs WebGL. Everything else is hand-rolled.
 
 ## Run it
 
-`fetch()` does not work from `file://`, so serve the folder over HTTP:
+Serve the folder with the bundled server (it also handles admin **server-side saves**):
 
 ```bash
-# any one of these, from this directory:
-python -m http.server 8000   # Python
-npx serve .                  # Node
+python server.py 8731        # from this directory (no dependencies — Python stdlib)
 ```
 
-Then open the printed URL (e.g. `http://localhost:8000`). The view auto-frames
-the plot cluster over the site; drag to look around, scroll to zoom.
+Then open the printed URL. The view auto-frames the plot cluster over the site; drag to
+look around, scroll to zoom. (A plain `python -m http.server` still works for *viewing*;
+admin saves then fall back to browser downloads.)
 
-- **Client view:** `http://localhost:8000/`
-- **Admin alignment view:** `http://localhost:8000/?admin=1` (see below)
+- **Client view:** `http://localhost:8731/?project=<id>`  (default `sample`)
+- **Admin view:** `http://localhost:8731/?admin=1&project=<id>` (see below)
+
+The server binds to **all interfaces (`0.0.0.0`)**, so other devices on the same network
+can open it at `http://<your-lan-ip>:8731/` (the startup banner prints the address). ⚠️
+The save/rename/delete API has **no authentication**, so only run it on a **trusted /
+firewalled** network. To restrict it back to this machine only, start it with
+`HOST=127.0.0.1 python server.py 8731`.
+
+### Projects
+Every site lives in its own directory under `projects/<id>/`. The client chooses which one
+to show with the **`?project=<id>`** URL parameter (default **`sample`**); admin adds a
+**project switcher** in the top header bar. Everything you Export/Save in admin is written
+straight into the active project's directory by `server.py` — no manual folder copying or
+downloads. The admin **⋯** menu creates, duplicates, renames and deletes projects.
 
 ---
 
@@ -80,17 +92,24 @@ the plot cluster over the site; drag to look around, scroll to zoom.
 index.html                  # shell / layout
 styles.css                  # premium dark-mode, gold accent, responsive
 app.js                      # 360° viewer (Three.js) + data join, panel, modal
+server.py                   # tiny stdlib server: static files + /api/save + /api/projects
 README.md                   # this file
 vendor/
   three.module.js           # Three.js (vendored; no build, no CDN)
 tools/
   generate-samples.mjs      # parameterised IRREGULAR-parcel generator (source of truth)
-sample/
-  EleganzaPano360.jpg       # original aerial 360° equirectangular panorama (12000×6000, ~30 MB)
-  EleganzaPano360.web.jpg   # texture copy (4096×2048, ≤ WebGL max-tex-size) — what the app loads
-  plots.svg                 # plot overlay (one irregular polygon per plot, id = plot_id)
-  plots.csv                 # plot data (status / size / price / tour_url / …)
-  alignment.json            # (optional) overlay transform from the admin tool; absent ⇒ generated placement
+projects/
+  <id>/                     # one directory per site (client loads it via ?project=<id>)
+    plots.svg               # plot overlay (one irregular polygon per plot, id = plot_id)
+    plots.csv               # plot data (status / size / price / tour_url / …)
+    alignment.json          # (optional) overlay transform + site branding; absent ⇒ generated placement
+    logo.web.png            # (optional) site/builder logo shown in the client title bar
+    landmarks.json          # (optional) horizon landmarks (banner + pin, optional render image)
+    landmark-*.web.jpg      # (optional) per-landmark render images (shown on hover/tap)
+    amenities.json          # (optional) in-layout amenities (icon pin + details + render image)
+    amenity-*.web.jpg       # (optional) per-amenity full-size render images
+    <pano>.web.jpg          # (optional) background 360° panorama for this project
+  sample/                   # the default project (?project=sample)
 ```
 
 ### Scaling the sample (10 ⇄ 400 plots)
@@ -129,9 +148,45 @@ uses. Open `index.html?admin=1`:
   the client loads it automatically (falling back to the built-in default if absent).
   *Switching panos changes the scene, so re-align the layout to the new pano before
   exporting.*
-- **Save As…:** opens a native save dialog (Chromium `showSaveFilePicker`; falls
-  back to a download elsewhere). Save it as `sample/alignment.json` and the
-  **client view applies it automatically** on load.
+- **Site branding:** set the **Project name**, an optional **Tagline**, and a **🏷 Logo**
+  shown in the client's title bar (in place of the built-in “B91 / Build91”). Type to
+  update the title bar live; upload a logo (auto-resized to a transparent-friendly
+  `sample/logo.web.png`) or **Clear** it. With no logo, the mark shows the project’s
+  initials. It’s stored as `"brand": { "name", "tagline", "logo": { "file" } }` in
+  `alignment.json` (and the logo image is shipped by Export); the client paints the title
+  bar from it, falling back to the `Build91` defaults when absent.
+- **Plot data (live Google Sheet):** by default plot status/details come from the committed
+  `plots.csv`. Tick **“Pull plot status & details from a Google Sheet,”** paste the sheet’s
+  link, and hit **Test** — it fetches the sheet and reports how many rows it found and how
+  many `plot_id`s match your layout. The client then reads the sheet **live** (so the sales
+  team can flip a plot to *sold* in the sheet and it shows without re-publishing), falling
+  back to the committed `plots.csv` if the sheet is ever unreachable. The **↻ Refresh**
+  button (top bar) re-pulls it, and the sync line shows the source
+  (*live sheet* / *cached · sheet unreachable*). **The sheet must be public** — either
+  *Share → “Anyone with the link”* or *File → Share → Publish to web* — and its header row
+  must match `plots.csv` (a `plot_id` column is required). On Save/Export the current sheet
+  is snapshotted into `plots.csv` (the offline fallback). Stored as a `"data"` block in
+  `alignment.json`. *Note: Google caches published sheets ~5 min, so edits aren’t instant.*
+- **Project menu (top header bar, admin only):** the client view is view-only and shows no
+  project controls. In admin, a **switcher** dropdown jumps between saved projects, and a
+  **💾 Save** button — one click writes **all**
+  project files (plots, alignment, landmarks, amenities + images) into the current
+  project's folder, so you never have to open the sidebar's Export/Save… again. The **⋯**
+  menu adds: **New project…** (opens a blank id to build from scratch), **Duplicate as…**
+  (clone this whole site — images included — into a new id), **⬇ Export standalone site…**
+  (see below), **Rename…**, and **Delete…**
+  (type the id to confirm; the folder is moved to a recoverable `projects/.trash/`).
+- **Export standalone site (⋯ menu):** downloads a **self-contained folder** (`<id>-plotmap.zip`
+  → an `<id>/` folder) that runs the **view-only** client on any static host — no `server.py`,
+  no admin, no API. Unzip and upload the folder anywhere (Netlify, S3, a plain web server) and
+  open `index.html`. It bakes a `data/` copy of the project (plots, alignment, landmarks,
+  amenities + images), so it works offline; if the project uses a **live Google Sheet**, that
+  keeps working in the bundle too (public URL), with the baked `plots.csv` as fallback. An
+  **`<iframe>` embed snippet** is copied to your clipboard — paste it into any site to embed the
+  map (replace `YOUR-HOST` with where you uploaded it). *(Needs `server.py` running to build the
+  zip; a plain static server can't.)*
+- **Save As… / Save…:** write straight to the server (`projects/<id>/`) via `server.py`
+  — no dialog, no download. (If the server isn't running they fall back to a download.)
 - **Load… / Reset:** re-import a saved file to keep fine-tuning, or revert to the
   generated placement.
 - **Save working session / Discard:** the full in-progress session — alignment
@@ -158,9 +213,12 @@ up (WYSIWYG) rather than re-deriving its own framing:
   "version": 1,
   "transform": { "tx": 300, "ty": -150, "scale": 0.75, "rotationDeg": 12 },
   "view": { "lonDeg": 206.8, "latDeg": -36.7, "fov": 45 },
-  "opacity": 0.65
+  "opacity": 0.65,
+  "brand": { "name": "Dholera Greens", "tagline": "Plots & Villas", "logo": { "file": "sample/logo.web.png" } }
 }
 ```
+
+(`brand` is optional — the title bar falls back to the built-in `Build91` defaults when it's absent.)
 
 - `transform` is one affine (about the layout's anchor — the centroid of all plot
   vertices, recomputed identically in both views), applied to every vertex
@@ -225,9 +283,10 @@ so you align them with the usual Scale/Rotate/Move tools. (Plot data is typed, b
 design, not OCR'd from the picture.)
 
 **Export site files…** writes `plots.svg`, `plots.csv`, `alignment.json` (and the
-plan image, pano image, and `landmarks.json` when present) into a folder you pick —
-point it at `sample/` and reload the client. (Falls back to individual downloads
-where the directory picker isn't supported.)
+plan image, pano image, brand logo, `landmarks.json`, `amenities.json`, and every
+landmark/amenity render image when present) **to the server** into `projects/<Project ID>/`,
+then reload the client at `/?project=<id>`. (Falls back to individual downloads if the
+server isn't reachable.)
 
 ---
 
@@ -240,7 +299,13 @@ separate.
 
 - **＋ Add landmark** drops a new one at the centre of your current view. Select it in
   the list to edit **Label / Distance / Drive time / Icon** (a category picker:
-  airport, school, hospital, mall, train…).
+  airport, school, hospital, mall, train…), and to attach an optional **render image**.
+- **Render image (optional).** Attach one via **Add image…** (auto-resized to a
+  texture-safe `landmark-<label>.web.jpg`, shipped by Export). A landmark that has a
+  render gets a small 🖼 badge; in the client, **hovering it (desktop)** or **tapping it
+  (mobile)** pops a card with the label, distance/drive-time and a **render thumbnail** —
+  click the thumbnail for the **full-size render** in a lightbox. Landmarks without a
+  render behave exactly as before (banner only, not clickable).
 - **Both the pin and the banner are anchored to fixed directions in the panorama**, so
   they stay on their part of the scene as you look around. **Drag the pin** onto the
   spot it marks; **drag the banner** to position it — the connector line stretches to
@@ -254,7 +319,42 @@ separate.
   swap the background pano, re-place them.
 
 `landmarks.json` shape: `{ "version":1, "landmarks":[ { "label","distance","driveTime",
-"icon", "hotspot":{"lonDeg","latDeg"}, "banner":{"lonDeg","latDeg"} } ] }`.
+"icon", "render":{"file":"sample/…"}, "hotspot":{"lonDeg","latDeg"},
+"banner":{"lonDeg","latDeg"} } ] }` (`render` omitted when no image is attached).
+
+---
+
+## Admin: amenities (`?admin=1` → **Amenities** tab)
+
+Points of interest **inside** the layout — a clubhouse, temple, pool, park, gym… Each
+is a **pin dot** marking the exact spot (like a landmark pin) with the icon + **name**
+label floating just above it (that name *is* its label — no "Plot 123"), the usual
+plot-style details, and an optional **render image** that opens full-screen when clicked. Amenities are **not for sale**, so they have **no status/colour** and
+never appear in the legend or status filter. The admin bar's third tab, **Amenities**,
+keeps this separate from Align and Landmarks.
+
+- **＋ Add amenity** drops a new pin at the centre of your current view. Select it in
+  the list to edit **Name / Icon / Facing / Size / Dimensions / Price / Block / Tour
+  URL / Notes**, and to attach a render.
+- **Icon** is a category picker (clubhouse, pool, gym, garden, playground, temple,
+  parking, shop, school, hospital, gate…).
+- **Add image… / Replace image…** attaches a full-size render; it's auto-resized to a
+  texture-safe `.web.jpg` (named `amenity-<name>.web.jpg`) and shipped by Export.
+- **Drag the pin** onto the spot it marks — placement is pixel-exact and scene-relative
+  (amenities belong to a given pano; re-place them if you swap the background pano).
+- Add **any number**; edit or delete anytime.
+- **Save amenities… / Load…** write/read an `amenities.json`; **Export site files…**
+  also writes it **plus every render image**, and it's kept in the auto-saved working
+  session (render images included).
+- **On the client**, amenities show as clickable icon-pins (on by default; the **🏛️
+  toggle** in the on-screen controls hides/shows them, remembered per browser).
+  Clicking a pin opens an **info card** with the details and a **render thumbnail** —
+  click the thumbnail to view the **full-size render** in a lightbox (Esc / click
+  outside to close).
+
+`amenities.json` shape: `{ "version":1, "amenities":[ { "id","name","icon","facing",
+"size","dimensions","price","block","tour_url","notes", "render":{"file":"sample/…"},
+"hotspot":{"lonDeg","latDeg"} } ] }` (`render` omitted when no image is attached).
 
 ---
 
@@ -264,7 +364,7 @@ One row per plot. Header row **exactly**:
 
 | Column     | Required | Example                                                              | Notes |
 |------------|----------|----------------------------------------------------------------------|-------|
-| `plot_id`    | yes  | `Plot-A101`                                                          | **Must exactly match the SVG shape `id`.** The join key. |
+| `plot_id`    | yes  | `Plot-A101` or `A101`                                                | The join key → the SVG shape `id`. **Prefix-tolerant:** a bare `A101` matches `Plot-A101` (and vice-versa), so a Google Sheet can list plain plot numbers. |
 | `status`     | yes  | `available`                                                          | `available` · `reserved` · `sold` (extendable). Drives colour. |
 | `facing`     | no   | `East Facing`                                                        | Free text, shown in panel. |
 | `size`       | no   | `1,850 sq ft`                                                        | Area. Free text, shown in panel (labelled **Area**). |
@@ -387,27 +487,29 @@ the image. *(If you re-shoot the pano, the camera/north orientation may differ �
 nudge `SITE` so the parcels sit over the developable ground.)*
 
 ### 3. Data: local CSV → Google Sheet (optional)
-For the prototype, edit `sample/plots.csv` directly. To switch to a published
-**Google Sheet** later:
+For the prototype, edit `projects/<id>/plots.csv` directly. To drive plot status live from a
+**Google Sheet** instead, use the admin **Plot data** control (no code edits):
 
-1. Create the sheet with the §schema header row.
-2. **File → Share → Publish to web → CSV**.
-3. Copy the Sheet ID from its URL
-   (`https://docs.google.com/spreadsheets/d/`**`<SHEET_ID>`**`/edit`).
-4. In `app.js` set:
-   ```js
-   USE_GOOGLE_SHEET: true,
-   SHEET_ID: '<your-sheet-id>',
-   SHEET_NAME: 'Sheet1',
-   ```
-   `app.js` then fetches the gviz CSV endpoint and **falls back to the local
-   sample** (non-blocking notice) on failure. Use **Refresh** to re-pull.
+1. Create the sheet with the §schema header row (a `plot_id` column is required). Its values
+   match your layout's plot ids **with or without the `Plot-` prefix** — a sheet listing plain
+   numbers like `133` joins to the `Plot-133` polygon automatically.
+2. Make it public — either **Share → “Anyone with the link”** (viewer) *or*
+   **File → Share → Publish to web**.
+3. In `?admin=1`, Align tab → **Plot data**, tick the toggle, paste the sheet link, and click
+   **Test** (it reports row count + how many `plot_id`s match your layout). **Save**.
 
-> **Privacy caveat:** a published sheet is **publicly readable**. Fine for
-> availability data. For privacy, front it with a small **serverless proxy**
-> (e.g. a Next.js route / edge function) reading the sheet server-side with a
-> service account, returning only needed fields. A marked stub + comment lives
-> in `app.js` (`CONFIG` block); the proxy itself is intentionally **not** built.
+The client reads the sheet **live** (gviz CSV for a share link, the published CSV for a
+Publish-to-web link), keyed by `plot_id`, and **falls back to the committed `plots.csv`** on
+any failure. Use **↻ Refresh** to re-pull; the sync line shows *live sheet* or *cached ·
+sheet unreachable*. The config is stored per-project in `alignment.json`'s `data` block, and
+Save/Export snapshots the current sheet into `plots.csv` as the offline fallback.
+
+> **Privacy caveat:** a public sheet is **publicly readable** — fine for availability data.
+> The browser reads it directly (no server proxy), which is what lets a live sheet keep
+> working inside a standalone/embedded export. For a private sheet you'd need a serverless
+> proxy reading it with a service account; that's intentionally out of scope here.
+> *Scope:* the sheet drives **plots only** — landmarks/amenities stay in their `*.json`
+> files. Google caches published sheets ~5 min, so status changes aren't instant.
 
 ### 4. 3DVista
 Host each tour's HTML5 export (same domain recommended). Set
@@ -429,6 +531,23 @@ above. Empty `tour_url` ⇒ the "Walk through" button is disabled for that plot.
 - **Info panel** — id, status, size, price, block, notes, styled by status.
 - **Deep-linked 3DVista modal** — focus-trapped, Esc / backdrop to close,
   "open in new tab" fallback.
+- **Landmarks** — horizon banners (icon + label + distance + drive time) on a
+  connector line to a placed pin; **📍 toggle** on the client. Optional **render image**
+  per landmark, shown as a card on hover (desktop) / tap (mobile) → lightbox.
+- **Amenities** — in-layout icon-pins (clubhouse, temple, pool…) with a name, the
+  usual details, and a full-size **render image** shown in a lightbox on click; no
+  status/colour; **🏛️ toggle** on the client (on by default).
+- **Site branding** — configurable project name, tagline and logo in the client
+  title bar (admin Align tab), stored in `alignment.json`.
+- **Live Google Sheet plot data** — optionally drive plot status/details from a
+  public Google Sheet (per project, set in the admin Plot data control), read live in
+  the client with the committed `plots.csv` as automatic fallback.
+- **Projects + server-side save** — each site is a `projects/<id>/` directory; the
+  client loads one via `?project=<id>` and admin saves write straight to disk through
+  `server.py` (with a browser-download fallback).
+- **Standalone / embeddable export** — one click packages a project into a self-contained
+  folder (zip) that runs view-only on any static host and embeds via `<iframe>` — no server,
+  no admin, no build step.
 - **Admin alignment tool** (`?admin=1`) — drag/scale/rotate the overlay live,
   save to a JSON file the client view imports; reload it later to fine-tune.
 - **Mobile-first responsive** — info panel becomes a bottom sheet; touch
@@ -441,4 +560,5 @@ above. Empty `tour_url` ⇒ the "Walk through" button is disabled for that plot.
 - Standalone — touches nothing outside this folder; one vendored dependency
   (Three.js), no build step, no CDN.
 - Status colouring is **purely data-driven**; geometry is never hand-edited.
-- Google Sheet path is documented and stubbed (not wired) per the chosen config.
+- **Live Google Sheet** plot data is wired end-to-end (per-project, public sheet,
+  committed-`plots.csv` fallback) — set it up from the admin **Plot data** control.
