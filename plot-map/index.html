@@ -33,6 +33,9 @@
         <button class="btn btn-primary proj-save" id="projSave" type="button"
           title="Save all project files (plots, alignment, landmarks, amenities, images) into this project">💾
           Save</button>
+        <button class="btn btn-ghost proj-settings-btn" id="projSettingsBtn" type="button"
+          title="Project settings: Site branding, Project name, Tagline, Logo" aria-haspopup="dialog"
+          aria-expanded="false">⚙️ Settings</button>
         <button class="btn btn-icon proj-menu-btn" id="projMenuBtn" type="button" aria-haspopup="true"
           aria-expanded="false" title="Project actions">⋯</button>
         <div class="proj-menu" id="projMenu" role="menu" hidden>
@@ -43,6 +46,31 @@
             standalone site…</button>
           <button type="button" role="menuitem" data-act="rename">Rename…</button>
           <button type="button" role="menuitem" data-act="delete" class="is-danger">Delete…</button>
+        </div>
+        <!-- Project settings popover: Site branding, Name, Tagline, Logo -->
+        <div class="proj-settings-popover" id="projSettingsPopover" role="dialog" aria-label="Project Settings" hidden>
+          <div class="proj-settings-head">
+            <div>
+              <strong>Project Settings</strong>
+              <p class="proj-settings-sub">Site branding &amp; header details</p>
+            </div>
+            <button class="btn btn-icon proj-settings-close" id="projSettingsClose" type="button" aria-label="Close settings">×</button>
+          </div>
+          <div class="ax-brand">
+            <label class="ax-brand-field">Project name
+              <input type="text" id="axBrandName" placeholder="e.g. Dholera Greens" maxlength="60" /></label>
+            <label class="ax-brand-field">Tagline
+              <input type="text" id="axBrandTagline" placeholder="e.g. Interactive Plot Map" maxlength="60" /></label>
+            <div class="ax-brand-logo">
+              <button class="btn btn-ghost" id="axBrandLogo" type="button"
+                title="Upload a builder/site logo shown in the title bar">🏷 Logo…</button>
+              <input type="file" id="axBrandLogoFile" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*"
+                hidden />
+              <span class="ax-brand-logo-name" id="axBrandLogoName">no logo</span>
+              <button class="btn btn-ghost ax-brand-logo-clear" id="axBrandLogoClear" type="button" title="Remove the logo"
+                hidden>Clear</button>
+            </div>
+          </div>
         </div>
         <!-- inline naming / confirm row (reused by new / duplicate / rename / delete) -->
         <div class="proj-name" id="projName" hidden>
@@ -121,38 +149,6 @@
         <button class="ax-modebtn" id="axModeMove" type="button" title="Drag to reposition the whole layout">Move
           layout</button>
       </div>
-      <div class="ax-brand">
-        <p class="ax-brand-head">Site branding <span>· shown in the client title bar</span></p>
-        <label class="ax-brand-field">Project name
-          <input type="text" id="axBrandName" placeholder="e.g. Dholera Greens" maxlength="60" /></label>
-        <label class="ax-brand-field">Tagline
-          <input type="text" id="axBrandTagline" placeholder="e.g. Interactive Plot Map" maxlength="60" /></label>
-        <div class="ax-brand-logo">
-          <button class="btn btn-ghost" id="axBrandLogo" type="button"
-            title="Upload a builder/site logo shown in the title bar">🏷 Logo…</button>
-          <input type="file" id="axBrandLogoFile" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*"
-            hidden />
-          <span class="ax-brand-logo-name" id="axBrandLogoName">no logo</span>
-          <button class="btn btn-ghost ax-brand-logo-clear" id="axBrandLogoClear" type="button" title="Remove the logo"
-            hidden>Clear</button>
-        </div>
-      </div>
-      <div class="ax-data">
-        <p class="ax-brand-head">Plot data <span>· live status from a Google Sheet</span></p>
-        <label class="ax-data-toggle"><input type="checkbox" id="axSheetOn" /> Pull plot status &amp; details from a
-          Google Sheet</label>
-        <div class="ax-data-body" id="axSheetBody" hidden>
-          <label class="ax-brand-field">Sheet link
-            <input type="text" id="axSheetUrl" placeholder="Paste the Google Sheet share / “Publish to web” link"
-              spellcheck="false" /></label>
-          <div class="ax-data-actions">
-            <button class="btn btn-ghost" id="axSheetTest" type="button" title="Fetch the sheet and check it">Test</button>
-            <span class="ax-data-note" id="axSheetMsg">The sheet must be public — Share → “Anyone with the link”, or
-              File → Share → Publish to web. Header row must match <code>plots.csv</code> (needs a
-              <code>plot_id</code> column).</span>
-          </div>
-        </div>
-      </div>
       <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
         Import / Trace plots…</button>
       <div class="ax-pano">
@@ -196,9 +192,6 @@
       </label>
       <div class="adminbar-actions">
         <button class="btn btn-ghost" id="axReset" type="button">Reset</button>
-        <button class="btn btn-ghost" id="axLoad" type="button">Load…</button>
-        <input type="file" id="axFile" accept="application/json,.json" hidden />
-        <button class="btn btn-primary" id="axSave" type="button">Save As…</button>
       </div>
     </div><!-- /axTabAlign -->
 
@@ -210,11 +203,6 @@
       <button class="btn btn-import" id="axLmAdd" type="button">＋ Add landmark</button>
       <p class="ax-lm-empty" id="axLmEmpty">No landmarks yet.</p>
       <ul class="ax-lm-list" id="axLmList" aria-label="Landmarks"></ul>
-      <div class="adminbar-actions">
-        <button class="btn btn-ghost" id="axLmLoad" type="button">Load…</button>
-        <input type="file" id="axLmFile" accept="application/json,.json" hidden />
-        <button class="btn btn-primary" id="axLmSave" type="button">Save landmarks…</button>
-      </div>
     </div><!-- /axTabLandmarks -->
 
     <div class="ax-tab" id="axTabAmenities" hidden>
@@ -225,29 +213,14 @@
       <button class="btn btn-import" id="axAmAdd" type="button">＋ Add amenity</button>
       <p class="ax-lm-empty" id="axAmEmpty">No amenities yet.</p>
       <ul class="ax-lm-list" id="axAmList" aria-label="Amenities"></ul>
-      <div class="adminbar-actions">
-        <button class="btn btn-ghost" id="axAmLoad" type="button">Load…</button>
-        <input type="file" id="axAmFile" accept="application/json,.json" hidden />
-        <button class="btn btn-primary" id="axAmSave" type="button">Save amenities…</button>
-      </div>
     </div><!-- /axTabAmenities -->
 
-    <div class="adminbar-actions">
-      <button class="btn btn-ghost" id="axExport" type="button"
-        title="Write plots.svg + plots.csv + alignment.json (+ plan/pano/logo images + landmarks.json + amenities.json &amp; all render images) into a folder">⤓
-        Export site files…</button>
-    </div>
     <div class="adminbar-actions ax-session">
-      <button class="btn btn-ghost" id="axSessionSave" type="button"
-        title="Save the whole in-progress session — traced plots, plan image and alignment — in this browser so a reload or crash won't lose it">⟳
-        Save working session</button>
       <button class="btn btn-ghost" id="axSessionClear" type="button"
-        title="Discard the working session stored in this browser">Discard</button>
+        title="Discard the working session stored in this browser">Discard session</button>
     </div>
     <p class="adminbar-sess" id="axSessionStatus" aria-live="polite">Work auto-saves in this browser as you go.</p>
-    <p class="adminbar-foot" id="axStatus">Drag/scale/rotate, then <strong>Save file</strong> → drop it in
-      <code>sample/alignment.json</code> for the client view.
-    </p>
+    <p class="adminbar-foot" id="axStatus">Drag/scale/rotate, then click <strong>Save</strong> in the top bar to save all changes.</p>
   </section>
 
   <!-- ─── Info panel ──────────────────────────────────────────────────────── -->
@@ -358,6 +331,22 @@
         <p class="trace-dxflayer" id="traceDxfLayer" hidden>Layer:
           <select id="traceLayerSel"></select>
         </p>
+        <div class="ax-data">
+          <p class="ax-brand-head">Plot data <span>· live status from a Google Sheet</span></p>
+          <label class="ax-data-toggle"><input type="checkbox" id="axSheetOn" /> Pull plot status &amp; details from a
+            Google Sheet</label>
+          <div class="ax-data-body" id="axSheetBody" hidden>
+            <label class="ax-brand-field">Sheet link
+              <input type="text" id="axSheetUrl" placeholder="Paste the Google Sheet share / “Publish to web” link"
+                spellcheck="false" /></label>
+            <div class="ax-data-actions">
+              <button class="btn btn-ghost" id="axSheetTest" type="button" title="Fetch the sheet and check it">Test</button>
+              <span class="ax-data-note" id="axSheetMsg">The sheet must be public — Share → “Anyone with the link”, or
+                File → Share → Publish to web. Header row must match <code>plots.csv</code> (needs a
+                <code>plot_id</code> column).</span>
+            </div>
+          </div>
+        </div>
         <p class="trace-count" id="traceCount">0 plots</p>
         <ul class="trace-list" id="traceList" aria-label="Captured plots"></ul>
       </aside>

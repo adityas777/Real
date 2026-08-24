@@ -44,7 +44,7 @@ const $ = (id) => document.getElementById(id);
 const els = {
   stage: $('stage'), pano: $('pano'), panoHint: $('panoHint'),
   brandMark: $('brandMark'), brandName: $('brandName'), brandTagline: $('brandTagline'),
-  proj: $('proj'), projSelect: $('projSelect'), projTools: $('projTools'), projSave: $('projSave'), projMenuBtn: $('projMenuBtn'), projMenu: $('projMenu'),
+  proj: $('proj'), projSelect: $('projSelect'), projTools: $('projTools'), projSave: $('projSave'), projSettingsBtn: $('projSettingsBtn'), projSettingsPopover: $('projSettingsPopover'), projSettingsClose: $('projSettingsClose'), projMenuBtn: $('projMenuBtn'), projMenu: $('projMenu'),
   projName: $('projName'), projNameInput: $('projNameInput'), projNameOk: $('projNameOk'), projNameCancel: $('projNameCancel'), projNameHint: $('projNameHint'),
   axBrandName: $('axBrandName'), axBrandTagline: $('axBrandTagline'), axBrandLogo: $('axBrandLogo'), axBrandLogoFile: $('axBrandLogoFile'), axBrandLogoName: $('axBrandLogoName'), axBrandLogoClear: $('axBrandLogoClear'),
   axSheetOn: $('axSheetOn'), axSheetBody: $('axSheetBody'), axSheetUrl: $('axSheetUrl'), axSheetTest: $('axSheetTest'), axSheetMsg: $('axSheetMsg'),
@@ -362,7 +362,7 @@ async function setPanoFromFile(file) {
   swapPano(panoTextureFromSource(c));
   state.panoBlob = blob; state.panoName = name; state.panoImage = { file: `sample/${name}` };
   updatePanoName(); onAlignmentChanged();
-  setAxStatus(`Background pano set to <code>${name}</code>${scale < 1 ? ` (resized to ${W}×${H} for the browser)` : ''}. <strong>Export site files…</strong> to ship it with the client.`);
+  setAxStatus(`Background pano set to <code>${name}</code>${scale < 1 ? ` (resized to ${W}×${H} for the browser)` : ''}. Click <strong>Save</strong> in the top bar to commit it.`);
 }
 function updatePanoName() {
   if (!els.axPanoName) return;
@@ -418,7 +418,7 @@ async function setBrandLogo(file) {
   if (state.brand._url) { try { URL.revokeObjectURL(state.brand._url); } catch {} state.brand._url = null; }
   state.brand.logoBlob = out.blob; state.brand.logo = 'sample/logo.web.png'; state.brand.logoName = 'logo.web.png';
   applyBrand(); onAlignmentChanged();
-  setAxStatus(`Logo set (${out.W}×${out.H}). <strong>Export site files…</strong> to ship it with the client.`);
+  setAxStatus(`Logo set (${out.W}×${out.H}). Click <strong>Save</strong> in the top bar to commit it.`);
 }
 function clearBrandLogo() {
   if (state.brand._url) { try { URL.revokeObjectURL(state.brand._url); } catch {} state.brand._url = null; }
@@ -480,16 +480,49 @@ async function initProjectBar() {
   if (els.projTools) {
     els.projTools.hidden = false;
     els.projSave?.addEventListener('click', headerSave);
+    els.projSettingsBtn?.addEventListener('click', toggleProjSettings);
+    els.projSettingsClose?.addEventListener('click', closeProjSettings);
     els.projMenuBtn.addEventListener('click', toggleProjMenu);
     els.projMenu.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => onProjAction(b.dataset.act)));
     els.projNameOk.addEventListener('click', commitProjName);
     els.projNameInput.addEventListener('input', validateProjName);
     els.projNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') commitProjName(); if (e.key === 'Escape') closeProjName(); });
     els.projNameCancel.addEventListener('click', closeProjName);
-    document.addEventListener('click', (e) => { if (!els.projTools.contains(e.target)) { els.projMenu.hidden = true; els.projMenuBtn.setAttribute('aria-expanded', 'false'); } });
+    document.addEventListener('click', (e) => {
+      if (!els.projTools.contains(e.target)) {
+        els.projMenu.hidden = true;
+        els.projMenuBtn.setAttribute('aria-expanded', 'false');
+        closeProjSettings();
+      }
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeProjSettings(); });
   }
 }
-function toggleProjMenu() { const open = els.projMenu.hidden; els.projMenu.hidden = !open; els.projMenuBtn.setAttribute('aria-expanded', String(open)); if (open) closeProjName(); }
+function toggleProjSettings() {
+  if (!els.projSettingsPopover) return;
+  const open = els.projSettingsPopover.hidden;
+  els.projSettingsPopover.hidden = !open;
+  els.projSettingsBtn?.setAttribute('aria-expanded', String(open));
+  if (open) {
+    els.projMenu.hidden = true;
+    els.projMenuBtn.setAttribute('aria-expanded', 'false');
+    closeProjName();
+    updateBrandAdminUI();
+  }
+}
+function closeProjSettings() {
+  if (els.projSettingsPopover) els.projSettingsPopover.hidden = true;
+  els.projSettingsBtn?.setAttribute('aria-expanded', 'false');
+}
+function toggleProjMenu() {
+  const open = els.projMenu.hidden;
+  els.projMenu.hidden = !open;
+  els.projMenuBtn.setAttribute('aria-expanded', String(open));
+  if (open) {
+    closeProjName();
+    closeProjSettings();
+  }
+}
 let projAction = null;   // 'new' | 'saveas' | 'rename' | 'delete'
 function onProjAction(act) {
   els.projMenu.hidden = true; els.projMenuBtn.setAttribute('aria-expanded', 'false');
@@ -1073,7 +1106,7 @@ function sheetData() {
   const url = (state.sheet.url || '').trim(); if (!url) return null;
   return { source: state.sheet.enabled ? 'sheet' : 'file', sheet: { url, ...(state.sheet.gid ? { gid: state.sheet.gid } : {}) } };
 }
-function onAlignmentChanged() { if (!state.admin) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify(alignmentData())); } catch {} scheduleSessionSave(); setAxStatus('Unsaved changes — click Save file to export.'); }
+function onAlignmentChanged() { if (!state.admin) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify(alignmentData())); } catch {} scheduleSessionSave(); setAxStatus('Unsaved changes — click <strong>Save</strong> in the top bar to apply.'); }
 function setAxStatus(msg) { if (els.axStatus) els.axStatus.innerHTML = msg; }
 
 // ─── Working session (full in-browser snapshot of in-progress admin work) ─────
@@ -1269,17 +1302,26 @@ async function fetchReferencedImages(haveNames) {
 }
 // one-click export of the whole site to the server-side project directory
 async function exportSite() {
-  if (!state.geom.length && !state.landmarks.length && !state.amenities.length) { setAxStatus('Nothing to save yet — Import / Trace plots, or add landmarks / amenities first.'); return false; }
+  const hasGeom = state.geom.length > 0;
+  const hasLandmarks = state.landmarks.length > 0;
+  const hasAmenities = state.amenities.length > 0;
+  const hasPano = !!(state.panoBlob || state.panoImage?.file);
+  const hasBrand = !!(state.brand?.name || state.brand?.tagline || state.brand?.logo || state.brand?.logoBlob);
+  const hasPlan = !!(trace.planBlob || state.planBlob || trace.objURL || state.groundImage?.file);
+
+  if (!hasGeom && !hasLandmarks && !hasAmenities && !hasPano && !hasBrand && !hasPlan) {
+    setAxStatus('Nothing to save yet — import/trace plots, set a panorama, or add landmarks / amenities first.');
+    return false;
+  }
   const planBlob = trace.planBlob || state.planBlob || (trace.objURL ? await (await fetch(trace.objURL)).blob() : null);
   const planName = trace.srcName || state.planName || 'plan.web.png';
   const panoBlob = state.panoBlob, panoName = state.panoName || baseName(state.panoImage?.file || '');
   // When a live sheet is the source, snapshot it into plots.csv so the committed file stays
   // a current fallback (and is what a standalone bundle bakes in); fall back to state.rows.
-  let plotsCsv = buildPlotsCSV();
-  if (state.sheet.enabled && state.sheet.url) { const snap = await fetchSheetRows().catch(() => null); if (snap && snap.size) plotsCsv = buildPlotsCSV(snap); }
+  let plotsCsv = hasGeom ? buildPlotsCSV() : '';
+  if (hasGeom && state.sheet.enabled && state.sheet.url) { const snap = await fetchSheetRows().catch(() => null); if (snap && snap.size) plotsCsv = buildPlotsCSV(snap); }
   const files = [
-    ['plots.svg', buildPlotsSVG(), 'image/svg+xml'],
-    ['plots.csv', plotsCsv, 'text/csv'],
+    ...(hasGeom ? [['plots.svg', buildPlotsSVG(), 'image/svg+xml'], ['plots.csv', plotsCsv, 'text/csv']] : []),
     ['alignment.json', JSON.stringify(alignmentData(), null, 2), 'application/json'],
     ...(planBlob ? [[baseName(planName), planBlob, 'image/png']] : []),
     ...(panoBlob && panoName ? [[panoName, panoBlob, 'image/jpeg']] : []),
@@ -1295,7 +1337,9 @@ async function exportSite() {
     const have = new Set(files.map((f) => f[0]));
     files.push(...await fetchReferencedImages(have));
   }
-  return await saveToProject(files, tagFiles(files));
+  const ok = await saveToProject(files, tagFiles(files));
+  if (ok) saveSession(true);
+  return ok;
 }
 // header "💾 Save" — write ALL project files to the current project dir, with inline feedback
 async function headerSave() {
@@ -1349,8 +1393,8 @@ function wireAdmin() {
   els.axRotNum.addEventListener('change', () => setRotation(els.axRotNum.value));
   els.axOpacity.addEventListener('input', () => { state.overlayOpacity = parseFloat(els.axOpacity.value); els.axOpacityVal.textContent = `${Math.round(state.overlayOpacity * 100)}%`; colorPlots(); requestRender(); onAlignmentChanged(); });
   els.axReset.addEventListener('click', () => { state.transform = IDENTITY(); state.savedView = null; state.overlayOpacity = 0.5; updateAdminUI(); colorPlots(); computeHome(); Object.assign(state.view, state.home); requestRender(true); try { localStorage.removeItem(DRAFT_KEY); } catch {} clearSession(); setAxStatus('Reset to generated placement.'); });
-  els.axSessionSave.addEventListener('click', () => saveSession(true));
-  els.axSessionClear.addEventListener('click', clearSession);
+  els.axSessionSave?.addEventListener('click', () => saveSession(true));
+  els.axSessionClear?.addEventListener('click', clearSession);
   els.axPano.addEventListener('click', () => els.axPanoFile.click());
   els.axPanoFile.addEventListener('change', () => { const f = els.axPanoFile.files?.[0]; if (f) setPanoFromFile(f); els.axPanoFile.value = ''; });
   els.axBrandName?.addEventListener('input', () => { state.brand.name = els.axBrandName.value; applyBrand(); onAlignmentChanged(); });
@@ -1367,18 +1411,18 @@ function wireAdmin() {
   els.axTabBtnLandmarks.addEventListener('click', () => setAdminTab('landmarks'));
   els.axTabBtnAmenities?.addEventListener('click', () => setAdminTab('amenities'));
   els.axLmAdd.addEventListener('click', addLandmark);
-  els.axLmSave.addEventListener('click', saveLandmarksAs);
-  els.axLmLoad.addEventListener('click', () => els.axLmFile.click());
-  els.axLmFile.addEventListener('change', async () => { const f = els.axLmFile.files?.[0]; if (f) { try { setLandmarks(parseLandmarks(JSON.parse(await f.text()))); onLandmarksChanged(); setAxStatus(`Loaded ${state.landmarks.length} landmark(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that landmarks file (${err.message}).`); } } els.axLmFile.value = ''; });
+  els.axLmSave?.addEventListener('click', saveLandmarksAs);
+  els.axLmLoad?.addEventListener('click', () => els.axLmFile?.click());
+  els.axLmFile?.addEventListener('change', async () => { const f = els.axLmFile.files?.[0]; if (f) { try { setLandmarks(parseLandmarks(JSON.parse(await f.text()))); onLandmarksChanged(); setAxStatus(`Loaded ${state.landmarks.length} landmark(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that landmarks file (${err.message}).`); } } els.axLmFile.value = ''; });
   els.axAmAdd?.addEventListener('click', addAmenity);
   els.axAmSave?.addEventListener('click', saveAmenitiesAs);
-  els.axAmLoad?.addEventListener('click', () => els.axAmFile.click());
+  els.axAmLoad?.addEventListener('click', () => els.axAmFile?.click());
   els.axAmFile?.addEventListener('change', async () => { const f = els.axAmFile.files?.[0]; if (f) { try { setAmenities(parseAmenities(JSON.parse(await f.text()))); onAmenitiesChanged(); setAxStatus(`Loaded ${state.amenities.length} amenit${state.amenities.length === 1 ? 'y' : 'ies'} from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that amenities file (${err.message}).`); } } els.axAmFile.value = ''; });
   setAdminTab('align');
-  els.axSave.addEventListener('click', saveAlignmentAs);
-  els.axExport.addEventListener('click', exportSite);
-  els.axLoad.addEventListener('click', () => els.axFile.click());
-  els.axFile.addEventListener('change', async () => {
+  els.axSave?.addEventListener('click', saveAlignmentAs);
+  els.axExport?.addEventListener('click', exportSite);
+  els.axLoad?.addEventListener('click', () => els.axFile?.click());
+  els.axFile?.addEventListener('change', async () => {
     const f = els.axFile.files?.[0]; if (!f) return;
     try {
       const a = parseAlignment(JSON.parse(await f.text()));
@@ -1661,10 +1705,11 @@ function finishTrace() {
   if (trace.isRaster && trace.objURL) { state.planBlob = trace.planBlob; state.planName = trace.srcName; loadGroundImage(trace.objURL, state.groundImage?.opacity ?? 1, `sample/${trace.srcName}`); els.axPlanRow.hidden = false; els.axPlanOpacity.value = 1; els.axPlanOpacityVal.textContent = '100%'; }
   else { state.planBlob = null; state.planName = null; removeGround(); els.axPlanRow.hidden = true; }
   applyData(); requestRender(true); onAlignmentChanged();
-  setAxStatus(`Imported ${state.geom.length} plots${trace.isRaster ? ' + plan image' : ''}. Align, fill data, then <strong>Export site files…</strong>${trace.isRaster ? ' (writes the resized plan image too)' : ''}.`);
+  setAxStatus(`Imported ${state.geom.length} plots${trace.isRaster ? ' + plan image' : ''}. Align, fill data, then click <strong>Save</strong> in the top bar${trace.isRaster ? ' (saves the resized plan image too)' : ''}.`);
 }
 async function openTrace() {
   trace.open = true; els.traceWin.classList.add('open'); els.traceWin.setAttribute('aria-hidden', 'false');
+  updateSheetAdminUI();
   if (state.geom.length) await loadCurrentLayoutIntoTrace();   // default to editing the live layout (price/status/retrace)
   requestAnimationFrame(() => { resizeTraceCanvas(); if (trace.W) fitTrace(); drawTrace(); });
 }
@@ -1934,7 +1979,7 @@ async function setLandmarkRender(lm, file) {
   const slug = ((lm.label || '').trim() || lm.id).toLowerCase().replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '') || lm.id;
   lm.renderBlob = out.blob; lm.render = `sample/landmark-${slug}.web.jpg`;
   rebuildLandmarkDOM(); refreshLmList(); onLandmarksChanged();      // rebuild so the banner gains its hover/tap card
-  setAxStatus(`Render set for <strong>${esc(lm.label || lm.id)}</strong> (${out.W}×${out.H}). It shows on hover/tap in the client. <strong>Export site files…</strong> to ship it.`);
+  setAxStatus(`Render set for <strong>${esc(lm.label || lm.id)}</strong> (${out.W}×${out.H}). It shows on hover/tap in the client. Click <strong>Save</strong> in the top bar to commit it.`);
 }
 function refreshLmList() {
   if (!els.axLmList) return;
@@ -2132,7 +2177,7 @@ async function setAmenityRender(am, file) {
   const name = `amenity-${slug}.web.jpg`;
   am.renderBlob = out.blob; am.render = `sample/${name}`;
   refreshAmList(); onAmenitiesChanged();
-  setAxStatus(`Render set for <strong>${esc(am.name || am.id)}</strong> (${out.W}×${out.H}). <strong>Export site files…</strong> to ship it.`);
+  setAxStatus(`Render set for <strong>${esc(am.name || am.id)}</strong> (${out.W}×${out.H}). Click <strong>Save</strong> in the top bar to commit it.`);
 }
 function refreshAmList() {
   if (!els.axAmList) return;

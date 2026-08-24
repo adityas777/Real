@@ -140,6 +140,19 @@ body {
 .proj-tools { position: relative; display: flex; align-items: center; gap: 6px; }
 .proj-save { padding: 6px 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .proj-save:disabled { opacity: .7; cursor: default; }
+.proj-settings-btn { padding: 6px 10px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.proj-settings-btn[aria-expanded="true"] { background: var(--gold-dim); border-color: var(--gold-soft); color: var(--gold); }
+.proj-settings-popover {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 52; width: 290px; max-width: 88vw;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+  box-shadow: 0 16px 40px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.05);
+  display: flex; flex-direction: column; gap: 10px; animation: pop .18s var(--ease);
+}
+.proj-settings-popover[hidden] { display: none; }
+.proj-settings-head { display: flex; align-items: flex-start; justify-content: space-between; border-bottom: 1px solid var(--line-soft); padding-bottom: 8px; }
+.proj-settings-head strong { font-size: 13.5px; color: var(--text); letter-spacing: .2px; }
+.proj-settings-sub { margin: 2px 0 0; font-size: 11px; color: var(--text-mute); }
+.proj-settings-close { width: 24px; height: 24px; font-size: 14px; }
 .proj-menu-btn { width: 30px; height: 30px; font-size: 16px; line-height: 1; }
 .proj-menu {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 50; min-width: 180px;
@@ -672,8 +685,9 @@ body {
 .trace-hint { color: var(--text-dim); font-size: 12px; flex: 1; min-width: 0; }
 .trace-hint.is-warn { color: #e3b341; }
 .tracewin-actions { display: flex; align-items: center; gap: 8px; }
-.tracewin-body { flex: 1; display: grid; grid-template-columns: 248px 1fr; min-height: 0; }
+.tracewin-body { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
 .trace-tools { border-right: 1px solid var(--line); background: var(--panel); padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.trace-tools .ax-data { margin: 0; }
 .trace-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--text-dim); }
 .trace-row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--gold); cursor: pointer; }
 .trace-row output { grid-row: 1; grid-column: 2; color: var(--text); font-variant-numeric: tabular-nums; }
