@@ -757,8 +757,8 @@ function renderLoop() {
   if (!three) return;
   if (plotsDirty) { plotsDirty = false; rebuildPlots(); }
 
-  // Slow motion auto-pan (left to right) when enabled and user is idle
-  if (state.autoPan && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
+  // Slow motion auto-pan (left to right) when enabled in client view (!state.admin) and user is idle
+  if (state.autoPan && !state.admin && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
     state.view.lon = (state.view.lon + 0.00035) % TAU;
   }
 
