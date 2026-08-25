@@ -83,6 +83,14 @@ const els = {
   traceSnap: $('traceSnap'), traceUndo: $('traceUndo'), traceClear: $('traceClear'),
   traceDxfLayer: $('traceDxfLayer'), traceLayerSel: $('traceLayerSel'), traceCount: $('traceCount'), traceList: $('traceList'),
   traceStage: $('traceStage'), traceCanvas: $('traceCanvas'), traceEmpty: $('traceEmpty'),
+  // custom menu admin + client elements
+  projCustomMenuBtn: $('projCustomMenuBtn'), projCustomDropdown: $('projCustomDropdown'),
+  catLevelVirtualTour: $('catLevelVirtualTour'), catVtNav: $('catVtNav'), catVtBackBtn: $('catVtBackBtn'),
+  adminLocationIntelModal: $('adminLocationIntelModal'), adminWalkthroughModal: $('adminWalkthroughModal'),
+  adminVirtualTourModal: $('adminVirtualTourModal'), adminGalleryModal: $('adminGalleryModal'),
+  adminBrochureModal: $('adminBrochureModal'), adminContactModal: $('adminContactModal'),
+  clientVideoModal: $('clientVideoModal'), clientGalleryModal: $('clientGalleryModal'),
+  clientBrochureModal: $('clientBrochureModal'), clientContactModal: $('clientContactModal'),
 };
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -141,6 +149,23 @@ const state = {
   savedView: null,                      // camera view stored in the alignment (WYSIWYG); null ⇒ auto-frame
   adminMode: 'look',                    // 'look' = drag rotates view; 'move' = drag repositions layout
   selectedCategory: 'ALL', autoPan: true, lastUserTouch: Date.now(), audioCtx: null, audioPlaying: false,
+  menuConfig: {
+    location_intel: { enabled: false, videoUrl: '', videoName: '', videoBlob: null },
+    walkthrough_video: { enabled: false, videoUrl: '', videoName: '', videoBlob: null },
+    virtual_tour: { enabled: false, items: [] },
+    gallery: { enabled: false, images: [] },
+    brochure: { enabled: false, pdfUrl: '', pdfName: '', pdfBlob: null },
+    contact_us: {
+      enabled: true,
+      image: '',
+      imageName: '',
+      imageBlob: null,
+      title: 'Anandam Eleganza - Premium Villa Plots',
+      about: 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh',
+      phone: '+91 7389705477',
+      email: 'anandameleganza@gmail.com'
+    }
+  },
 };
 let three = null, plotsDirty = false;
 const labelCache = new Map();           // id → reusable label Sprite (avoid texture churn on rebuild)
@@ -151,6 +176,7 @@ const labelCache = new Map();           // id → reusable label Sprite (avoid t
 const dataUrl = (name) => `${state.assetBase}/${name}?t=${Date.now()}`;
 function assetUrl(storedPath, ver) {
   if (!storedPath) return '';
+  if (/^(https?:|\/\/|data:|blob:)/i.test(storedPath)) return storedPath;
   const u = `${state.assetBase}/${baseName(storedPath)}`;
   return ver ? `${u}?v=${encodeURIComponent(ver)}` : u;
 }
@@ -742,8 +768,7 @@ function computeHome() {
   state.home.lon = Math.atan2(-mean.x, mean.z);
   // True Nadir Top-Down Bird's-Eye View (pitch -87° facing straight down at layout center)
   state.home.lat = -1.50;
-  let maxAng = 0; dirs.forEach((d) => { maxAng = Math.max(maxAng, mean.angleTo(d)); });
-  state.home.fov = Math.max(98, Math.min(FOV_MAX, maxAng * 2 * 180 / Math.PI * 1.6));
+  state.home.fov = FOV_MAX; // Max zoomed out (120°)
 }
 
 // ─── Render loop (continuous rAF; rebuilds geometry first if marked dirty) ────
@@ -887,7 +912,7 @@ function wireViewControls() {
         applyCategoryFilter('ALL');
       } else if (act === 'aerial') {
         computeHome();
-        animateCameraTo(state.home.lon, state.home.lat, Math.max(state.home.fov, 92));
+        animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
         state.autoPan = true;
       } else {
         const title = btn.textContent.replace('›', '').trim();
@@ -950,6 +975,30 @@ function animateCameraTo(targetLon, targetLat, targetFov = null) {
   }, 16);
 }
 
+function isLandmarkMatchCategory(lm, cat) {
+  if (!lm || !cat || cat === 'ALL') return true;
+  const c = String(cat).toUpperCase();
+  const icon = String(lm.icon || '').toLowerCase();
+  const label = String(lm.label || lm.name || '').toLowerCase();
+
+  // 1. Check icon category mapping
+  const grp = ICON_CATEGORIES.find((g) => g.category.toUpperCase() === c);
+  if (grp && grp.icons.includes(icon)) return true;
+
+  // 2. Keyword fallback on label/name text
+  if (c === 'CONNECTIVITY' && /airport|train|railway|station|metro|bus|highway|road|expressway|flyover|junction/i.test(label)) return true;
+  if (c === 'HEALTHCARE' && /hospital|clinic|pharma|medical|health|care|nursing/i.test(label)) return true;
+  if (c === 'EDUCATION' && /school|college|university|institute|academy|tuition|vidyalaya/i.test(label)) return true;
+  if (c === 'COMMERCIAL' && /mall|market|office|bank|hotel|shop|store|bazaar|complex|plaza|center|centre|hub/i.test(label)) return true;
+  if (c === 'LIFESTYLE' && /restaurant|park|lake|stadium|club|pool|gym|garden|playground|court|theatre|theater|resort|cinema|movie/i.test(label)) return true;
+  if (c === 'TEMPLE' && /temple|mandir|church|mosque|gurudwara|shrine|dargah|prayer/i.test(label)) return true;
+
+  // 3. Direct landmark category property check
+  if (lm.category && String(lm.category).toUpperCase() === c) return true;
+
+  return false;
+}
+
 function applyCategoryFilter(cat) {
   state.selectedCategory = cat || 'ALL';
   if (els.catNav) {
@@ -962,26 +1011,27 @@ function applyCategoryFilter(cat) {
   state.showLandmarks = true;
   applyLandmarkVisibility();
 
+  // Ensure DOM elements are initialized
+  if (lmDom.size === 0 && state.landmarks.length > 0) {
+    rebuildLandmarkDOM();
+  }
+
   const matched = [];
   state.landmarks.forEach((lm) => {
+    const isMatch = isLandmarkMatchCategory(lm, state.selectedCategory);
     const d = lmDom.get(lm.id);
-    if (!d) return;
-
-    if (state.selectedCategory === 'ALL') {
-      d.banner.classList.remove('is-dimmed', 'is-cat-matched');
-      d.pin.classList.remove('is-dimmed', 'is-cat-matched');
-      d.line.classList.remove('is-dimmed', 'is-cat-matched');
-    } else {
-      const grp = ICON_CATEGORIES.find((g) => g.icons.includes(lm.icon));
-      const isMatch = grp && grp.category === state.selectedCategory;
-      if (isMatch) {
+    if (d) {
+      if (state.selectedCategory === 'ALL') {
+        d.banner.classList.remove('is-dimmed', 'is-cat-matched');
+        d.pin.classList.remove('is-dimmed', 'is-cat-matched');
+        d.line.classList.remove('is-dimmed', 'is-cat-matched');
+      } else if (isMatch) {
         d.banner.classList.add('is-cat-matched');
         d.banner.classList.remove('is-dimmed');
         d.pin.classList.add('is-cat-matched');
         d.pin.classList.remove('is-dimmed');
         d.line.classList.add('is-cat-matched');
         d.line.classList.remove('is-dimmed');
-        matched.push(lm);
       } else {
         d.banner.classList.add('is-dimmed');
         d.banner.classList.remove('is-cat-matched');
@@ -991,20 +1041,35 @@ function applyCategoryFilter(cat) {
         d.line.classList.remove('is-cat-matched');
       }
     }
+    if (isMatch) {
+      matched.push(lm);
+    }
   });
 
   const targetList = state.selectedCategory === 'ALL' ? state.landmarks : matched;
 
   if (targetList.length > 0 && three) {
-    const dirs = targetList.map((l) => dirFromLonLat(l.banner.lon, l.banner.lat));
-    const mean = new THREE.Vector3();
-    dirs.forEach((v) => mean.add(v));
-    mean.divideScalar(dirs.length).normalize();
-    const targetLon = Math.atan2(-mean.x, mean.z);
-    const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
-    animateCameraTo(targetLon, targetLat, 72);
+    const validDirs = [];
+    targetList.forEach((l) => {
+      const pos = l.banner || l.hotspot;
+      if (!pos) return;
+      const lon = pos.lon != null ? pos.lon : (pos.lonDeg != null ? pos.lonDeg : null);
+      const lat = pos.lat != null ? pos.lat : (pos.latDeg != null ? pos.latDeg : null);
+      if (isFinite(lon) && isFinite(lat)) {
+        validDirs.push(dirFromLonLat(lon, lat));
+      }
+    });
+
+    if (validDirs.length > 0) {
+      const mean = new THREE.Vector3();
+      validDirs.forEach((v) => mean.add(v));
+      mean.divideScalar(validDirs.length).normalize();
+      const targetLon = Math.atan2(-mean.x, mean.z);
+      const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
+      animateCameraTo(targetLon, targetLat, 72);
+    }
   } else if (state.selectedCategory !== 'ALL') {
-    showNotice(`No <strong>${esc(state.selectedCategory)}</strong> landmarks saved in this project yet. Add landmarks with airport/train/bus/highway icons in Admin mode and click <strong>Save</strong>.`);
+    showNotice(`No <strong>${esc(state.selectedCategory)}</strong> landmarks saved in this project yet.`);
   }
 }
 
@@ -1279,11 +1344,15 @@ function closePanel() {
 function parseMediaType(url) {
   if (!url) return { type: 'none', url: '' };
   url = String(url).trim();
-  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|watch\?.+&v=))([\w-]{11})/i);
   if (ytMatch) {
     return { type: 'youtube', videoId: ytMatch[1], embedUrl: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0` };
   }
-  if (/\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(url) || url.startsWith('data:image/') || url.startsWith('blob:')) {
+  const vimeoMatch = url.match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+  if (vimeoMatch) {
+    return { type: 'vimeo', videoId: vimeoMatch[1], embedUrl: `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=1` };
+  }
+  if (/\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(url) || url.startsWith('data:image/')) {
     return { type: 'image', url };
   }
   return { type: 'walkthrough', url };
@@ -1356,7 +1425,7 @@ function openModal(media, plotId = '') {
   }
 
   const plotName = plotId ? plotId.replace('Plot-', 'Plot ') : '';
-  const mediaTypeName = type === 'youtube' ? 'YouTube Video' : type === 'image' ? 'Image' : '3D Walkthrough';
+  const mediaTypeName = type === 'youtube' ? 'YouTube Video' : type === 'vimeo' ? 'Vimeo Video' : type === 'image' ? 'Image' : '3D Walkthrough';
   const displayTitle = title ? `${title}${plotName ? ' · ' + plotName : ''}` : `${mediaTypeName}${plotName ? ' · ' + plotName : ''}`;
 
   els.modalTitle.textContent = displayTitle;
@@ -1425,6 +1494,26 @@ async function refresh() { els.refreshBtn.disabled = true; try { const src = awa
 // ─── Alignment: load / save / admin UI ────────────────────────────────────────
 // An alignment = the overlay transform PLUS the camera view, so the client
 // reproduces exactly what the admin set up (WYSIWYG) instead of re-framing.
+function menuConfigData() {
+  const mc = state.menuConfig || {};
+  return {
+    location_intel: { enabled: !!mc.location_intel?.enabled, videoUrl: mc.location_intel?.videoUrl || '', videoName: mc.location_intel?.videoName || '' },
+    walkthrough_video: { enabled: !!mc.walkthrough_video?.enabled, videoUrl: mc.walkthrough_video?.videoUrl || '', videoName: mc.walkthrough_video?.videoName || '' },
+    virtual_tour: { enabled: !!mc.virtual_tour?.enabled, items: Array.isArray(mc.virtual_tour?.items) ? mc.virtual_tour.items : [] },
+    gallery: { enabled: !!mc.gallery?.enabled, images: Array.isArray(mc.gallery?.images) ? mc.gallery.images.map(img => ({ name: img.name, url: img.url })) : [] },
+    brochure: { enabled: !!mc.brochure?.enabled, pdfUrl: mc.brochure?.pdfUrl || '', pdfName: mc.brochure?.pdfName || '' },
+    contact_us: {
+      enabled: !!mc.contact_us?.enabled,
+      image: mc.contact_us?.image || '',
+      imageName: mc.contact_us?.imageName || '',
+      title: mc.contact_us?.title || '',
+      about: mc.contact_us?.about || '',
+      phone: mc.contact_us?.phone || '',
+      email: mc.contact_us?.email || ''
+    }
+  };
+}
+
 function parseAlignment(d) {
   const t = (d && d.transform) ? d.transform : d || {};
   const transform = { tx: +t.tx || 0, ty: +t.ty || 0, scale: +t.scale || 1, rotation: (t.rotationDeg != null ? t.rotationDeg * Math.PI / 180 : +t.rotation || 0) };
@@ -1438,7 +1527,8 @@ function parseAlignment(d) {
   const brand = b ? { name: (b.name || '').toString(), tagline: (b.tagline || '').toString(), logo: (b.logo && b.logo.file) ? b.logo.file : null, _ver: savedAt } : null;
   const dc = d && d.data, sh = dc && dc.sheet;                       // plot-data source (Google Sheet | committed file)
   const data = { enabled: !!(dc && dc.source === 'sheet'), url: (sh && sh.url || '').toString(), gid: (sh && sh.gid != null ? String(sh.gid) : '') };
-  return { transform, view, opacity, groundImage, panoImage, brand, data, savedAt };
+  const menuConfig = d && d.menuConfig ? d.menuConfig : null;
+  return { transform, view, opacity, groundImage, panoImage, brand, data, menuConfig, savedAt };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
   try { const res = await fetch(dataUrl('alignment.json'), { cache: 'no-store' }); if (!res.ok) return null; return parseAlignment(await res.json()); }
@@ -1453,7 +1543,8 @@ function alignmentData() {
     ...(state.groundImage ? { groundImage: { file: state.groundImage.file, opacity: +(+state.groundImage.opacity).toFixed(2) } } : {}),
     ...(state.panoImage ? { panoImage: { file: state.panoImage.file } } : {}),
     ...(brandData() ? { brand: brandData() } : {}),
-    ...(sheetData() ? { data: sheetData() } : {}) };
+    ...(sheetData() ? { data: sheetData() } : {}),
+    ...(menuConfigData() ? { menuConfig: menuConfigData() } : {}) };
 }
 // Serialise the plot-data source (only when a sheet URL has been configured).
 function sheetData() {
@@ -1694,11 +1785,17 @@ async function exportSite() {
     ...(planBlob ? [[baseName(planName), planBlob, 'image/png']] : []),
     ...(panoBlob && panoName ? [[panoName, panoBlob, 'image/jpeg']] : []),
     ...(state.brand.logoBlob && state.brand.logo ? [[baseName(state.brand.logo), state.brand.logoBlob, 'image/png']] : []),
-    ...(state.landmarks.length ? [['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json']] : []),
-    ...(state.amenities.length ? [['amenities.json', JSON.stringify(buildAmenitiesData(), null, 2), 'application/json']] : []),
+    ['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json'],
+    ['amenities.json', JSON.stringify(buildAmenitiesData(), null, 2), 'application/json'],
     // freshly-imported render images (an already-on-disk path has no blob to re-ship)
     ...state.amenities.filter((a) => a.renderBlob && a.render).map((a) => [baseName(a.render), a.renderBlob, 'image/jpeg']),
     ...state.landmarks.filter((l) => l.renderBlob && l.render).map((l) => [baseName(l.render), l.renderBlob, 'image/jpeg']),
+    // custom menu files (videos, pdfs, images)
+    ...(state.menuConfig?.location_intel?.videoBlob ? [[baseName(state.menuConfig.location_intel.videoName || 'location_intel.mp4'), state.menuConfig.location_intel.videoBlob, 'video/mp4']] : []),
+    ...(state.menuConfig?.walkthrough_video?.videoBlob ? [[baseName(state.menuConfig.walkthrough_video.videoName || 'walkthrough.mp4'), state.menuConfig.walkthrough_video.videoBlob, 'video/mp4']] : []),
+    ...(state.menuConfig?.brochure?.pdfBlob ? [[baseName(state.menuConfig.brochure.pdfName || 'brochure.pdf'), state.menuConfig.brochure.pdfBlob, 'application/pdf']] : []),
+    ...(state.menuConfig?.contact_us?.imageBlob ? [[baseName(state.menuConfig.contact_us.imageName || 'contact_bg.png'), state.menuConfig.contact_us.imageBlob, 'image/png']] : []),
+    ...(state.menuConfig?.gallery?.images ? state.menuConfig.gallery.images.filter(img => img.blob).map(img => [baseName(img.name), img.blob, 'image/jpeg']) : []),
   ];
   // saving to a different project → copy over the on-disk images too, so the clone is complete
   if (state.projectId !== BOOT_PROJECT) {
@@ -2579,10 +2676,9 @@ function renderLandmarks() {
   for (const lm of state.landmarks) {
     const d = lmDom.get(lm.id); if (!d) continue;
 
-    // Strict category filtering: if a category is selected and lm icon does not match -> hide completely
+    // Strict category filtering: if a category is selected and lm icon/label does not match -> hide completely
     if (filterCat !== 'ALL') {
-      const grp = ICON_CATEGORIES.find((g) => g.icons.includes(lm.icon));
-      const isMatch = grp && grp.category === filterCat;
+      const isMatch = isLandmarkMatchCategory(lm, filterCat);
       if (!isMatch) {
         d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
         continue;
@@ -2608,7 +2704,15 @@ function applyLandmarkVisibility() {
   if (els.landmarkToggle) { els.landmarkToggle.setAttribute('aria-pressed', String(state.showLandmarks)); els.landmarkToggle.title = state.showLandmarks ? 'Hide landmarks' : 'Show landmarks'; }
   if (visible) renderLandmarks();
 }
-function onLandmarksChanged() { if (state.admin) scheduleSessionSave(); }
+function onLandmarksChanged() {
+  if (state.admin) {
+    scheduleSessionSave();
+    clearTimeout(onLandmarksChanged._t);
+    onLandmarksChanged._t = setTimeout(() => {
+      exportSite().catch(() => {});
+    }, 400);
+  }
+}
 
 function startLmDrag(e, id, part) {
   if (!(state.admin && state.adminTab === 'landmarks')) return;
@@ -2807,7 +2911,15 @@ function applyAmenityVisibility() {
   if (els.amenityToggle) { els.amenityToggle.setAttribute('aria-pressed', String(state.showAmenities)); els.amenityToggle.title = state.showAmenities ? 'Hide amenities' : 'Show amenities'; }
   if (visible) renderAmenities();
 }
-function onAmenitiesChanged() { if (state.admin) scheduleSessionSave(); }
+function onAmenitiesChanged() {
+  if (state.admin) {
+    scheduleSessionSave();
+    clearTimeout(onAmenitiesChanged._t);
+    onAmenitiesChanged._t = setTimeout(() => {
+      exportSite().catch(() => {});
+    }, 400);
+  }
+}
 
 function startAmDrag(e, id) {
   e.preventDefault(); e.stopPropagation();
@@ -3028,6 +3140,569 @@ async function resizeImageToBlob(file, cap, mime = 'image/jpeg', q = 0.9) {
   return { blob, W, H };
 }
 
+// ─── Custom Menu Setup & Client Integration ────────────────────────────────────
+function renderClientSidebar() {
+  if (!els.catNavL1) return;
+  const mc = state.menuConfig || {};
+  let html = `
+    <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
+    <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
+  `;
+  if (mc.location_intel?.enabled) {
+    html += `<button class="cat-btn" type="button" data-act="location_intel">LOCATION INTELLIGENCE</button>`;
+  }
+  if (mc.walkthrough_video?.enabled) {
+    html += `<button class="cat-btn" type="button" data-act="walkthrough_video">WALKTHROUGH VIDEO</button>`;
+  }
+  if (mc.virtual_tour?.enabled && mc.virtual_tour?.items?.length) {
+    html += `<button class="cat-btn cat-btn-sub" type="button" data-act="virtual_tour">VIRTUAL TOUR <span class="cat-btn-arrow">›</span></button>`;
+  }
+  if (mc.gallery?.enabled && (mc.gallery?.images?.length || mc.gallery?.urls?.length)) {
+    html += `<button class="cat-btn" type="button" data-act="gallery">GALLERY</button>`;
+  }
+  if (mc.brochure?.enabled && (mc.brochure?.pdfUrl || mc.brochure?.pdfBlob)) {
+    html += `<button class="cat-btn" type="button" data-act="brochure">BROCHURE</button>`;
+  }
+  if (mc.contact_us?.enabled) {
+    html += `<button class="cat-btn" type="button" data-act="contact_us">CONTACT US</button>`;
+  }
+  els.catNavL1.innerHTML = html;
+  wireClientSidebarButtons();
+}
+
+function wireClientSidebarButtons() {
+  if (!els.catNavL1) return;
+  const touch = () => { state.lastUserTouch = Date.now(); };
+  els.catNavL1.querySelectorAll('.cat-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      touch();
+      const act = btn.dataset.act;
+      if (act === 'landmarks') {
+        if (els.catLevel1) els.catLevel1.hidden = true;
+        if (els.catLevelVirtualTour) els.catLevelVirtualTour.hidden = true;
+        if (els.catLevel2) els.catLevel2.hidden = false;
+        state.autoPan = true;
+        applyCategoryFilter('ALL');
+      } else if (act === 'aerial') {
+        computeHome();
+        animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
+        state.autoPan = true;
+      } else if (act === 'virtual_tour') {
+        if (els.catLevel1) els.catLevel1.hidden = true;
+        if (els.catLevel2) els.catLevel2.hidden = true;
+        if (els.catLevelVirtualTour) els.catLevelVirtualTour.hidden = false;
+        renderVirtualTourDestinations();
+      } else if (act === 'location_intel') {
+        openClientVideoModal('📍 Location Intelligence', state.menuConfig.location_intel);
+      } else if (act === 'walkthrough_video') {
+        openClientVideoModal('🎬 Walkthrough Video', state.menuConfig.walkthrough_video);
+      } else if (act === 'gallery') {
+        openClientGalleryModal();
+      } else if (act === 'brochure') {
+        openClientBrochureModal();
+      } else if (act === 'contact_us') {
+        openClientContactModal();
+      }
+    });
+  });
+}
+
+function renderVirtualTourDestinations() {
+  if (!els.catVtNav) return;
+  const items = (state.menuConfig.virtual_tour?.items || []).filter(item => (item.name || '').trim() || (item.url || '').trim());
+  if (!items.length) {
+    els.catVtNav.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No virtual tour destinations configured.</p>`;
+    return;
+  }
+  els.catVtNav.innerHTML = items.map((item) => `
+    <button class="cat-btn" type="button" data-vt-url="${esc(item.url || '')}" data-vt-name="${esc(item.name || '')}">
+      ${esc(item.name || 'DESTINATION')}
+    </button>
+  `).join('');
+
+  els.catVtNav.querySelectorAll('.cat-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const url = btn.dataset.vtUrl;
+      const name = btn.dataset.vtName;
+      if (url) {
+        openModal({ url, title: name });
+      } else {
+        showNotice(`Virtual tour link not set for <strong>${esc(name)}</strong>.`);
+      }
+    });
+  });
+}
+
+function openClientVideoModal(title, config) {
+  let rawSrc = config.videoBlob ? URL.createObjectURL(config.videoBlob) : (config.videoUrl || '');
+  if (!rawSrc) {
+    showNotice(`No video uploaded or URL configured for ${title}.`);
+    return;
+  }
+  const src = assetUrl(rawSrc);
+  openModal({ url: src, title: title });
+}
+
+function isYoutubeUrl(url) {
+  return /youtube\.com|youtu\.be/i.test(url || '');
+}
+function getYoutubeEmbedUrl(url) {
+  const m = (url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|watch\?.+&v=))([\w-]{11})/i);
+  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1` : url;
+}
+function isVimeoUrl(url) {
+  return /vimeo\.com/i.test(url || '');
+}
+function getVimeoEmbedUrl(url) {
+  const m = (url || '').match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+  return m ? `https://player.vimeo.com/video/${m[1]}?autoplay=1` : url;
+}
+
+let currentGalleryIdx = 0;
+
+function openClientGalleryModal(startIdx = 0) {
+  if (!els.clientGalleryModal) return;
+  const images = state.menuConfig.gallery?.images || [];
+  if (!images.length) {
+    showNotice('No gallery images uploaded yet.');
+    return;
+  }
+  currentGalleryIdx = Math.max(0, Math.min(startIdx, images.length - 1));
+  updateGallerySlide(currentGalleryIdx);
+
+  els.clientGalleryModal.classList.add('open');
+  els.clientGalleryModal.setAttribute('aria-hidden', 'false');
+}
+
+function updateGallerySlide(idx) {
+  const images = state.menuConfig.gallery?.images || [];
+  if (!images.length) return;
+
+  currentGalleryIdx = (idx + images.length) % images.length;
+  const img = images[currentGalleryIdx];
+  const src = img.blob ? URL.createObjectURL(img.blob) : assetUrl(img.url || img.name);
+
+  const activeImg = $('galleryActiveImg');
+  const imgName = $('galleryImgName');
+  const imgCounter = $('galleryImgCounter');
+  const prevBtn = $('galleryPrevBtn');
+  const nextBtn = $('galleryNextBtn');
+
+  if (activeImg) {
+    activeImg.style.opacity = '0.4';
+    activeImg.src = src;
+    setTimeout(() => { activeImg.style.opacity = '1'; }, 50);
+  }
+  if (imgName) imgName.textContent = img.name || `Image ${currentGalleryIdx + 1}`;
+  if (imgCounter) imgCounter.textContent = `(${currentGalleryIdx + 1} / ${images.length})`;
+
+  if (prevBtn) prevBtn.style.display = images.length > 1 ? 'flex' : 'none';
+  if (nextBtn) nextBtn.style.display = images.length > 1 ? 'flex' : 'none';
+}
+
+function openClientBrochureModal() {
+  if (!els.clientBrochureModal) return;
+  const frame = $('clientBrochureFrame');
+  const btn = $('clientBrochureDownload');
+  const b = state.menuConfig.brochure || {};
+  const src = b.pdfBlob ? URL.createObjectURL(b.pdfBlob) : (b.pdfUrl ? assetUrl(b.pdfUrl) : '');
+  if (!src) {
+    showNotice('No PDF brochure uploaded yet.');
+    return;
+  }
+  if (frame) frame.src = src;
+  if (btn) { btn.href = src; btn.download = b.pdfName || 'brochure.pdf'; }
+  els.clientBrochureModal.classList.add('open');
+  els.clientBrochureModal.setAttribute('aria-hidden', 'false');
+}
+
+function openClientContactModal() {
+  const modal = els.clientContactModal || $('clientContactModal');
+  if (!modal) return;
+  try {
+    const c = state.menuConfig?.contact_us || {};
+    const title = $('clientContactTitle');
+    const about = $('clientContactAbout');
+    const phone = $('clientContactPhone');
+    const email = $('clientContactEmail');
+    const img = $('clientContactImg');
+
+    if (title) title.textContent = String(c.title || 'Anandam Eleganza - Premium Villa Plots');
+    if (about) about.textContent = String(c.about || 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh');
+    if (phone) {
+      const num = String(c.phone || '+91 7389705477');
+      phone.textContent = num;
+      phone.href = `tel:${num.replace(/\s+/g, '')}`;
+    }
+    if (email) {
+      const mail = String(c.email || 'anandameleganza@gmail.com');
+      email.textContent = mail;
+      email.href = `mailto:${mail}`;
+    }
+    if (img) {
+      const defaultImg = state.panoImage?.file ? assetUrl(state.panoImage.file) : 'projects/sample/Demo.web.jpg';
+      const src = c.imageBlob ? URL.createObjectURL(c.imageBlob) : (c.image ? assetUrl(c.image) : defaultImg);
+      img.src = src;
+    }
+  } catch (err) {
+    console.error('Contact modal error:', err);
+  }
+
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function initCustomMenuAdminAndClient() {
+  // Admin custom menu dropdown toggling
+  els.projCustomMenuBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!els.projCustomDropdown) return;
+    const isHidden = els.projCustomDropdown.hidden;
+    els.projCustomDropdown.hidden = !isHidden;
+    els.projCustomMenuBtn.setAttribute('aria-expanded', String(isHidden));
+  });
+
+  document.addEventListener('click', () => {
+    if (els.projCustomDropdown) {
+      els.projCustomDropdown.hidden = true;
+      els.projCustomMenuBtn?.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  els.projCustomDropdown?.querySelectorAll('button[data-menu-act]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      els.projCustomDropdown.hidden = true;
+      const act = btn.dataset.menuAct;
+      openAdminMenuModal(act);
+    });
+  });
+
+  // Virtual Tour back button
+  els.catVtBackBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (els.catLevelVirtualTour) els.catLevelVirtualTour.hidden = true;
+    if (els.catLevel1) els.catLevel1.hidden = false;
+  });
+
+  // Gallery Lightbox Navigation
+  $('galleryPrevBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    updateGallerySlide(currentGalleryIdx - 1);
+  });
+  $('galleryNextBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    updateGallerySlide(currentGalleryIdx + 1);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (els.clientGalleryModal && els.clientGalleryModal.classList.contains('open')) {
+      if (e.key === 'ArrowLeft' || e.key === 'Left') {
+        e.preventDefault();
+        updateGallerySlide(currentGalleryIdx - 1);
+      } else if (e.key === 'ArrowRight' || e.key === 'Right') {
+        e.preventDefault();
+        updateGallerySlide(currentGalleryIdx + 1);
+      }
+    }
+  });
+
+  // Setup Admin Modals
+  // 1. Location Intel Modal
+  $('adminLocIntelSave')?.addEventListener('click', () => {
+    const fileInput = $('adminLocIntelFile');
+    const urlInput = $('adminLocIntelUrl');
+    const file = fileInput?.files?.[0];
+    const url = (urlInput?.value || '').trim();
+    if (file) {
+      state.menuConfig.location_intel = {
+        enabled: true,
+        videoBlob: file,
+        videoName: file.name,
+        videoUrl: `sample/${file.name}`
+      };
+    } else if (url) {
+      state.menuConfig.location_intel = {
+        enabled: true,
+        videoUrl: url,
+        videoName: '',
+        videoBlob: null
+      };
+    }
+    closeCustomModal(els.adminLocationIntelModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+  $('adminLocIntelClear')?.addEventListener('click', () => {
+    state.menuConfig.location_intel.enabled = false;
+    closeCustomModal(els.adminLocationIntelModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+
+  // 2. Walkthrough Video Modal
+  $('adminWalkthroughSave')?.addEventListener('click', () => {
+    const fileInput = $('adminWalkthroughFile');
+    const urlInput = $('adminWalkthroughUrl');
+    const file = fileInput?.files?.[0];
+    const url = (urlInput?.value || '').trim();
+    if (file) {
+      state.menuConfig.walkthrough_video = {
+        enabled: true,
+        videoBlob: file,
+        videoName: file.name,
+        videoUrl: `sample/${file.name}`
+      };
+    } else if (url) {
+      state.menuConfig.walkthrough_video = {
+        enabled: true,
+        videoUrl: url,
+        videoName: '',
+        videoBlob: null
+      };
+    }
+    closeCustomModal(els.adminWalkthroughModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+  $('adminWalkthroughClear')?.addEventListener('click', () => {
+    state.menuConfig.walkthrough_video.enabled = false;
+    closeCustomModal(els.adminWalkthroughModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+
+  // 3. Virtual Tour Modal
+  $('adminVtAddBtn')?.addEventListener('click', () => {
+    addAdminVtRow('', '');
+  });
+  $('adminVtSave')?.addEventListener('click', () => {
+    const list = $('adminVtList');
+    const rows = list?.querySelectorAll('.vt-item-row') || [];
+    const items = [];
+    rows.forEach((row, i) => {
+      const name = (row.querySelector('.vt-name')?.value || '').trim();
+      const url = (row.querySelector('.vt-url')?.value || '').trim();
+      if (name || url) {
+        items.push({ id: 'vt' + (i + 1), name: name || 'DESTINATION', url });
+      }
+    });
+    state.menuConfig.virtual_tour = {
+      enabled: items.length > 0,
+      items
+    };
+    closeCustomModal(els.adminVirtualTourModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+  $('adminVtClear')?.addEventListener('click', () => {
+    state.menuConfig.virtual_tour.enabled = false;
+    state.menuConfig.virtual_tour.items = [];
+    closeCustomModal(els.adminVirtualTourModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+
+  // 4. Gallery Modal
+  $('adminGalleryFiles')?.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!state.menuConfig.gallery.images) state.menuConfig.gallery.images = [];
+    files.forEach((f) => {
+      state.menuConfig.gallery.images.push({ name: f.name, blob: f, url: `sample/${f.name}` });
+    });
+    renderAdminGalleryPreviews();
+  });
+  $('adminGallerySave')?.addEventListener('click', () => {
+    state.menuConfig.gallery.enabled = (state.menuConfig.gallery.images?.length || 0) > 0;
+    closeCustomModal(els.adminGalleryModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+  $('adminGalleryClear')?.addEventListener('click', () => {
+    state.menuConfig.gallery.enabled = false;
+    state.menuConfig.gallery.images = [];
+    closeCustomModal(els.adminGalleryModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+
+  // 5. Brochure Modal
+  $('adminBrochureSave')?.addEventListener('click', () => {
+    const fileInput = $('adminBrochureFile');
+    const file = fileInput?.files?.[0];
+    if (file) {
+      state.menuConfig.brochure = {
+        enabled: true,
+        pdfBlob: file,
+        pdfName: file.name,
+        pdfUrl: `sample/${file.name}`
+      };
+    }
+    closeCustomModal(els.adminBrochureModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+  $('adminBrochureClear')?.addEventListener('click', () => {
+    state.menuConfig.brochure.enabled = false;
+    closeCustomModal(els.adminBrochureModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+
+  // 6. Contact Us Modal
+  $('adminContactSave')?.addEventListener('click', () => {
+    const fileInput = $('adminContactImageFile');
+    const file = fileInput?.files?.[0];
+    const title = ($('adminContactTitle')?.value || '').trim();
+    const about = ($('adminContactAbout')?.value || '').trim();
+    const phone = ($('adminContactPhone')?.value || '').trim();
+    const email = ($('adminContactEmail')?.value || '').trim();
+
+    state.menuConfig.contact_us = {
+      enabled: true,
+      imageBlob: file || state.menuConfig.contact_us.imageBlob,
+      imageName: file ? file.name : state.menuConfig.contact_us.imageName,
+      image: file ? `sample/${file.name}` : state.menuConfig.contact_us.image,
+      title,
+      about,
+      phone,
+      email
+    };
+    closeCustomModal(els.adminContactModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+  $('adminContactClear')?.addEventListener('click', () => {
+    state.menuConfig.contact_us.enabled = false;
+    closeCustomModal(els.adminContactModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+  });
+
+  // Modal Close buttons (data-close)
+  document.querySelectorAll('.custom-feature-modal [data-close]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const modal = btn.closest('.modal');
+      if (modal) closeCustomModal(modal);
+    });
+  });
+
+  // Client Contact Close
+  const closeContact = () => {
+    if (els.clientContactModal) {
+      els.clientContactModal.classList.remove('open');
+      els.clientContactModal.hidden = true;
+      els.clientContactModal.style.display = 'none';
+      els.clientContactModal.setAttribute('hidden', '');
+      els.clientContactModal.setAttribute('aria-hidden', 'true');
+    }
+  };
+
+  $('clientContactClose')?.addEventListener('click', closeContact);
+  els.clientContactModal?.querySelector('.contact-modal-backdrop')?.addEventListener('click', closeContact);
+}
+
+function openAdminMenuModal(act) {
+  if (act === 'location_intel') {
+    const input = $('adminLocIntelUrl');
+    if (input) input.value = state.menuConfig.location_intel?.videoUrl || '';
+    const status = $('adminLocIntelFileStatus');
+    if (status) status.textContent = state.menuConfig.location_intel?.videoName ? `Current file: ${state.menuConfig.location_intel.videoName}` : 'No file selected';
+    openCustomModal(els.adminLocationIntelModal);
+  } else if (act === 'walkthrough_video') {
+    const input = $('adminWalkthroughUrl');
+    if (input) input.value = state.menuConfig.walkthrough_video?.videoUrl || '';
+    const status = $('adminWalkthroughFileStatus');
+    if (status) status.textContent = state.menuConfig.walkthrough_video?.videoName ? `Current file: ${state.menuConfig.walkthrough_video.videoName}` : 'No file selected';
+    openCustomModal(els.adminWalkthroughModal);
+  } else if (act === 'virtual_tour') {
+    populateAdminVtList();
+    openCustomModal(els.adminVirtualTourModal);
+  } else if (act === 'gallery') {
+    renderAdminGalleryPreviews();
+    openCustomModal(els.adminGalleryModal);
+  } else if (act === 'brochure') {
+    const status = $('adminBrochureFileStatus');
+    if (status) status.textContent = state.menuConfig.brochure?.pdfName ? `Current file: ${state.menuConfig.brochure.pdfName}` : 'No file selected';
+    openCustomModal(els.adminBrochureModal);
+  } else if (act === 'contact_us') {
+    const c = state.menuConfig.contact_us || {};
+    if ($('adminContactTitle')) $('adminContactTitle').value = c.title || '';
+    if ($('adminContactAbout')) $('adminContactAbout').value = c.about || '';
+    if ($('adminContactPhone')) $('adminContactPhone').value = c.phone || '';
+    if ($('adminContactEmail')) $('adminContactEmail').value = c.email || '';
+    const status = $('adminContactImageStatus');
+    if (status) status.textContent = c.imageName ? `Current image: ${c.imageName}` : (c.image ? `Current: ${c.image}` : 'No image selected');
+    openCustomModal(els.adminContactModal);
+  }
+}
+
+function openCustomModal(modalEl) {
+  if (!modalEl) return;
+  modalEl.classList.add('open');
+  modalEl.setAttribute('aria-hidden', 'false');
+}
+
+function closeCustomModal(modalEl) {
+  if (!modalEl) return;
+  modalEl.classList.remove('open');
+  modalEl.setAttribute('aria-hidden', 'true');
+  const video = modalEl.querySelector('video');
+  if (video) { video.pause(); video.src = ''; }
+  const iframe = modalEl.querySelector('iframe');
+  if (iframe) iframe.src = 'about:blank';
+}
+
+function populateAdminVtList() {
+  const list = $('adminVtList');
+  if (!list) return;
+  list.innerHTML = '';
+  const items = state.menuConfig.virtual_tour?.items || [];
+  if (items.length === 0) {
+    addAdminVtRow('', '');
+  } else {
+    items.forEach(item => addAdminVtRow(item.name, item.url));
+  }
+}
+
+function addAdminVtRow(name, url) {
+  const list = $('adminVtList');
+  if (!list) return;
+  const row = document.createElement('div');
+  row.className = 'vt-item-row';
+  row.innerHTML = `
+    <input type="text" placeholder="Title (e.g. MANDIR)" class="vt-name form-input-text" value="${esc(name)}" />
+    <input type="text" placeholder="3DVista / Tour URL" class="vt-url form-input-text" value="${esc(url)}" />
+    <button type="button" class="btn btn-ghost vt-del-btn" title="Delete">✕</button>
+  `;
+  row.querySelector('.vt-del-btn')?.addEventListener('click', () => row.remove());
+  list.appendChild(row);
+}
+
+function renderAdminGalleryPreviews() {
+  const container = $('adminGalleryPreviews');
+  if (!container) return;
+  const images = state.menuConfig.gallery?.images || [];
+  container.innerHTML = images.map((img, i) => {
+    const src = img.blob ? URL.createObjectURL(img.blob) : assetUrl(img.url || img.name);
+    return `
+      <div class="gallery-preview-item">
+        <img src="${esc(src)}" alt="${esc(img.name)}" />
+        <button type="button" class="gallery-preview-remove" data-idx="${i}">✕</button>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.gallery-preview-remove').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      state.menuConfig.gallery.images.splice(idx, 1);
+      renderAdminGalleryPreviews();
+    });
+  });
+}
+
 // ─── Boot ───────────────────────────────────────────────────────────────────
 (async function init() {
   try {
@@ -3053,6 +3728,11 @@ async function resizeImageToBlob(file, cap, mime = 'image/jpeg', q = 0.9) {
     if (chosen?.brand) Object.assign(state.brand, { name: chosen.brand.name, tagline: chosen.brand.tagline, logo: chosen.brand.logo, _ver: chosen.brand._ver });
     if (restored?.brandLogo?.blob) { state.brand.logoBlob = restored.brandLogo.blob; state.brand.logoName = restored.brandLogo.name; if (!state.brand.logo) state.brand.logo = `sample/${restored.brandLogo.name}`; }
     applyBrand();
+    if (chosen?.menuConfig) {
+      state.menuConfig = Object.assign({}, state.menuConfig, chosen.menuConfig);
+    }
+    initCustomMenuAdminAndClient();
+    renderClientSidebar();
     // background pano: session blob > project's panoImage reference > neutral fallback
     let panoSrc = null;
     if (restored?.pano?.blob) { state.panoBlob = restored.pano.blob; state.panoName = restored.pano.name; state.panoImage = { file: restored.pano.name }; panoSrc = restored.pano.blob; }

@@ -1,126 +1,186 @@
 {
   "version": 1,
   "note": "Build91 landmark hotspots",
-  "savedAt": "2026-08-25T06:40:09.591Z",
+  "savedAt": "2026-08-25T10:32:45.957Z",
   "landmarks": [
     {
-      "id": "lm1",
-      "label": "Hesaraghatta Lake Viewpoint",
-      "distance": "3.5 km",
-      "driveTime": "15 mins",
-      "icon": "lake",
+      "id": "lm18",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "mall",
       "hotspot": {
-        "lonDeg": -158.93,
-        "latDeg": -1.88
+        "lonDeg": -108.86,
+        "latDeg": -6.68
       },
       "banner": {
-        "lonDeg": -159,
-        "latDeg": 5.79
+        "lonDeg": -108.34,
+        "latDeg": 4.63
       }
     },
     {
-      "id": "lm2",
-      "label": "Yelahanka Jn.",
-      "distance": "15 km",
-      "driveTime": "32 min",
+      "id": "lm19",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
       "icon": "train",
       "hotspot": {
-        "lonDeg": 114.02,
-        "latDeg": -1.8
+        "lonDeg": 116.07,
+        "latDeg": -7.57
       },
       "banner": {
-        "lonDeg": 114.3,
-        "latDeg": 5.62
+        "lonDeg": 117.19,
+        "latDeg": -0.66
       }
     },
     {
-      "id": "lm3",
-      "label": "Our Native Village - Eco & Pet Friendly Resort",
-      "distance": "15.5 km",
-      "driveTime": "26 min",
-      "icon": "hotel",
-      "hotspot": {
-        "lonDeg": 139.53,
-        "latDeg": -1.82
-      },
-      "banner": {
-        "lonDeg": 139.42,
-        "latDeg": 6.86
-      }
-    },
-    {
-      "id": "lm4",
-      "label": "New Landmark",
-      "distance": "12 km",
-      "driveTime": "25 min",
-      "icon": "college",
-      "hotspot": {
-        "lonDeg": 173.45,
-        "latDeg": -2.6
-      },
-      "banner": {
-        "lonDeg": 173.44,
-        "latDeg": 9.54
-      }
-    },
-    {
-      "id": "lm5",
+      "id": "lm20",
       "label": "",
       "distance": "",
       "driveTime": "",
       "icon": "place",
       "hotspot": {
-        "lonDeg": -65.72,
-        "latDeg": -31.92
+        "lonDeg": 145.01,
+        "latDeg": -5.98
       },
       "banner": {
-        "lonDeg": -65.72,
-        "latDeg": -19.92
+        "lonDeg": 144.36,
+        "latDeg": 1.08
       }
     },
     {
-      "id": "lm6",
+      "id": "lm21",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "hotel",
+      "hotspot": {
+        "lonDeg": 163.7,
+        "latDeg": -6.65
+      },
+      "banner": {
+        "lonDeg": 162.67,
+        "latDeg": 1.59
+      }
+    },
+    {
+      "id": "lm22",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "bus",
+      "hotspot": {
+        "lonDeg": -156.51,
+        "latDeg": -4.23
+      },
+      "banner": {
+        "lonDeg": -157.34,
+        "latDeg": 1.92
+      }
+    },
+    {
+      "id": "lm23",
       "label": "",
       "distance": "",
       "driveTime": "",
       "icon": "airport",
       "hotspot": {
-        "lonDeg": -87.54,
-        "latDeg": -7.06
+        "lonDeg": -176.37,
+        "latDeg": -6.53
       },
       "banner": {
-        "lonDeg": -98.16,
-        "latDeg": -3.34
+        "lonDeg": -176.49,
+        "latDeg": -0.98
       }
     },
     {
-      "id": "lm7",
-      "label": "",
+      "id": "lm24",
+      "label": "Temple",
       "distance": "",
       "driveTime": "",
-      "icon": "metro",
+      "icon": "temple",
       "hotspot": {
-        "lonDeg": -137.43,
-        "latDeg": -15.47
+        "lonDeg": -86.81,
+        "latDeg": -8.47
       },
       "banner": {
-        "lonDeg": -136.32,
-        "latDeg": -4.23
+        "lonDeg": -86.39,
+        "latDeg": 4.16
       }
     },
     {
-      "id": "lm8",
+      "id": "lm25",
       "label": "",
       "distance": "",
       "driveTime": "",
-      "icon": "highway",
+      "icon": "school",
       "hotspot": {
-        "lonDeg": -165.79,
-        "latDeg": -32.34
+        "lonDeg": 132.13,
+        "latDeg": -7.32
       },
       "banner": {
-        "lonDeg": -160.14,
-        "latDeg": -6.31
+        "lonDeg": 132.41,
+        "latDeg": 1.53
+      }
+    },
+    {
+      "id": "lm26",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "college",
+      "hotspot": {
+        "lonDeg": -141.52,
+        "latDeg": -5.97
+      },
+      "banner": {
+        "lonDeg": -140.72,
+        "latDeg": 4.73
+      }
+    },
+    {
+      "id": "lm27",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "market",
+      "hotspot": {
+        "lonDeg": -129.15,
+        "latDeg": -4.76
+      },
+      "banner": {
+        "lonDeg": -128.83,
+        "latDeg": 1.69
+      }
+    },
+    {
+      "id": "lm28",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "hospital",
+      "hotspot": {
+        "lonDeg": -133.39,
+        "latDeg": -3.88
+      },
+      "banner": {
+        "lonDeg": -133.44,
+        "latDeg": 0.53
+      }
+    },
+    {
+      "id": "lm29",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "hospital",
+      "hotspot": {
+        "lonDeg": 153.42,
+        "latDeg": -5.62
+      },
+      "banner": {
+        "lonDeg": 152.37,
+        "latDeg": 4.07
       }
     }
   ]

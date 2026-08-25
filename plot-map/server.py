@@ -234,8 +234,15 @@ def lan_ip():
         return "your-lan-ip"
 
 class DualStackServer(ThreadingHTTPServer):
-    """ThreadingHTTPServer that attempts dual-stack IPv6/IPv4 socket binding."""
-    address_family = socket.AF_INET6 if getattr(socket, 'has_ipv6', False) else socket.AF_INET
+    """ThreadingHTTPServer configured for IPv4/IPv6 compatibility."""
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+        host, port = server_address
+        if ":" in host:
+            self.address_family = socket.AF_INET6
+        else:
+            self.address_family = socket.AF_INET
+        super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+
 
     def server_bind(self):
         if self.address_family == socket.AF_INET6:
@@ -244,6 +251,7 @@ class DualStackServer(ThreadingHTTPServer):
             except (AttributeError, OSError):
                 pass
         super().server_bind()
+
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8731
