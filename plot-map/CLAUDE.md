@@ -155,7 +155,8 @@ Top-down, by section header:
   clipboard `<iframe>` snippet).
 - **`wireAdmin`** — wires every admin control incl. tabs + the Project ID field.
 - **Trace editor** (PNG/DXF → polygons): `trace` state, flood-fill/`traceBoundary`/
-  `douglasPeucker`, `refreshTraceList` (inline per-plot data editing), `traceLoadImage`
+  `douglasPeucker`, `refreshTraceList` (inline per-plot data & media attachment editing), `parseMediaType`
+  (detects & handles 3D Walkthroughs, YouTube embeds, and Image URLs/files), `traceLoadImage`
   (downscale ≤`TRACE_MAX=4096`), `finishTrace`, `openTrace`/`loadCurrentLayoutIntoTrace`
   (pre-loads the live layout for editing), `wireTrace`; **`parseDXF`**.
 - **Landmarks:** `LM_ICONS`, `dirFromLonLat`/`lonLatFromDir`, `lmBannerHTML`,
@@ -419,6 +420,11 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   the ❓ strip step is deferred, per ROADMAP.) One benign 404: the sample project's
   `alignment.json` references a `logo.web.png` that isn't on disk → brand falls back to
   initials (pre-existing data state, not a bundle bug; the normal client 404s the same).
+- **Multi-Attachment Plot Media Support (3D Walkthrough / YouTube / Image)** (added 2026-08-22):
+  Admins can now attach **multiple media items** (3D Walkthroughs, YouTube videos, Image URLs, local uploaded photos) to a single plot inside **Import & Trace** (`refreshTraceList`).
+  Features a full inline multi-media item list manager with type selectors (`🌐 3D Tour`, `▶ YouTube`, `🖼 Image`), custom labels, URL inputs, local file upload (`＋ 📁 Upload Image…`), and instant `👁` preview buttons.
+  On the client Plot Info Card, **all attached media options** render as distinct action buttons (e.g. `🌐 Walk through this plot →`, `▶ Watch YouTube Video →`, `🖼 View Photo →`).
+  `parseMediaType` & `getPlotMediaList` seamlessly handle YouTube embed conversion, image lightboxes, and 3D tour iframe rendering.
 - The user actively publishes real sites via server-side save (their data — don't clobber it).
 - Suggested next: **ROADMAP Feature 3** (enquiry/lead capture) — see [ROADMAP.md](ROADMAP.md).
   Also outstanding: a client-side **"Load site folder…"** picker (view any exported folder) —
