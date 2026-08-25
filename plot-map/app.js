@@ -1791,9 +1791,9 @@ async function exportSite() {
     ...state.amenities.filter((a) => a.renderBlob && a.render).map((a) => [baseName(a.render), a.renderBlob, 'image/jpeg']),
     ...state.landmarks.filter((l) => l.renderBlob && l.render).map((l) => [baseName(l.render), l.renderBlob, 'image/jpeg']),
     // custom menu files (videos, pdfs, images)
-    ...(state.menuConfig?.location_intel?.videoBlob ? [[baseName(state.menuConfig.location_intel.videoName || 'location_intel.mp4'), state.menuConfig.location_intel.videoBlob, 'video/mp4']] : []),
-    ...(state.menuConfig?.walkthrough_video?.videoBlob ? [[baseName(state.menuConfig.walkthrough_video.videoName || 'walkthrough.mp4'), state.menuConfig.walkthrough_video.videoBlob, 'video/mp4']] : []),
-    ...(state.menuConfig?.brochure?.pdfBlob ? [[baseName(state.menuConfig.brochure.pdfName || 'brochure.pdf'), state.menuConfig.brochure.pdfBlob, 'application/pdf']] : []),
+    ...(state.menuConfig?.location_intel?.items ? state.menuConfig.location_intel.items.filter(i => i.videoBlob).map(i => [baseName(i.videoName || 'location_intel.mp4'), i.videoBlob, 'video/mp4']) : (state.menuConfig?.location_intel?.videoBlob ? [[baseName(state.menuConfig.location_intel.videoName || 'location_intel.mp4'), state.menuConfig.location_intel.videoBlob, 'video/mp4']] : [])),
+    ...(state.menuConfig?.walkthrough_video?.items ? state.menuConfig.walkthrough_video.items.filter(i => i.videoBlob).map(i => [baseName(i.videoName || 'walkthrough.mp4'), i.videoBlob, 'video/mp4']) : (state.menuConfig?.walkthrough_video?.videoBlob ? [[baseName(state.menuConfig.walkthrough_video.videoName || 'walkthrough.mp4'), state.menuConfig.walkthrough_video.videoBlob, 'video/mp4']] : [])),
+    ...(state.menuConfig?.brochure?.items ? state.menuConfig.brochure.items.filter(i => i.pdfBlob).map(i => [baseName(i.pdfName || 'brochure.pdf'), i.pdfBlob, 'application/pdf']) : (state.menuConfig?.brochure?.pdfBlob ? [[baseName(state.menuConfig.brochure.pdfName || 'brochure.pdf'), state.menuConfig.brochure.pdfBlob, 'application/pdf']] : [])),
     ...(state.menuConfig?.contact_us?.imageBlob ? [[baseName(state.menuConfig.contact_us.imageName || 'contact_bg.png'), state.menuConfig.contact_us.imageBlob, 'image/png']] : []),
     ...(state.menuConfig?.gallery?.images ? state.menuConfig.gallery.images.filter(img => img.blob).map(img => [baseName(img.name), img.blob, 'image/jpeg']) : []),
   ];
@@ -3141,6 +3141,29 @@ async function resizeImageToBlob(file, cap, mime = 'image/jpeg', q = 0.9) {
 }
 
 // ─── Custom Menu Setup & Client Integration ────────────────────────────────────
+function getSectionSubItems(secKey) {
+  const mc = state.menuConfig || {};
+  const sec = mc[secKey] || {};
+  if (Array.isArray(sec.items) && sec.items.length) {
+    return sec.items.filter((i) => i && ((i.name || '').trim() || (i.url || '').trim() || (i.videoUrl || '').trim() || (i.pdfUrl || '').trim() || i.videoBlob || i.pdfBlob));
+  }
+  // Backward compatibility single item fallbacks
+  if (secKey === 'location_intel') {
+    if (sec.videoUrl || sec.videoBlob) {
+      return [{ id: 'li1', name: sec.title || 'Location Intelligence', videoUrl: sec.videoUrl, videoName: sec.videoName, videoBlob: sec.videoBlob }];
+    }
+  } else if (secKey === 'walkthrough_video') {
+    if (sec.videoUrl || sec.videoBlob) {
+      return [{ id: 'wv1', name: sec.title || 'Walkthrough Video', videoUrl: sec.videoUrl, videoName: sec.videoName, videoBlob: sec.videoBlob }];
+    }
+  } else if (secKey === 'brochure') {
+    if (sec.pdfUrl || sec.pdfBlob) {
+      return [{ id: 'br1', name: sec.title || 'Brochure PDF', pdfUrl: sec.pdfUrl, pdfName: sec.pdfName, pdfBlob: sec.pdfBlob }];
+    }
+  }
+  return [];
+}
+
 function renderClientSidebar() {
   if (!els.catNavL1) return;
   const mc = state.menuConfig || {};
@@ -3148,24 +3171,30 @@ function renderClientSidebar() {
     <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
     <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
   `;
-  if (mc.location_intel?.enabled) {
-    html += `<button class="cat-btn" type="button" data-act="location_intel">LOCATION INTELLIGENCE</button>`;
-  }
-  if (mc.walkthrough_video?.enabled) {
-    html += `<button class="cat-btn" type="button" data-act="walkthrough_video">WALKTHROUGH VIDEO</button>`;
-  }
-  if (mc.virtual_tour?.enabled && mc.virtual_tour?.items?.length) {
-    html += `<button class="cat-btn cat-btn-sub" type="button" data-act="virtual_tour">VIRTUAL TOUR <span class="cat-btn-arrow">›</span></button>`;
-  }
-  if (mc.gallery?.enabled && (mc.gallery?.images?.length || mc.gallery?.urls?.length)) {
-    html += `<button class="cat-btn" type="button" data-act="gallery">GALLERY</button>`;
-  }
-  if (mc.brochure?.enabled && (mc.brochure?.pdfUrl || mc.brochure?.pdfBlob)) {
-    html += `<button class="cat-btn" type="button" data-act="brochure">BROCHURE</button>`;
-  }
-  if (mc.contact_us?.enabled) {
-    html += `<button class="cat-btn" type="button" data-act="contact_us">CONTACT US</button>`;
-  }
+
+  const sections = [
+    { key: 'location_intel', defaultTitle: 'LOCATION INTELLIGENCE' },
+    { key: 'walkthrough_video', defaultTitle: 'WALKTHROUGH VIDEO' },
+    { key: 'virtual_tour', defaultTitle: 'VIRTUAL TOUR' },
+    { key: 'gallery', defaultTitle: 'GALLERY' },
+    { key: 'brochure', defaultTitle: 'BROCHURE' },
+    { key: 'contact_us', defaultTitle: 'CONTACT US' }
+  ];
+
+  sections.forEach(({ key, defaultTitle }) => {
+    const sec = mc[key];
+    if (!sec || !sec.enabled) return;
+    const title = (sec.title || defaultTitle).trim().toUpperCase();
+    const items = getSectionSubItems(key);
+
+    const isSub = key === 'virtual_tour' || key === 'walkthrough_video' || key === 'location_intel' || key === 'brochure' || items.length > 0;
+    if (isSub) {
+      html += `<button class="cat-btn cat-btn-sub" type="button" data-act="${key}">${esc(title)} <span class="cat-btn-arrow">›</span></button>`;
+    } else {
+      html += `<button class="cat-btn" type="button" data-act="${key}">${esc(title)}</button>`;
+    }
+  });
+
   els.catNavL1.innerHTML = html;
   wireClientSidebarButtons();
 }
@@ -3180,7 +3209,7 @@ function wireClientSidebarButtons() {
       const act = btn.dataset.act;
       if (act === 'landmarks') {
         if (els.catLevel1) els.catLevel1.hidden = true;
-        if (els.catLevelVirtualTour) els.catLevelVirtualTour.hidden = true;
+        if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
         if (els.catLevel2) els.catLevel2.hidden = false;
         state.autoPan = true;
         applyCategoryFilter('ALL');
@@ -3188,46 +3217,72 @@ function wireClientSidebarButtons() {
         computeHome();
         animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
         state.autoPan = true;
-      } else if (act === 'virtual_tour') {
-        if (els.catLevel1) els.catLevel1.hidden = true;
-        if (els.catLevel2) els.catLevel2.hidden = true;
-        if (els.catLevelVirtualTour) els.catLevelVirtualTour.hidden = false;
-        renderVirtualTourDestinations();
-      } else if (act === 'location_intel') {
-        openClientVideoModal('📍 Location Intelligence', state.menuConfig.location_intel);
-      } else if (act === 'walkthrough_video') {
-        openClientVideoModal('🎬 Walkthrough Video', state.menuConfig.walkthrough_video);
       } else if (act === 'gallery') {
         openClientGalleryModal();
-      } else if (act === 'brochure') {
-        openClientBrochureModal();
       } else if (act === 'contact_us') {
         openClientContactModal();
+      } else if (['location_intel', 'walkthrough_video', 'virtual_tour', 'brochure'].includes(act)) {
+        if (els.catLevel1) els.catLevel1.hidden = true;
+        if (els.catLevel2) els.catLevel2.hidden = true;
+        if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = false;
+        renderSubMenuNav(act);
       }
     });
   });
 }
 
-function renderVirtualTourDestinations() {
-  if (!els.catVtNav) return;
-  const items = (state.menuConfig.virtual_tour?.items || []).filter(item => (item.name || '').trim() || (item.url || '').trim());
+function renderSubMenuNav(secKey) {
+  const container = $('catSubMenuNav');
+  const titleEl = $('catSubMenuTitle');
+  if (!container) return;
+
+  const mc = state.menuConfig || {};
+  const sec = mc[secKey] || {};
+  const defaultTitles = {
+    location_intel: 'LOCATION INTELLIGENCE',
+    walkthrough_video: 'WALKTHROUGH VIDEO',
+    virtual_tour: 'VIRTUAL TOUR',
+    brochure: 'BROCHURE'
+  };
+  const title = (sec.title || defaultTitles[secKey] || 'SUB MENU').trim().toUpperCase();
+  if (titleEl) titleEl.textContent = title;
+
+  const items = getSectionSubItems(secKey);
   if (!items.length) {
-    els.catVtNav.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No virtual tour destinations configured.</p>`;
+    container.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No items configured in this section.</p>`;
     return;
   }
-  els.catVtNav.innerHTML = items.map((item) => `
-    <button class="cat-btn" type="button" data-vt-url="${esc(item.url || '')}" data-vt-name="${esc(item.name || '')}">
-      ${esc(item.name || 'DESTINATION')}
+
+  container.innerHTML = items.map((item, idx) => `
+    <button class="cat-btn" type="button" data-sec-key="${secKey}" data-item-idx="${idx}">
+      ${esc(item.name || item.title || `ITEM ${idx + 1}`)}
     </button>
   `).join('');
 
-  els.catVtNav.querySelectorAll('.cat-btn').forEach((btn) => {
+  container.querySelectorAll('.cat-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const url = btn.dataset.vtUrl;
-      const name = btn.dataset.vtName;
-      if (url) {
-        openModal({ url, title: name });
+      const sKey = btn.dataset.secKey;
+      const idx = parseInt(btn.dataset.itemIdx, 10);
+      const subItems = getSectionSubItems(sKey);
+      const item = subItems[idx];
+      if (item) {
+        openSubItemModal(sKey, item);
+      }
+    });
+  });
+}
+
+function openSubItemModal(secKey, item) {
+  if (secKey === 'location_intel' || secKey === 'walkthrough_video') {
+    const title = item.name || (secKey === 'location_intel' ? 'Location Intelligence' : 'Walkthrough Video');
+    openClientVideoModal(title, item);
+  } else if (secKey === 'virtual_tour') {
+    if (item.url) openModal({ url: item.url, title: item.name });
+  } else if (secKey === 'brochure') {
+    openSingleBrochureModal(item);
+  }
+}
       } else {
         showNotice(`Virtual tour link not set for <strong>${esc(name)}</strong>.`);
       }
@@ -3376,10 +3431,10 @@ function initCustomMenuAdminAndClient() {
     });
   });
 
-  // Virtual Tour back button
-  els.catVtBackBtn?.addEventListener('click', (e) => {
+  // Generic Sub-Menu back button
+  $('catSubMenuBackBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (els.catLevelVirtualTour) els.catLevelVirtualTour.hidden = true;
+    if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
     if (els.catLevel1) els.catLevel1.hidden = false;
   });
 
@@ -3406,64 +3461,48 @@ function initCustomMenuAdminAndClient() {
 
   // Setup Admin Modals
   // 1. Location Intel Modal
+  $('adminLocIntelAddBtn')?.addEventListener('click', () => {
+    addAdminSubItemRow('adminLocIntelList');
+  });
   $('adminLocIntelSave')?.addEventListener('click', () => {
-    const fileInput = $('adminLocIntelFile');
-    const urlInput = $('adminLocIntelUrl');
-    const file = fileInput?.files?.[0];
-    const url = (urlInput?.value || '').trim();
-    if (file) {
-      state.menuConfig.location_intel = {
-        enabled: true,
-        videoBlob: file,
-        videoName: file.name,
-        videoUrl: `sample/${file.name}`
-      };
-    } else if (url) {
-      state.menuConfig.location_intel = {
-        enabled: true,
-        videoUrl: url,
-        videoName: '',
-        videoBlob: null
-      };
-    }
+    const title = ($('adminLocIntelSectionTitle')?.value || '').trim();
+    const items = getAdminSubItemRows('adminLocIntelList');
+    state.menuConfig.location_intel = {
+      title,
+      enabled: items.length > 0,
+      items
+    };
     closeCustomModal(els.adminLocationIntelModal);
     onAlignmentChanged();
     renderClientSidebar();
   });
   $('adminLocIntelClear')?.addEventListener('click', () => {
     state.menuConfig.location_intel.enabled = false;
+    state.menuConfig.location_intel.items = [];
     closeCustomModal(els.adminLocationIntelModal);
     onAlignmentChanged();
     renderClientSidebar();
   });
 
   // 2. Walkthrough Video Modal
+  $('adminWalkthroughAddBtn')?.addEventListener('click', () => {
+    addAdminSubItemRow('adminWalkthroughList');
+  });
   $('adminWalkthroughSave')?.addEventListener('click', () => {
-    const fileInput = $('adminWalkthroughFile');
-    const urlInput = $('adminWalkthroughUrl');
-    const file = fileInput?.files?.[0];
-    const url = (urlInput?.value || '').trim();
-    if (file) {
-      state.menuConfig.walkthrough_video = {
-        enabled: true,
-        videoBlob: file,
-        videoName: file.name,
-        videoUrl: `sample/${file.name}`
-      };
-    } else if (url) {
-      state.menuConfig.walkthrough_video = {
-        enabled: true,
-        videoUrl: url,
-        videoName: '',
-        videoBlob: null
-      };
-    }
+    const title = ($('adminWalkthroughSectionTitle')?.value || '').trim();
+    const items = getAdminSubItemRows('adminWalkthroughList');
+    state.menuConfig.walkthrough_video = {
+      title,
+      enabled: items.length > 0,
+      items
+    };
     closeCustomModal(els.adminWalkthroughModal);
     onAlignmentChanged();
     renderClientSidebar();
   });
   $('adminWalkthroughClear')?.addEventListener('click', () => {
     state.menuConfig.walkthrough_video.enabled = false;
+    state.menuConfig.walkthrough_video.items = [];
     closeCustomModal(els.adminWalkthroughModal);
     onAlignmentChanged();
     renderClientSidebar();
@@ -3471,20 +3510,13 @@ function initCustomMenuAdminAndClient() {
 
   // 3. Virtual Tour Modal
   $('adminVtAddBtn')?.addEventListener('click', () => {
-    addAdminVtRow('', '');
+    addAdminSubItemRow('adminVtList');
   });
   $('adminVtSave')?.addEventListener('click', () => {
-    const list = $('adminVtList');
-    const rows = list?.querySelectorAll('.vt-item-row') || [];
-    const items = [];
-    rows.forEach((row, i) => {
-      const name = (row.querySelector('.vt-name')?.value || '').trim();
-      const url = (row.querySelector('.vt-url')?.value || '').trim();
-      if (name || url) {
-        items.push({ id: 'vt' + (i + 1), name: name || 'DESTINATION', url });
-      }
-    });
+    const title = ($('adminVtSectionTitle')?.value || '').trim();
+    const items = getAdminSubItemRows('adminVtList');
     state.menuConfig.virtual_tour = {
+      title,
       enabled: items.length > 0,
       items
     };
@@ -3510,6 +3542,8 @@ function initCustomMenuAdminAndClient() {
     renderAdminGalleryPreviews();
   });
   $('adminGallerySave')?.addEventListener('click', () => {
+    const title = ($('adminGallerySectionTitle')?.value || '').trim();
+    state.menuConfig.gallery.title = title;
     state.menuConfig.gallery.enabled = (state.menuConfig.gallery.images?.length || 0) > 0;
     closeCustomModal(els.adminGalleryModal);
     onAlignmentChanged();
@@ -3524,23 +3558,24 @@ function initCustomMenuAdminAndClient() {
   });
 
   // 5. Brochure Modal
+  $('adminBrochureAddBtn')?.addEventListener('click', () => {
+    addAdminSubItemRow('adminBrochureList');
+  });
   $('adminBrochureSave')?.addEventListener('click', () => {
-    const fileInput = $('adminBrochureFile');
-    const file = fileInput?.files?.[0];
-    if (file) {
-      state.menuConfig.brochure = {
-        enabled: true,
-        pdfBlob: file,
-        pdfName: file.name,
-        pdfUrl: `sample/${file.name}`
-      };
-    }
+    const title = ($('adminBrochureSectionTitle')?.value || '').trim();
+    const items = getAdminSubItemRows('adminBrochureList');
+    state.menuConfig.brochure = {
+      title,
+      enabled: items.length > 0,
+      items
+    };
     closeCustomModal(els.adminBrochureModal);
     onAlignmentChanged();
     renderClientSidebar();
   });
   $('adminBrochureClear')?.addEventListener('click', () => {
     state.menuConfig.brochure.enabled = false;
+    state.menuConfig.brochure.items = [];
     closeCustomModal(els.adminBrochureModal);
     onAlignmentChanged();
     renderClientSidebar();
@@ -3548,6 +3583,7 @@ function initCustomMenuAdminAndClient() {
 
   // 6. Contact Us Modal
   $('adminContactSave')?.addEventListener('click', () => {
+    const sectionTitle = ($('adminContactSectionTitle')?.value || '').trim();
     const fileInput = $('adminContactImageFile');
     const file = fileInput?.files?.[0];
     const title = ($('adminContactTitle')?.value || '').trim();
@@ -3556,6 +3592,7 @@ function initCustomMenuAdminAndClient() {
     const email = ($('adminContactEmail')?.value || '').trim();
 
     state.menuConfig.contact_us = {
+      title: sectionTitle || 'CONTACT US',
       enabled: true,
       imageBlob: file || state.menuConfig.contact_us.imageBlob,
       imageName: file ? file.name : state.menuConfig.contact_us.imageName,

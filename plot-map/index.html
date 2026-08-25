@@ -434,18 +434,17 @@
         <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
       </div>
       <div class="modal-body custom-modal-body">
-        <p class="custom-modal-desc">Upload a location video file (.mp4, .webm) or enter a video URL.</p>
         <div class="form-group">
-          <label class="form-label">Upload Video File:</label>
-          <input type="file" id="adminLocIntelFile" accept="video/mp4,video/webm,video/*" class="form-input-file" />
-          <span class="file-status" id="adminLocIntelFileStatus">No file selected</span>
+          <label class="form-label">Section Display Name (in Client Sidebar):</label>
+          <input type="text" id="adminLocIntelSectionTitle" placeholder="e.g. LOCATION INTELLIGENCE" class="form-input-text" />
         </div>
-        <div class="form-group">
-          <label class="form-label">Or Video URL:</label>
-          <input type="text" id="adminLocIntelUrl" placeholder="https://example.com/video.mp4 or YouTube URL" class="form-input-text" />
+        <p class="custom-modal-desc">Add one or more location videos (URL or uploaded file) along with a sub-menu title for each.</p>
+        <div class="vt-items-list" id="adminLocIntelList">
+          <!-- Dynamic Location Intel sub-items list -->
         </div>
-        <div class="modal-actions-bar">
-          <button class="btn btn-ghost" id="adminLocIntelClear" type="button">Remove / Disable</button>
+        <button class="btn btn-ghost" id="adminLocIntelAddBtn" type="button" style="margin-top: 8px;">＋ Add Location Video Sub-Item</button>
+        <div class="modal-actions-bar" style="margin-top: 16px;">
+          <button class="btn btn-ghost" id="adminLocIntelClear" type="button">Remove / Disable All</button>
           <button class="btn btn-primary" id="adminLocIntelSave" type="button">Save Location Intelligence</button>
         </div>
       </div>
@@ -461,19 +460,18 @@
         <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
       </div>
       <div class="modal-body custom-modal-body">
-        <p class="custom-modal-desc">Upload a project walkthrough video (.mp4, .webm) or enter a video URL.</p>
         <div class="form-group">
-          <label class="form-label">Upload Video File:</label>
-          <input type="file" id="adminWalkthroughFile" accept="video/mp4,video/webm,video/*" class="form-input-file" />
-          <span class="file-status" id="adminWalkthroughFileStatus">No file selected</span>
+          <label class="form-label">Section Display Name (in Client Sidebar):</label>
+          <input type="text" id="adminWalkthroughSectionTitle" placeholder="e.g. WALKTHROUGH VIDEO" class="form-input-text" />
         </div>
-        <div class="form-group">
-          <label class="form-label">Or Video URL:</label>
-          <input type="text" id="adminWalkthroughUrl" placeholder="https://example.com/walkthrough.mp4" class="form-input-text" />
+        <p class="custom-modal-desc">Add one or more walkthrough videos (e.g. HOME VIDEO, KITCHEN VIDEO, AMENITIES VIDEO).</p>
+        <div class="vt-items-list" id="adminWalkthroughList">
+          <!-- Dynamic Walkthrough Video sub-items list -->
         </div>
-        <div class="modal-actions-bar">
-          <button class="btn btn-ghost" id="adminWalkthroughClear" type="button">Remove / Disable</button>
-          <button class="btn btn-primary" id="adminWalkthroughSave" type="button">Save Walkthrough Video</button>
+        <button class="btn btn-ghost" id="adminWalkthroughAddBtn" type="button" style="margin-top: 8px;">＋ Add Video Sub-Item</button>
+        <div class="modal-actions-bar" style="margin-top: 16px;">
+          <button class="btn btn-ghost" id="adminWalkthroughClear" type="button">Remove / Disable All</button>
+          <button class="btn btn-primary" id="adminWalkthroughSave" type="button">Save Walkthrough Videos</button>
         </div>
       </div>
     </div>
@@ -488,6 +486,10 @@
         <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
       </div>
       <div class="modal-body custom-modal-body">
+        <div class="form-group">
+          <label class="form-label">Section Display Name (in Client Sidebar):</label>
+          <input type="text" id="adminVtSectionTitle" placeholder="e.g. VIRTUAL TOUR" class="form-input-text" />
+        </div>
         <p class="custom-modal-desc">Add one or more 3DVista or virtual tour links along with a title for each (e.g. MANDIR, CLUB HOUSE & POOL, GYM, etc.).</p>
         <div class="vt-items-list" id="adminVtList">
           <!-- Dynamic Virtual Tour items list -->
@@ -510,6 +512,10 @@
         <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
       </div>
       <div class="modal-body custom-modal-body">
+        <div class="form-group">
+          <label class="form-label">Section Display Name (in Client Sidebar):</label>
+          <input type="text" id="adminGallerySectionTitle" placeholder="e.g. GALLERY" class="form-input-text" />
+        </div>
         <p class="custom-modal-desc">Upload one or more project images for the photo gallery.</p>
         <div class="form-group">
           <label class="form-label">Upload Gallery Images:</label>
@@ -535,14 +541,17 @@
         <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
       </div>
       <div class="modal-body custom-modal-body">
-        <p class="custom-modal-desc">Upload a PDF brochure file for the project.</p>
         <div class="form-group">
-          <label class="form-label">Upload PDF Brochure:</label>
-          <input type="file" id="adminBrochureFile" accept=".pdf,application/pdf" class="form-input-file" />
-          <span class="file-status" id="adminBrochureFileStatus">No file selected</span>
+          <label class="form-label">Section Display Name (in Client Sidebar):</label>
+          <input type="text" id="adminBrochureSectionTitle" placeholder="e.g. BROCHURE" class="form-input-text" />
         </div>
-        <div class="modal-actions-bar">
-          <button class="btn btn-ghost" id="adminBrochureClear" type="button">Remove / Disable</button>
+        <p class="custom-modal-desc">Add one or more PDF brochure files (e.g. MASTER BROCHURE, FLOOR PLANS).</p>
+        <div class="vt-items-list" id="adminBrochureList">
+          <!-- Dynamic Brochure sub-items list -->
+        </div>
+        <button class="btn btn-ghost" id="adminBrochureAddBtn" type="button" style="margin-top: 8px;">＋ Add PDF Brochure Sub-Item</button>
+        <div class="modal-actions-bar" style="margin-top: 16px;">
+          <button class="btn btn-ghost" id="adminBrochureClear" type="button">Remove / Disable All</button>
           <button class="btn btn-primary" id="adminBrochureSave" type="button">Save Brochure</button>
         </div>
       </div>
@@ -558,6 +567,10 @@
         <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
       </div>
       <div class="modal-body custom-modal-body">
+        <div class="form-group">
+          <label class="form-label">Section Display Name (in Client Sidebar):</label>
+          <input type="text" id="adminContactSectionTitle" placeholder="e.g. CONTACT US" class="form-input-text" />
+        </div>
         <p class="custom-modal-desc">Configure the project contact card displayed to clients.</p>
         <div class="form-group">
           <label class="form-label">Project Image / Site Photo:</label>
