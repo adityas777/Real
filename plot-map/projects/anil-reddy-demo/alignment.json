@@ -1,24 +1,24 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-07-08T13:00:34.677Z",
+  "savedAt": "2026-08-22T08:11:00.317Z",
   "transform": {
     "tx": -0.4449,
     "ty": -0.8403,
-    "scale": 0.85,
+    "scale": 0.06,
     "rotationDeg": -0.9
   },
   "view": {
-    "lonDeg": 202.76,
-    "latDeg": -13.3,
-    "fov": 38
+    "lonDeg": 204.73,
+    "latDeg": -54.23,
+    "fov": 56
   },
   "opacity": 0.75,
   "groundImage": {
-    "file": "sample/Untitled - July 08, 2026 at 17.02.04.web.png",
+    "file": "sample/Aditya_Plots.web.web.web.png",
     "opacity": 1
   },
   "panoImage": {
-    "file": "sample/DJI_20251106132132_0055_D.web.jpg"
+    "file": "sample/Aditya_ref_bg.web.web.web.jpg"
   }
 }

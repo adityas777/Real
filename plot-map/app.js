@@ -994,8 +994,48 @@ function openPanel(id, keepScroll = false) {
     rest.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(val(v))}</dd></div>`).join('');
   els.panelGrid.hidden = !price && rest.length === 0;
   const notes = val(row.notes); els.panelNotes.textContent = notes; els.panelNotes.hidden = !notes;
-  const hasTour = !!val(row.tour_url);
-  els.walkBtn.hidden = !hasTour; els.walkBtn.disabled = !hasTour; els.walkBtn.onclick = hasTour ? () => openModal(row) : null;
+  const mediaList = getPlotMediaList(row);
+  let ctaWrap = els.panel.querySelector('.panel-cta-wrap');
+  if (!ctaWrap) {
+    ctaWrap = document.createElement('div');
+    ctaWrap.className = 'panel-cta-wrap';
+    els.walkBtn.parentNode.insertBefore(ctaWrap, els.walkBtn);
+    els.walkBtn.hidden = true;
+  }
+
+  ctaWrap.innerHTML = '';
+  if (!mediaList.length && !state.admin) {
+    ctaWrap.hidden = true;
+  } else {
+    ctaWrap.hidden = false;
+    mediaList.forEach((media, idx) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = idx === 0 ? 'btn btn-primary panel-cta' : 'btn btn-primary panel-cta panel-cta-sub';
+      const icon = media.type === 'youtube' ? '▶' : media.type === 'image' ? '📷' : '🌐';
+      const defaultTitle = media.type === 'youtube' ? 'Watch Video' : media.type === 'image' ? 'View Photo' : 'Walk through this plot';
+      btn.innerHTML = `<span>${icon} ${esc(media.title || defaultTitle)}</span><span class="panel-cta-arrow" aria-hidden="true">→</span>`;
+      btn.onclick = () => openModal(media, row.plot_id);
+      ctaWrap.appendChild(btn);
+    });
+
+    if (state.admin) {
+      const adminBtn = document.createElement('button');
+      adminBtn.type = 'button';
+      adminBtn.className = 'btn btn-ghost panel-admin-edit-btn';
+      adminBtn.style.cssText = 'width:100%; margin-top:6px; font-size:11px; padding:6px 10px; border:1px dashed var(--gold); color:var(--gold); display:flex; align-items:center; justify-content:center; gap:6px; background:rgba(212,175,55,0.08); border-radius:6px; cursor:pointer;';
+      adminBtn.innerHTML = '<span>✏️ Edit Media & Plot Data</span><span style="font-size:10px; opacity:0.8;">(Admin) →</span>';
+      adminBtn.onclick = async () => {
+        await openTrace();
+        const foundIdx = trace.plots.findIndex(p => canonPlotId(p.id) === canonPlotId(id));
+        if (foundIdx >= 0) {
+          trace.sel = foundIdx;
+          refreshTraceList();
+        }
+      };
+      ctaWrap.appendChild(adminBtn);
+    }
+  }
   els.walkHint.hidden = true; els.walkHint.textContent = '';
   els.panel.classList.add('open'); els.panel.setAttribute('aria-hidden', 'false');
   panelDims = { w: els.panel.offsetWidth, h: els.panel.offsetHeight };  // measure once per open (content height varies)
@@ -1039,19 +1079,137 @@ function closePanel() {
   if (state.selectedId) { restorePlotStyle(state.selectedId); state.selectedId = null; requestRender(); }
 }
 
-// ─── Tour modal ───────────────────────────────────────────────────────────────
+// ─── Media Type Parser & List Helper (3D Tour, YouTube, Image) ──────────────────
+function parseMediaType(url) {
+  if (!url) return { type: 'none', url: '' };
+  url = String(url).trim();
+  const ytMatch = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+  if (ytMatch) {
+    return { type: 'youtube', videoId: ytMatch[1], embedUrl: `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0` };
+  }
+  if (/\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i.test(url) || url.startsWith('data:image/') || url.startsWith('blob:')) {
+    return { type: 'image', url };
+  }
+  return { type: 'walkthrough', url };
+}
+
+function getPlotMediaList(row) {
+  if (!row) return [];
+  const list = [];
+  const urlsSeen = new Set();
+
+  const addMediaItem = (type, url, title) => {
+    if (!url || !String(url).trim()) return;
+    const u = String(url).trim();
+    if (urlsSeen.has(u)) return;
+    urlsSeen.add(u);
+    const parsed = parseMediaType(u);
+    const finalType = type || (parsed.type !== 'none' ? parsed.type : 'walkthrough');
+    const defaultTitle = finalType === 'youtube' ? 'Watch Video' : finalType === 'image' ? 'View Photo' : 'Walk through this plot';
+    list.push({
+      type: finalType,
+      url: u,
+      title: title || defaultTitle,
+      embedUrl: parsed.embedUrl,
+    });
+  };
+
+  // 1. In-memory mediaList array
+  if (Array.isArray(row.mediaList)) {
+    row.mediaList.forEach(item => {
+      addMediaItem(item.type, item.url || item.tour_url, item.title || item.label);
+    });
+  }
+
+  // 2. media_json string or array
+  if (row.media_json) {
+    try {
+      const arr = typeof row.media_json === 'string' ? JSON.parse(row.media_json) : row.media_json;
+      if (Array.isArray(arr)) {
+        arr.forEach(item => {
+          addMediaItem(item.type, item.url || item.tour_url, item.title || item.label);
+        });
+      }
+    } catch {}
+  }
+
+  // 3. Fallback CSV columns
+  addMediaItem('walkthrough', row.tour_url, 'Walk through this plot');
+  addMediaItem('youtube', row.video_url, 'Watch Video');
+  addMediaItem('image', row.image_url, 'View Photo');
+
+  return list;
+}
+
+// ─── Tour & Media modal ────────────────────────────────────────────────────────
 let lastFocused = null;
-function openModal(row) {
+function openModal(media, plotId = '') {
   lastFocused = document.activeElement;
-  els.modalTitle.textContent = `Walkthrough · ${row.plot_id.replace('Plot-', 'Plot ')}`;
-  els.modalOpenNew.href = row.tour_url; els.modalSpinner.style.display = 'grid';
-  els.tourFrame.src = row.tour_url; els.tourFrame.onload = () => { els.modalSpinner.style.display = 'none'; };
-  els.modal.classList.add('open'); els.modal.setAttribute('aria-hidden', 'false');
-  document.addEventListener('keydown', onModalKey); setTimeout(() => els.modalClose.focus(), 0);
+  let rawUrl = '', type = 'walkthrough', title = '', embedUrl = '';
+  if (typeof media === 'string') {
+    rawUrl = media;
+    const parsed = parseMediaType(rawUrl);
+    type = parsed.type; embedUrl = parsed.embedUrl;
+  } else if (media && typeof media === 'object') {
+    rawUrl = media.url || media.tour_url || '';
+    const parsed = parseMediaType(rawUrl);
+    type = media.type || parsed.type;
+    embedUrl = media.embedUrl || parsed.embedUrl;
+    title = media.title || '';
+    if (!plotId && media.plot_id) plotId = media.plot_id;
+  }
+
+  const plotName = plotId ? plotId.replace('Plot-', 'Plot ') : '';
+  const mediaTypeName = type === 'youtube' ? 'YouTube Video' : type === 'image' ? 'Image' : '3D Walkthrough';
+  const displayTitle = title ? `${title}${plotName ? ' · ' + plotName : ''}` : `${mediaTypeName}${plotName ? ' · ' + plotName : ''}`;
+
+  els.modalTitle.textContent = displayTitle;
+  els.modalOpenNew.href = rawUrl || '#';
+  els.modalSpinner.style.display = 'grid';
+
+  let imgEl = els.modal.querySelector('.modal-img');
+  if (!imgEl) {
+    imgEl = document.createElement('img');
+    imgEl.className = 'modal-img';
+    imgEl.style.cssText = 'max-width:100%; max-height:80vh; object-fit:contain; display:none; margin:auto; border-radius:8px; box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+    els.tourFrame.parentNode.appendChild(imgEl);
+  }
+
+  if (type === 'youtube') {
+    els.tourFrame.style.display = 'block';
+    imgEl.style.display = 'none';
+    imgEl.src = '';
+    els.tourFrame.src = embedUrl || rawUrl;
+    els.tourFrame.onload = () => { els.modalSpinner.style.display = 'none'; };
+  } else if (type === 'image') {
+    els.tourFrame.style.display = 'none';
+    els.tourFrame.src = 'about:blank';
+    imgEl.src = rawUrl;
+    imgEl.style.display = 'block';
+    imgEl.onload = () => { els.modalSpinner.style.display = 'none'; };
+    imgEl.onerror = () => { els.modalSpinner.style.display = 'none'; };
+  } else {
+    els.tourFrame.style.display = 'block';
+    imgEl.style.display = 'none';
+    imgEl.src = '';
+    els.tourFrame.src = rawUrl || 'about:blank';
+    els.tourFrame.onload = () => { els.modalSpinner.style.display = 'none'; };
+  }
+
+  els.modal.classList.add('open');
+  els.modal.setAttribute('aria-hidden', 'false');
+  document.addEventListener('keydown', onModalKey);
+  setTimeout(() => els.modalClose.focus(), 0);
 }
 function closeModal() {
-  els.modal.classList.remove('open'); els.modal.setAttribute('aria-hidden', 'true'); els.tourFrame.src = 'about:blank';
-  document.removeEventListener('keydown', onModalKey); lastFocused?.focus?.();
+  els.modal.classList.remove('open');
+  els.modal.setAttribute('aria-hidden', 'true');
+  els.tourFrame.src = 'about:blank';
+  const imgEl = els.modal.querySelector('.modal-img');
+  if (imgEl) { imgEl.src = ''; imgEl.style.display = 'none'; }
+  els.tourFrame.style.display = 'block';
+  document.removeEventListener('keydown', onModalKey);
+  lastFocused?.focus?.();
 }
 function onModalKey(e) {
   if (e.key === 'Escape') return closeModal();
@@ -1234,9 +1392,23 @@ function buildPlotsSVG() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.round(state.imgW)} ${Math.round(state.imgH)}" class="plot-overlay" preserveAspectRatio="xMidYMid meet">\n  <!-- Exported by the Build91 admin trace tool. -->\n  <g class="plots">\n${body}\n  </g>\n</svg>\n`;
 }
 function buildPlotsCSV(rowsMap = state.rows) {
-  const cols = ['plot_id', 'status', 'facing', 'size', 'dimensions', 'price', 'block', 'tour_url', 'notes'];
+  const cols = ['plot_id', 'status', 'facing', 'size', 'dimensions', 'price', 'block', 'tour_url', 'video_url', 'image_url', 'media_json', 'notes'];
   const esc = (v) => { v = (v ?? '').toString(); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
-  const rows = state.geom.map((g) => { const r = rowsMap.get(g.id) || { plot_id: g.id }; return cols.map((c) => esc(c === 'plot_id' ? g.id : r[c])).join(','); });
+  const rows = state.geom.map((g) => {
+    const r = rowsMap.get(g.id) || { plot_id: g.id };
+    if (r.mediaList && r.mediaList.length) {
+      if (!r.media_json || typeof r.media_json !== 'string') {
+        r.media_json = JSON.stringify(r.mediaList);
+      }
+      const mainTour = r.mediaList.find(m => m.type === 'walkthrough') || r.mediaList[0];
+      if (mainTour && !r.tour_url) r.tour_url = mainTour.url;
+      const mainYt = r.mediaList.find(m => m.type === 'youtube');
+      if (mainYt && !r.video_url) r.video_url = mainYt.url;
+      const mainImg = r.mediaList.find(m => m.type === 'image');
+      if (mainImg && !r.image_url) r.image_url = mainImg.url;
+    }
+    return cols.map((c) => esc(c === 'plot_id' ? g.id : r[c])).join(',');
+  });
   return cols.join(',') + '\n' + rows.join('\n') + '\n';
 }
 // ─── Server-side save ─────────────────────────────────────────────────────────
@@ -1569,7 +1741,6 @@ function doManualClick(pt) {
   let p = snapTarget(pt, null) || { x: pt.x, y: pt.y };
   if (!trace.draft) { trace.draft = [p]; }
   else { const f = toScr(trace.draft[0].x, trace.draft[0].y), s = toScr(p.x, p.y); if (trace.draft.length >= 3 && Math.hypot(f.x - s.x, f.y - s.y) < 10) { addPlot(trace.draft.slice()); trace.draft = null; } else trace.draft.push(p); }
-  drawTrace();
 }
 
 // — pointer / wheel —
@@ -1609,32 +1780,233 @@ function refreshTraceList() {
   els.traceCount.textContent = `${trace.plots.length} plot${trace.plots.length === 1 ? '' : 's'}`;
   els.traceList.innerHTML = '';
   trace.plots.forEach((p, i) => {
+    if (!p.mediaList) p.mediaList = getPlotMediaList(p);
+
+    const syncMedia = () => {
+      p.media_json = JSON.stringify(p.mediaList);
+      const mainTour = p.mediaList.find(m => m.type === 'walkthrough') || p.mediaList[0];
+      p.tour_url = mainTour ? mainTour.url : (p.tour_url || '');
+      const mainYt = p.mediaList.find(m => m.type === 'youtube');
+      p.video_url = mainYt ? mainYt.url : (p.video_url || '');
+      const mainImg = p.mediaList.find(m => m.type === 'image');
+      p.image_url = mainImg ? mainImg.url : (p.image_url || '');
+    };
+    syncMedia();
+
     const li = document.createElement('li'); li.className = 'trace-li' + (i === trace.sel ? ' is-sel' : '');
     const idIn = document.createElement('input'); idIn.className = 'trace-id'; idIn.value = p.id.replace('Plot-', ''); idIn.title = 'Plot number';
     idIn.addEventListener('change', () => { p.id = 'Plot-' + idIn.value.trim(); drawTrace(); });
+    
     const sel = document.createElement('select'); sel.className = 'trace-status';
     STATUS_ORDER.forEach((s) => { const o = document.createElement('option'); o.value = s; o.textContent = STATUS_META[s].label; if (s === p.status) o.selected = true; sel.appendChild(o); });
     sel.addEventListener('change', () => { p.status = sel.value; drawTrace(); });
-    const del = document.createElement('button'); del.className = 'trace-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete plot';
-    del.addEventListener('click', () => { trace.plots.splice(i, 1); if (trace.sel >= trace.plots.length) trace.sel = trace.plots.length - 1; refreshTraceList(); drawTrace(); });
-    li.append(idIn, sel, del);
-    li.addEventListener('click', (ev) => { if (ev.target.closest('input,select,button,.trace-edit')) return; trace.sel = (trace.sel === i ? -1 : i); refreshTraceList(); drawTrace(); });
-    if (i === trace.sel) {                                // selected plot expands an inline data editor
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn btn-ghost btn-xs trace-edit-btn';
+    editBtn.type = 'button';
+    editBtn.textContent = i === trace.sel ? '▲ Close' : '✏️ Edit';
+    editBtn.title = 'Edit plot data and media';
+    editBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      trace.sel = (trace.sel === i ? -1 : i);
+      refreshTraceList();
+      drawTrace();
+    });
+
+    const del = document.createElement('button'); del.className = 'trace-del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Delete plot';
+    del.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      trace.plots.splice(i, 1);
+      if (trace.sel >= trace.plots.length) trace.sel = trace.plots.length - 1;
+      refreshTraceList();
+      drawTrace();
+    });
+
+    if (p.mediaList.length) {
+      const mediaBadge = document.createElement('span');
+      mediaBadge.className = 'trace-media-badge';
+      mediaBadge.title = `${p.mediaList.length} media item(s) attached`;
+      mediaBadge.textContent = `🎬 ${p.mediaList.length}`;
+      li.append(idIn, mediaBadge, sel, editBtn, del);
+    } else {
+      li.append(idIn, sel, editBtn, del);
+    }
+
+    li.addEventListener('click', (ev) => {
+      if (ev.target.closest('input,select,button,.trace-edit,label')) return;
+      trace.sel = (trace.sel === i ? -1 : i);
+      refreshTraceList();
+      drawTrace();
+    });
+
+    if (i === trace.sel) {
       const ed = document.createElement('div'); ed.className = 'trace-edit';
-      const field = (label, key, ph) => {
+      
+      const field = (label, key, ph, onUpdate) => {
         const w = document.createElement('label'); w.className = 'trace-field'; w.append(document.createTextNode(label));
         const inp = document.createElement('input'); inp.type = 'text'; inp.value = p[key] || ''; if (ph) inp.placeholder = ph;
-        inp.addEventListener('input', () => { p[key] = inp.value; });
+        inp.addEventListener('input', () => {
+          p[key] = inp.value;
+          if (onUpdate) onUpdate(inp.value);
+        });
         w.appendChild(inp); return w;
       };
+
       ed.append(
         field('Price', 'price', 'e.g. ₹ 12,50,000'),
         field('Area', 'size', 'e.g. 1,500 sq ft'),
         field('Facing', 'facing', 'e.g. East'),
         field('Dimensions', 'dimensions', "e.g. 30' × 50'"),
-        field('Tour URL', 'tour_url', 'https://…'),
-        field('Notes', 'notes', ''),
       );
+
+      // Quick Media Link Fields
+      ed.append(
+        field('3D Tour URL', 'tour_url', 'https://demo.build91.in/...', (val) => {
+          if (val) {
+            const existing = p.mediaList.find(m => m.type === 'walkthrough');
+            if (existing) existing.url = val;
+            else p.mediaList.unshift({ type: 'walkthrough', url: val, title: '3D Virtual Walkthrough' });
+          }
+          syncMedia();
+        }),
+        field('YouTube Video URL', 'video_url', 'https://www.youtube.com/watch?v=...', (val) => {
+          if (val) {
+            const existing = p.mediaList.find(m => m.type === 'youtube');
+            if (existing) existing.url = val;
+            else p.mediaList.push({ type: 'youtube', url: val, title: 'Watch Video' });
+          }
+          syncMedia();
+        }),
+        field('Image / Photo URL', 'image_url', 'https://images.unsplash.com/...', (val) => {
+          if (val) {
+            const existing = p.mediaList.find(m => m.type === 'image');
+            if (existing) existing.url = val;
+            else p.mediaList.push({ type: 'image', url: val, title: 'View Photo' });
+          }
+          syncMedia();
+        })
+      );
+
+      // Multi-Media Manager Box
+      const mediaBox = document.createElement('div');
+      mediaBox.className = 'trace-media-box';
+
+      const mediaHead = document.createElement('div');
+      mediaHead.className = 'trace-media-head';
+      mediaHead.textContent = `ATTACHED MEDIA (${p.mediaList.length} ATTACHMENT${p.mediaList.length === 1 ? '' : 'S'})`;
+      mediaBox.appendChild(mediaHead);
+
+      const itemsList = document.createElement('div');
+      itemsList.className = 'trace-media-items-list';
+
+      p.mediaList.forEach((mItem, mIdx) => {
+        const itemRow = document.createElement('div');
+        itemRow.className = 'trace-media-item-row';
+
+        const typeSel = document.createElement('select');
+        typeSel.className = 'trace-media-type-sel';
+        typeSel.innerHTML = `
+          <option value="walkthrough" ${mItem.type === 'walkthrough' ? 'selected' : ''}>🌐 3D Tour</option>
+          <option value="youtube" ${mItem.type === 'youtube' ? 'selected' : ''}>▶ YouTube</option>
+          <option value="image" ${mItem.type === 'image' ? 'selected' : ''}>📷 Image</option>
+        `;
+        typeSel.addEventListener('change', () => {
+          mItem.type = typeSel.value;
+          syncMedia();
+          refreshTraceList();
+        });
+
+        const titleInp = document.createElement('input');
+        titleInp.type = 'text';
+        titleInp.className = 'trace-media-title-inp';
+        titleInp.placeholder = 'Label (e.g. 3D Tour, Video)';
+        titleInp.value = mItem.title || '';
+        titleInp.addEventListener('input', () => {
+          mItem.title = titleInp.value;
+          syncMedia();
+        });
+
+        const urlInp = document.createElement('input');
+        urlInp.type = 'text';
+        urlInp.className = 'trace-media-url-inp';
+        urlInp.placeholder = 'URL (https://...)';
+        urlInp.value = mItem.url || '';
+        urlInp.addEventListener('input', () => {
+          mItem.url = urlInp.value;
+          syncMedia();
+        });
+
+        const prevBtn = document.createElement('button');
+        prevBtn.type = 'button'; prevBtn.className = 'btn btn-ghost btn-xs'; prevBtn.textContent = '👁'; prevBtn.title = 'Preview media';
+        prevBtn.addEventListener('click', () => {
+          if (!mItem.url) return alert('Enter a URL first.');
+          openModal(mItem, p.id);
+        });
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button'; delBtn.className = 'trace-del'; delBtn.textContent = '✕'; delBtn.title = 'Remove media item';
+        delBtn.addEventListener('click', () => {
+          p.mediaList.splice(mIdx, 1);
+          syncMedia();
+          refreshTraceList();
+        });
+
+        itemRow.append(typeSel, titleInp, urlInp, prevBtn, delBtn);
+        itemsList.appendChild(itemRow);
+      });
+
+      mediaBox.appendChild(itemsList);
+
+      // Add New Media Action Buttons
+      const addBar = document.createElement('div');
+      addBar.className = 'trace-media-presets';
+
+      const add3D = document.createElement('button');
+      add3D.type = 'button'; add3D.className = 'btn btn-ghost btn-xs'; add3D.textContent = '+ 🌐 3D Tour';
+      add3D.addEventListener('click', () => {
+        p.mediaList.push({ type: 'walkthrough', url: 'https://demo.build91.in/3BHK-Tour/index.htm', title: '3D Virtual Walkthrough' });
+        syncMedia();
+        refreshTraceList();
+      });
+
+      const addYt = document.createElement('button');
+      addYt.type = 'button'; addYt.className = 'btn btn-ghost btn-xs'; addYt.textContent = '+ ▶ YouTube';
+      addYt.addEventListener('click', () => {
+        p.mediaList.push({ type: 'youtube', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'Watch Video' });
+        syncMedia();
+        refreshTraceList();
+      });
+
+      const addImg = document.createElement('button');
+      addImg.type = 'button'; addImg.className = 'btn btn-ghost btn-xs'; addImg.textContent = '+ 📷 Image URL';
+      addImg.addEventListener('click', () => {
+        p.mediaList.push({ type: 'image', url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c', title: 'View Photo' });
+        syncMedia();
+        refreshTraceList();
+      });
+
+      const fileLabel = document.createElement('label');
+      fileLabel.className = 'btn btn-ghost btn-xs trace-file-label';
+      fileLabel.innerHTML = '+ 📁 Upload Image<input type="file" accept="image/*" hidden>';
+      const fileInp = fileLabel.querySelector('input');
+      fileInp.addEventListener('change', () => {
+        const file = fileInp.files?.[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            p.mediaList.push({ type: 'image', url: e.target.result, title: file.name.replace(/\.[^.]+$/, '') });
+            syncMedia();
+            refreshTraceList();
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      addBar.append(add3D, addYt, addImg, fileLabel);
+      mediaBox.appendChild(addBar);
+      ed.appendChild(mediaBox);
+
+      ed.append(field('Notes', 'notes', ''));
       li.appendChild(ed);
     }
     els.traceList.appendChild(li);
@@ -1696,7 +2068,11 @@ function finishTrace() {
   trace.plots.forEach((p) => {
     const row = state.rows.get(p.id) || { plot_id: p.id };
     row.plot_id = p.id; row.status = p.status;
-    ['size', 'price', 'facing', 'dimensions', 'tour_url', 'notes', 'block'].forEach((k) => { if (p[k] !== undefined) row[k] = p[k]; });
+    ['size', 'price', 'facing', 'dimensions', 'tour_url', 'video_url', 'image_url', 'notes', 'block', 'media_json'].forEach((k) => { if (p[k] !== undefined) row[k] = p[k]; });
+    if (p.mediaList && p.mediaList.length) {
+      row.mediaList = p.mediaList;
+      row.media_json = JSON.stringify(p.mediaList);
+    }
     state.rows.set(p.id, row);
   });
   labelCache.clear();                                   // ids changed → rebuild label sprites
@@ -1711,6 +2087,15 @@ async function openTrace() {
   trace.open = true; els.traceWin.classList.add('open'); els.traceWin.setAttribute('aria-hidden', 'false');
   updateSheetAdminUI();
   if (state.geom.length) await loadCurrentLayoutIntoTrace();   // default to editing the live layout (price/status/retrace)
+  if (trace.plots.length > 0 && (trace.sel === -1 || trace.sel >= trace.plots.length)) {
+    let selIdx = 0;
+    if (state.selectedId) {
+      const found = trace.plots.findIndex(p => canonPlotId(p.id) === canonPlotId(state.selectedId));
+      if (found >= 0) selIdx = found;
+    }
+    trace.sel = selIdx;
+  }
+  refreshTraceList();
   requestAnimationFrame(() => { resizeTraceCanvas(); if (trace.W) fitTrace(); drawTrace(); });
 }
 // Pull the current working plots + their data + the plan image into the editor so
@@ -1719,8 +2104,23 @@ async function loadCurrentLayoutIntoTrace() {
   trace.W = state.imgW; trace.H = state.imgH;
   trace.plots = state.geom.map((g) => {
     const r = state.rows.get(g.id) || {};
-    return { id: g.id, status: STATUS_META[r.status] ? r.status : 'available', pts: g.pts.map((v) => ({ x: v.x, y: v.y })),
-      size: r.size || '', price: r.price || '', facing: r.facing || '', dimensions: r.dimensions || '', tour_url: r.tour_url || '', notes: r.notes || '', block: r.block || '' };
+    const mediaList = getPlotMediaList(r);
+    return {
+      id: g.id,
+      status: STATUS_META[r.status] ? r.status : 'available',
+      pts: g.pts.map((v) => ({ x: v.x, y: v.y })),
+      size: r.size || '',
+      price: r.price || '',
+      facing: r.facing || '',
+      dimensions: r.dimensions || '',
+      tour_url: r.tour_url || '',
+      video_url: r.video_url || '',
+      image_url: r.image_url || '',
+      notes: r.notes || '',
+      block: r.block || '',
+      media_json: r.media_json || (mediaList.length ? JSON.stringify(mediaList) : ''),
+      mediaList: mediaList,
+    };
   });
   trace.draft = null; trace.sel = -1;
   trace.seq = Math.max(0, ...state.geom.map((g) => { const m = /A(\d+)\b/.exec(g.id); return m ? +m[1] - 100 : 0; })); // keep new ids past existing A1xx
