@@ -2480,10 +2480,31 @@ function lonLatFromDir(v) {                               // inverse of dirFromL
 function lmBannerHTML(lm) {
   const ico = LM_ICONS[lm.icon] || LM_ICONS.place;
   const label = (lm.label || '').trim() ? esc(lm.label) : '<span class="lm-empty-label">New landmark</span>';
-  const dist = (lm.distance || '').trim() ? `<span><span class="lm-ic">📏</span>${esc(lm.distance)}</span>` : '';
-  const time = (lm.driveTime || '').trim() ? `<span><span class="lm-ic">🚗</span>${esc(lm.driveTime)}</span>` : '';
-  const meta = (dist || time) ? `<span class="lm-meta">${dist}${time}</span>` : '';
-  return `<span class="lm-ico">${ico}</span><div class="lm-text"><span class="lm-label">${label}</span>${meta}</div>`;
+
+  let distStr = (lm.distance || '').trim();
+  let timeStr = (lm.driveTime || '').trim();
+
+  let metaText = '';
+  if (distStr || timeStr) {
+    let parts = [];
+    if (distStr) {
+      let d = distStr.toUpperCase();
+      if (!d.startsWith('~')) d = '~' + d;
+      if (!/\bKM\b/i.test(d)) d += ' KM';
+      parts.push(d);
+    }
+    if (timeStr) {
+      let t = timeStr.toUpperCase();
+      if (!t.includes('MINUTE') && !t.includes('MIN')) t += ' MINUTE';
+      if (!t.startsWith('(') && !t.endsWith(')')) t = `(${t})`;
+      parts.push(t);
+    }
+    metaText = parts.join(' ');
+  }
+
+  const subBar = metaText ? `<div class="lm-sub-bar">${esc(metaText)}</div>` : '';
+
+  return `<div class="lm-head-row"><span class="lm-ico">${ico}</span><span class="lm-label">${label}</span></div>${subBar}`;
 }
 function ensureLmSvg() {
   if (lmSvg && lmSvg.isConnected) return lmSvg;
