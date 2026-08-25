@@ -742,7 +742,7 @@ function computeHome() {
   state.home.lon = Math.atan2(-mean.x, mean.z);
   state.home.lat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
   let maxAng = 0; dirs.forEach((d) => { maxAng = Math.max(maxAng, mean.angleTo(d)); });
-  state.home.fov = Math.max(88, Math.min(FOV_MAX, maxAng * 2 * 180 / Math.PI * 1.5));
+  state.home.fov = Math.max(50, Math.min(75, maxAng * 2 * 180 / Math.PI * 1.15));
 }
 
 // ─── Render loop (continuous rAF; rebuilds geometry first if marked dirty) ────
@@ -886,7 +886,7 @@ function wireViewControls() {
         applyCategoryFilter('ALL');
       } else if (act === 'aerial') {
         computeHome();
-        animateCameraTo(state.home.lon, state.home.lat, Math.max(state.home.fov, 92));
+        animateCameraTo(state.home.lon, state.home.lat, state.home.fov);
         state.autoPan = true;
       } else {
         const title = btn.textContent.replace('›', '').trim();
