@@ -52,7 +52,7 @@ const els = {
   tooltip: $('tooltip'), notice: $('notice'),
   zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'), amenityToggle: $('amenityToggle'),
   landmarks: $('landmarks'), amenities: $('amenities'),
-  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catNav: $('catNav'), catBackBtn: $('catBackBtn'), fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
+  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'), fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
   // admin tabs + landmarks
   axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'),
   axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'),
@@ -875,11 +875,30 @@ function wireViewControls() {
     if (els.catToggleIco) els.catToggleIco.textContent = collapsed ? '›' : '‹';
   });
 
+  els.catNavL1?.querySelectorAll('.cat-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      touch();
+      const act = btn.dataset.act;
+      if (act === 'landmarks') {
+        if (els.catLevel1) els.catLevel1.hidden = true;
+        if (els.catLevel2) els.catLevel2.hidden = false;
+        applyCategoryFilter('ALL');
+      } else if (act === 'aerial') {
+        computeHome(); Object.assign(state.view, state.home); requestRender();
+      } else {
+        const title = btn.textContent.replace('›', '').trim();
+        showNotice(`<strong>${esc(title)}</strong> section selected.`);
+      }
+    });
+  });
+
   els.catBackBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     touch();
     applyCategoryFilter('ALL');
-    computeHome(); Object.assign(state.view, state.home); requestRender();
+    if (els.catLevel2) els.catLevel2.hidden = true;
+    if (els.catLevel1) els.catLevel1.hidden = false;
   });
 
   els.catNav?.querySelectorAll('.cat-btn').forEach((btn) => {

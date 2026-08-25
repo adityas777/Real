@@ -879,13 +879,30 @@ body {
 .cat-back-btn:hover {
   color: #ffffff;
 }
+.cat-menu-level {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.cat-menu-level[hidden] { display: none; }
 .cat-nav {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 20px;
+  margin-top: 10px;
   flex: 1;
   overflow-y: auto;
+}
+.cat-btn-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cat-btn-arrow {
+  font-size: 16px;
+  font-weight: 400;
+  opacity: 0.75;
 }
 .cat-btn {
   background: transparent;

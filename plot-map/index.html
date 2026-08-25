@@ -105,24 +105,42 @@
       <div class="amenities" id="amenities" aria-hidden="true"></div>
     </div>
 
-    <!-- ─── Client Category Drawer (Left Panel Overlay) ────────────────────────── -->
-    <aside class="cat-drawer" id="catDrawer" aria-label="Landmark Categories">
-      <button class="cat-drawer-toggle" id="catDrawerToggle" type="button" aria-label="Toggle Category Panel" title="Toggle Categories">
+    <!-- ─── Client Navigation Drawer (Left Panel Overlay) ────────────────────────── -->
+    <aside class="cat-drawer" id="catDrawer" aria-label="Client Navigation">
+      <button class="cat-drawer-toggle" id="catDrawerToggle" type="button" aria-label="Toggle Navigation Panel" title="Toggle Navigation">
         <span class="cat-toggle-ico" id="catToggleIco">‹</span>
       </button>
       <div class="cat-drawer-inner">
-        <div class="cat-drawer-head">
-          <button class="cat-back-btn" id="catBackBtn" type="button">‹ BACK</button>
+        <!-- Level 1: Main Menu -->
+        <div class="cat-menu-level" id="catLevel1">
+          <nav class="cat-nav" id="catNavL1" aria-label="Main Menu">
+            <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
+            <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
+            <button class="cat-btn" type="button" data-act="location_intel">LOCATION INTELLIGENCE</button>
+            <button class="cat-btn" type="button" data-act="walkthrough_video">WALKTHROUGH VIDEO</button>
+            <button class="cat-btn" type="button" data-act="virtual_tour">VIRTUAL TOUR</button>
+            <button class="cat-btn" type="button" data-act="gallery">GALLERY</button>
+            <button class="cat-btn" type="button" data-act="brochure">BROCHURE</button>
+            <button class="cat-btn" type="button" data-act="contact_us">CONTACT US</button>
+          </nav>
         </div>
-        <nav class="cat-nav" id="catNav" aria-label="Categories">
-          <button class="cat-btn is-active" type="button" data-cat="ALL">ALL LANDMARKS</button>
-          <button class="cat-btn" type="button" data-cat="HEALTHCARE">HEALTHCARE</button>
-          <button class="cat-btn" type="button" data-cat="EDUCATION">EDUCATION</button>
-          <button class="cat-btn" type="button" data-cat="COMMERCIAL">COMMERCIAL</button>
-          <button class="cat-btn" type="button" data-cat="CONNECTIVITY">CONNECTIVITY</button>
-          <button class="cat-btn" type="button" data-cat="LIFESTYLE">LIFESTYLE</button>
-          <button class="cat-btn" type="button" data-cat="TEMPLE">TEMPLE</button>
-        </nav>
+
+        <!-- Level 2: Landmarks Sub-Menu -->
+        <div class="cat-menu-level" id="catLevel2" hidden>
+          <div class="cat-drawer-head">
+            <button class="cat-back-btn" id="catBackBtn" type="button">‹ BACK</button>
+          </div>
+          <nav class="cat-nav" id="catNav" aria-label="Landmark Categories">
+            <button class="cat-btn is-active" type="button" data-cat="ALL">ALL LANDMARKS</button>
+            <button class="cat-btn" type="button" data-cat="HEALTHCARE">HEALTHCARE</button>
+            <button class="cat-btn" type="button" data-cat="EDUCATION">EDUCATION</button>
+            <button class="cat-btn" type="button" data-cat="COMMERCIAL">COMMERCIAL</button>
+            <button class="cat-btn" type="button" data-cat="CONNECTIVITY">CONNECTIVITY</button>
+            <button class="cat-btn" type="button" data-cat="LIFESTYLE">LIFESTYLE</button>
+            <button class="cat-btn" type="button" data-cat="TEMPLE">TEMPLE</button>
+          </nav>
+        </div>
+
         <div class="cat-drawer-foot">
           <button class="btn btn-icon cat-foot-btn" id="fsToggle" type="button" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">⤢</button>
           <button class="btn btn-icon cat-foot-btn" id="audioToggle" type="button" title="Toggle Sound" aria-label="Toggle Sound">🔇</button>
