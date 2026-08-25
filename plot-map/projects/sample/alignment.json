@@ -1,31 +1,24 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-07-15T06:37:28.072Z",
+  "savedAt": "2026-08-25T04:49:33.958Z",
   "transform": {
-    "tx": 0.4276,
-    "ty": -0.1616,
-    "scale": 2.36,
-    "rotationDeg": -178.3
+    "tx": 1.0888,
+    "ty": 0.2001,
+    "scale": 0.09,
+    "rotationDeg": -0.6
   },
   "view": {
-    "lonDeg": -81.22,
-    "latDeg": -32.25,
-    "fov": 101
+    "lonDeg": 379.98,
+    "latDeg": -74.84,
+    "fov": 120
   },
-  "opacity": 0.9,
+  "opacity": 0.75,
   "groundImage": {
-    "file": "sample/Untitled - July 14, 2026 at 17.06.17.web.png",
-    "opacity": 0.75
+    "file": "Map_DesignCutOut10.web.png",
+    "opacity": 1
   },
   "panoImage": {
-    "file": "sample/DJI_20251106132132_0055_D.web.jpg"
-  },
-  "brand": {
-    "name": "DODDABALLAPURA",
-    "tagline": "Residential Malathahalli",
-    "logo": {
-      "file": "sample/logo.web.png"
-    }
+    "file": "Demo.web.jpg"
   }
 }

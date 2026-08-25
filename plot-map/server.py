@@ -233,17 +233,28 @@ def lan_ip():
     except Exception:
         return "your-lan-ip"
 
+class DualStackServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that attempts dual-stack IPv6/IPv4 socket binding."""
+    address_family = socket.AF_INET6 if getattr(socket, 'has_ipv6', False) else socket.AF_INET
+
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:
+            try:
+                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            except (AttributeError, OSError):
+                pass
+        super().server_bind()
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8731
-    # 0.0.0.0 = all interfaces so LAN devices can reach it; HOST env can restrict it.
-    host = os.environ.get("HOST", "0.0.0.0")
+    # "" or 0.0.0.0 = all interfaces so LAN devices & IPv4/IPv6 localhost can reach it.
+    host = os.environ.get("HOST", "")
     os.makedirs(PROJECTS_DIR, exist_ok=True)
-    httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"Build91 plot-map server listening on {host}:{port}  (projects dir: {PROJECTS_DIR})")
-    if host == "0.0.0.0":
-        print(f"  local:  http://localhost:{port}/")
-        print(f"  LAN:    http://{lan_ip()}:{port}/   (admin: add ?admin=1&project=<id>)")
-        print("  WARNING: the save/rename/delete API is open to your LAN with no auth. Use only on a trusted network.")
+    httpd = DualStackServer((host, port), Handler)
+    print(f"Build91 plot-map server listening on {host or 'all interfaces'}:{port}  (projects dir: {PROJECTS_DIR})")
+    print(f"  local:  http://localhost:{port}/  or  http://127.0.0.1:{port}/")
+    print(f"  LAN:    http://{lan_ip()}:{port}/   (admin: add ?admin=1&project=<id>)")
+    print("  WARNING: the save/rename/delete API is open to your LAN with no auth. Use only on a trusted network.")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

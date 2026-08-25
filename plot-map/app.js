@@ -2253,6 +2253,49 @@ window.addEventListener('pagehide', () => { try { three?.renderer?.forceContextL
 // overlay (so the banner can be nicely styled). Client is view-only.
 const LM_ICONS = { place: '📍', airport: '✈️', train: '🚆', metro: '🚇', bus: '🚌', highway: '🛣️', school: '🎓', college: '🏛️', hospital: '🏥', mall: '🛍️', market: '🏪', restaurant: '🍽️', park: '🌳', lake: '🌊', temple: '🛕', stadium: '🏟️', office: '🏢', hotel: '🏨', bank: '🏦' };
 const LM_ICON_ORDER = ['place', 'airport', 'train', 'metro', 'bus', 'highway', 'school', 'college', 'hospital', 'mall', 'market', 'restaurant', 'park', 'lake', 'temple', 'stadium', 'office', 'hotel', 'bank'];
+
+const ICON_CATEGORIES = [
+  { category: 'CONNECTIVITY', icons: ['airport', 'train', 'metro', 'bus', 'highway'] },
+  { category: 'HEALTHCARE', icons: ['hospital'] },
+  { category: 'EDUCATION', icons: ['school', 'college'] },
+  { category: 'COMMERCIAL', icons: ['mall', 'market', 'office', 'bank', 'hotel', 'shop'] },
+  { category: 'LIFESTYLE', icons: ['restaurant', 'park', 'lake', 'stadium', 'clubhouse', 'pool', 'gym', 'garden', 'playground', 'court', 'amphitheatre', 'pond'] },
+  { category: 'TEMPLE', icons: ['temple'] },
+  { category: 'GENERAL', icons: ['place', 'parking', 'gate', 'tower', 'hall'] }
+];
+
+function populateIconSelect(sel, currentIcon, iconDict, orderList) {
+  sel.innerHTML = '';
+  const categorized = new Set();
+  ICON_CATEGORIES.forEach((grp) => {
+    const validIcons = grp.icons.filter((k) => orderList.includes(k));
+    if (validIcons.length === 0) return;
+    const optgrp = document.createElement('optgroup');
+    optgrp.label = grp.category;
+    validIcons.forEach((k) => {
+      categorized.add(k);
+      const o = document.createElement('option');
+      o.value = k;
+      o.textContent = `${iconDict[k] || '📍'}  ${k}`;
+      if (k === currentIcon) o.selected = true;
+      optgrp.appendChild(o);
+    });
+    sel.appendChild(optgrp);
+  });
+  const remaining = orderList.filter((k) => !categorized.has(k));
+  if (remaining.length > 0) {
+    const optgrp = document.createElement('optgroup');
+    optgrp.label = 'OTHER';
+    remaining.forEach((k) => {
+      const o = document.createElement('option');
+      o.value = k;
+      o.textContent = `${iconDict[k] || '📍'}  ${k}`;
+      if (k === currentIcon) o.selected = true;
+      optgrp.appendChild(o);
+    });
+    sel.appendChild(optgrp);
+  }
+}
 const SVGNS = 'http://www.w3.org/2000/svg';
 let lmSeq = 0, lmSvg = null, lmDrag = null;
 const lmDom = new Map();                                  // id → { line, pin, banner }
@@ -2404,9 +2447,9 @@ function refreshLmList() {
         w.appendChild(inp); return w;
       };
       const iconField = () => {
-        const w = document.createElement('label'); w.className = 'ax-lm-field'; w.append(document.createTextNode('Icon'));
+        const w = document.createElement('label'); w.className = 'ax-lm-field'; w.append(document.createTextNode('Icon / Category'));
         const sel = document.createElement('select');
-        LM_ICON_ORDER.forEach((k) => { const o = document.createElement('option'); o.value = k; o.textContent = `${LM_ICONS[k]}  ${k}`; if (k === lm.icon) o.selected = true; sel.appendChild(o); });
+        populateIconSelect(sel, lm.icon, LM_ICONS, LM_ICON_ORDER);
         sel.addEventListener('change', () => { lm.icon = sel.value; sync(); });
         w.appendChild(sel); return w;
       };
@@ -2602,9 +2645,9 @@ function refreshAmList() {
         w.appendChild(inp); return w;
       };
       const iconField = () => {
-        const w = document.createElement('label'); w.className = 'ax-lm-field'; w.append(document.createTextNode('Icon'));
+        const w = document.createElement('label'); w.className = 'ax-lm-field'; w.append(document.createTextNode('Icon / Category'));
         const sel = document.createElement('select');
-        AM_ICON_ORDER.forEach((k) => { const o = document.createElement('option'); o.value = k; o.textContent = `${AM_ICONS[k]}  ${k}`; if (k === am.icon) o.selected = true; sel.appendChild(o); });
+        populateIconSelect(sel, am.icon, AM_ICONS, AM_ICON_ORDER);
         sel.addEventListener('change', () => { am.icon = sel.value; sync(); });
         w.appendChild(sel); return w;
       };
