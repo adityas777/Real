@@ -834,6 +834,8 @@ body {
 }
 
 /* ─── Client Category Drawer & Slow Motion Pan Controls ────────────────────── */
+body.is-admin .cat-drawer { display: none !important; }
+
 .cat-drawer {
   position: absolute;
   top: 0; left: 0; bottom: 0;

@@ -1733,6 +1733,7 @@ async function exportBundle() {
 function wireAdmin() {
   if (!state.admin) return;
   document.body.classList.add('is-admin'); els.adminBar.hidden = false;
+  if (els.catDrawer) els.catDrawer.hidden = true;
   updateAdminUI();
   setAdminMode('look');
 
