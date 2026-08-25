@@ -52,7 +52,7 @@ const els = {
   tooltip: $('tooltip'), notice: $('notice'),
   zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'), amenityToggle: $('amenityToggle'),
   landmarks: $('landmarks'), amenities: $('amenities'),
-  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'), fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
+  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catLevelSubMenu: $('catLevelSubMenu'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'), fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
   // admin tabs + landmarks
   axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'),
   axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'),
@@ -85,7 +85,7 @@ const els = {
   traceStage: $('traceStage'), traceCanvas: $('traceCanvas'), traceEmpty: $('traceEmpty'),
   // custom menu admin + client elements
   projCustomMenuBtn: $('projCustomMenuBtn'), projCustomDropdown: $('projCustomDropdown'),
-  catLevelVirtualTour: $('catLevelVirtualTour'), catVtNav: $('catVtNav'), catVtBackBtn: $('catVtBackBtn'),
+  catLevelSubMenu: $('catLevelSubMenu'), catSubMenuNav: $('catSubMenuNav'), catSubMenuBackBtn: $('catSubMenuBackBtn'),
   adminLocationIntelModal: $('adminLocationIntelModal'), adminWalkthroughModal: $('adminWalkthroughModal'),
   adminVirtualTourModal: $('adminVirtualTourModal'), adminGalleryModal: $('adminGalleryModal'),
   adminBrochureModal: $('adminBrochureModal'), adminContactModal: $('adminContactModal'),
@@ -3282,12 +3282,6 @@ function openSubItemModal(secKey, item) {
   } else if (secKey === 'brochure') {
     openSingleBrochureModal(item);
   }
-}
-      } else {
-        showNotice(`Virtual tour link not set for <strong>${esc(name)}</strong>.`);
-      }
-    });
-  });
 }
 
 function openClientVideoModal(title, config) {
