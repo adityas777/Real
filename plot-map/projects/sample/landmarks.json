@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 landmark hotspots",
-  "savedAt": "2026-08-25T04:49:33.958Z",
+  "savedAt": "2026-08-25T06:27:00.943Z",
   "landmarks": [
     {
       "id": "lm1",
@@ -61,6 +61,66 @@
       "banner": {
         "lonDeg": 173.44,
         "latDeg": 9.54
+      }
+    },
+    {
+      "id": "lm5",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "place",
+      "hotspot": {
+        "lonDeg": -65.72,
+        "latDeg": -31.92
+      },
+      "banner": {
+        "lonDeg": -65.72,
+        "latDeg": -19.92
+      }
+    },
+    {
+      "id": "lm6",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "airport",
+      "hotspot": {
+        "lonDeg": -87.54,
+        "latDeg": -7.06
+      },
+      "banner": {
+        "lonDeg": -98.16,
+        "latDeg": -3.34
+      }
+    },
+    {
+      "id": "lm7",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "metro",
+      "hotspot": {
+        "lonDeg": -137.43,
+        "latDeg": -15.47
+      },
+      "banner": {
+        "lonDeg": -136.32,
+        "latDeg": -4.23
+      }
+    },
+    {
+      "id": "lm8",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "highway",
+      "hotspot": {
+        "lonDeg": -165.79,
+        "latDeg": -32.34
+      },
+      "banner": {
+        "lonDeg": -160.14,
+        "latDeg": -6.31
       }
     }
   ]

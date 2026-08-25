@@ -1,19 +1,19 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-25T04:49:33.958Z",
+  "savedAt": "2026-08-25T06:27:00.943Z",
   "transform": {
-    "tx": 1.0888,
-    "ty": 0.2001,
-    "scale": 0.09,
-    "rotationDeg": -0.6
+    "tx": 1.3157,
+    "ty": -0.2425,
+    "scale": 0.08,
+    "rotationDeg": 2.5
   },
   "view": {
-    "lonDeg": 379.98,
-    "latDeg": -74.84,
-    "fov": 120
+    "lonDeg": 118.32,
+    "latDeg": -25.32,
+    "fov": 67
   },
-  "opacity": 0.75,
+  "opacity": 0.5,
   "groundImage": {
     "file": "Map_DesignCutOut10.web.png",
     "opacity": 1

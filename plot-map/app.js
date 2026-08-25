@@ -131,7 +131,7 @@ const state = {
   activeFilters: new Set(STATUS_ORDER),
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
-  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') === '1'; } catch { return false; } })(), // landmark banners: optional, default off
+  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
   landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   amenities: [], amSel: null, amCardOpen: null,  // in-layout amenities (icon pins + render); selected id; open card id
   cardAnchor: null, cardHoverMode: false,        // shared info-card anchor {lon,lat}; hover cards (landmarks) auto-hide
@@ -923,10 +923,9 @@ function applyCategoryFilter(cat) {
     });
   }
 
-  if (state.selectedCategory !== 'ALL' && !state.showLandmarks) {
-    state.showLandmarks = true;
-    applyLandmarkVisibility();
-  }
+  // Force landmarks visible when filtering by category
+  state.showLandmarks = true;
+  applyLandmarkVisibility();
 
   const matched = [];
   state.landmarks.forEach((lm) => {
@@ -964,9 +963,11 @@ function applyCategoryFilter(cat) {
     const mean = new THREE.Vector3();
     dirs.forEach((v) => mean.add(v));
     mean.divideScalar(dirs.length).normalize();
-    const targetLon = (Math.atan2(-mean.x, mean.z) + TAU) % TAU;
+    const targetLon = Math.atan2(-mean.x, mean.z);
     const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
     animateCameraTo(targetLon, targetLat);
+  } else if (state.selectedCategory !== 'ALL') {
+    showNotice(`No <strong>${esc(state.selectedCategory)}</strong> landmarks saved in this project yet. Add landmarks with airport/train/bus/highway icons in Admin mode and click <strong>Save</strong>.`);
   }
 }
 
