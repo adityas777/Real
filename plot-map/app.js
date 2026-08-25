@@ -3319,39 +3319,35 @@ function openClientBrochureModal() {
 }
 
 function openClientContactModal() {
-  const modal = els.clientContactModal || $('clientContactModal');
-  if (!modal) return;
-  try {
-    const c = state.menuConfig?.contact_us || {};
-    const title = $('clientContactTitle');
-    const about = $('clientContactAbout');
-    const phone = $('clientContactPhone');
-    const email = $('clientContactEmail');
-    const img = $('clientContactImg');
+  if (!els.clientContactModal) return;
+  const c = state.menuConfig.contact_us || {};
+  const title = $('clientContactTitle');
+  const about = $('clientContactAbout');
+  const phone = $('clientContactPhone');
+  const email = $('clientContactEmail');
+  const img = $('clientContactImg');
 
-    if (title) title.textContent = String(c.title || 'Anandam Eleganza - Premium Villa Plots');
-    if (about) about.textContent = String(c.about || 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh');
-    if (phone) {
-      const num = String(c.phone || '+91 7389705477');
-      phone.textContent = num;
-      phone.href = `tel:${num.replace(/\s+/g, '')}`;
-    }
-    if (email) {
-      const mail = String(c.email || 'anandameleganza@gmail.com');
-      email.textContent = mail;
-      email.href = `mailto:${mail}`;
-    }
-    if (img) {
-      const defaultImg = state.panoImage?.file ? assetUrl(state.panoImage.file) : 'projects/sample/Demo.web.jpg';
-      const src = c.imageBlob ? URL.createObjectURL(c.imageBlob) : (c.image ? assetUrl(c.image) : defaultImg);
-      img.src = src;
-    }
-  } catch (err) {
-    console.error('Contact modal error:', err);
+  if (title) title.textContent = c.title || 'Anandam Eleganza - Premium Villa Plots';
+  if (about) about.textContent = c.about || 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh';
+  if (phone) {
+    const num = c.phone || '+91 7389705477';
+    phone.textContent = num;
+    phone.href = `tel:${num.replace(/\s+/g, '')}`;
+  }
+  if (email) {
+    const mail = c.email || 'anandameleganza@gmail.com';
+    email.textContent = mail;
+    email.href = `mailto:${mail}`;
+  }
+  if (img) {
+    const defaultImg = state.panoImage?.file ? assetUrl(state.panoImage.file) : 'projects/sample/Demo.web.jpg';
+    const src = c.imageBlob ? URL.createObjectURL(c.imageBlob) : (c.image ? assetUrl(c.image) : defaultImg);
+    img.src = src;
   }
 
-  modal.classList.add('open');
-  modal.setAttribute('aria-hidden', 'false');
+  els.clientContactModal.style.display = 'flex';
+  els.clientContactModal.hidden = false;
+  els.clientContactModal.setAttribute('aria-hidden', 'false');
 }
 
 function initCustomMenuAdminAndClient() {
@@ -3589,18 +3585,15 @@ function initCustomMenuAdminAndClient() {
   });
 
   // Client Contact Close
-  const closeContact = () => {
+  const hideContactModal = () => {
     if (els.clientContactModal) {
-      els.clientContactModal.classList.remove('open');
-      els.clientContactModal.hidden = true;
       els.clientContactModal.style.display = 'none';
-      els.clientContactModal.setAttribute('hidden', '');
+      els.clientContactModal.hidden = true;
       els.clientContactModal.setAttribute('aria-hidden', 'true');
     }
   };
-
-  $('clientContactClose')?.addEventListener('click', closeContact);
-  els.clientContactModal?.querySelector('.contact-modal-backdrop')?.addEventListener('click', closeContact);
+  $('clientContactClose')?.addEventListener('click', hideContactModal);
+  els.clientContactModal?.querySelector('.contact-modal-backdrop')?.addEventListener('click', hideContactModal);
 }
 
 function openAdminMenuModal(act) {

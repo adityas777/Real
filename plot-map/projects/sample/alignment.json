@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-25T10:32:45.957Z",
+  "savedAt": "2026-08-25T12:56:58.787Z",
   "transform": {
     "tx": 1.3157,
     "ty": -0.2425,
@@ -9,8 +9,8 @@
     "rotationDeg": 2.5
   },
   "view": {
-    "lonDeg": 199.47,
-    "latDeg": 5.24,
+    "lonDeg": 190.93,
+    "latDeg": 2.96,
     "fov": 72
   },
   "opacity": 0.5,
@@ -28,7 +28,7 @@
       "videoName": ""
     },
     "walkthrough_video": {
-      "enabled": true,
+      "enabled": false,
       "videoUrl": "https://www.youtube.com/watch?v=5BOvC328DHY",
       "videoName": ""
     },
@@ -70,9 +70,9 @@
       "pdfName": "blogs.pdf"
     },
     "contact_us": {
-      "enabled": false,
-      "image": "",
-      "imageName": "",
+      "enabled": true,
+      "image": "sample/WhatsApp Image 2026-07-24 at 18.35.01.jpeg",
+      "imageName": "WhatsApp Image 2026-07-24 at 18.35.01.jpeg",
       "title": "Anandam Eleganza - Premium Villa Plots",
       "about": "Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh",
       "phone": "+91 7389705477",

@@ -649,38 +649,30 @@
     </div>
   </div>
 
-  <!-- Client Contact Us Modal -->
-  <div class="modal custom-feature-modal" id="clientContactModal" aria-hidden="true">
-    <div class="modal-backdrop" data-close></div>
-    <div class="modal-dialog feature-modal-dialog contact-modal-dialog" role="dialog" aria-label="Contact Information">
-      <div class="modal-bar">
-        <h3 class="modal-title">📞 Contact Us</h3>
-        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+  <!-- Client Contact Us Modal (Exact Replica of User Reference Image 2) -->
+  <div class="contact-modal" id="clientContactModal" aria-hidden="true" hidden style="position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.78); backdrop-filter:blur(8px);">
+    <div class="contact-modal-backdrop" data-close style="position:absolute; inset:0; z-index:1;"></div>
+    <div class="contact-modal-dialog" role="dialog" aria-label="Contact Information" style="position:relative; z-index:10; display:flex; flex-direction:row; width:880px; max-width:92vw; height:480px; max-height:85vh; background:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.7); margin:auto;">
+      
+      <!-- Left Side Image -->
+      <div class="contact-modal-left" style="flex:1.1; width:52%; height:100%; position:relative; overflow:hidden; background:#0f172a;">
+        <img id="clientContactImg" src="projects/sample/Demo.web.jpg" alt="Project Site Map" style="width:100%; height:100%; object-fit:cover; display:block;" />
+        <div style="position:absolute; inset:0; background:linear-gradient(to top, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0.15) 40%, transparent 100%); pointer-events:none;"></div>
       </div>
-      <div class="modal-body custom-modal-body contact-modal-body" style="padding:24px; background:var(--panel);">
-        <div class="contact-card-container">
-          <div class="contact-card-media" id="clientContactImgContainer">
-            <img id="clientContactImg" src="projects/sample/Demo.web.jpg" alt="Project Site Map" />
-          </div>
-          <div class="contact-card-details">
-            <h2 class="contact-card-title" id="clientContactTitle">Anandam Eleganza - Premium Villa Plots</h2>
-            <div class="contact-card-info">
-              <div class="contact-info-item">
-                <span class="contact-info-icon">📍</span>
-                <span class="contact-info-text" id="clientContactAbout">Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh</span>
-              </div>
-              <div class="contact-info-item" id="clientContactPhoneContainer">
-                <span class="contact-info-icon">📞</span>
-                <a class="contact-info-link" id="clientContactPhone" href="tel:+917389705477">+91 7389705477</a>
-              </div>
-              <div class="contact-info-item" id="clientContactEmailContainer">
-                <span class="contact-info-icon">✉️</span>
-                <a class="contact-info-link" id="clientContactEmail" href="mailto:anandameleganza@gmail.com">anandameleganza@gmail.com</a>
-              </div>
-            </div>
-          </div>
+      
+      <!-- Right Side White Card Info -->
+      <div class="contact-modal-right" style="flex:0.9; width:48%; height:100%; padding:40px 36px; display:flex; flex-direction:column; justify-content:center; background:#ffffff; color:#0f172a; position:relative; box-sizing:border-box;">
+        <button class="contact-modal-close" id="clientContactClose" type="button" aria-label="Close" style="position:absolute; top:16px; right:16px; width:32px; height:32px; background:#00bcff; color:#ffffff; border:none; border-radius:4px; font-size:18px; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:20;">✕</button>
+        
+        <h2 class="contact-title" id="clientContactTitle" style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 24px 0; line-height:1.35; font-family:system-ui, -apple-system, sans-serif;">Anandam Eleganza - Premium Villa Plots</h2>
+        
+        <div class="contact-info-block" style="display:flex; flex-direction:column; gap:16px; font-size:14.5px; color:#334155; line-height:1.6; font-family:system-ui, -apple-system, sans-serif;">
+          <p id="clientContactAbout" style="margin:0; color:#334155;">Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh</p>
+          <p id="clientContactPhoneContainer" style="margin:0; color:#334155;">Phone: <a id="clientContactPhone" href="tel:+917389705477" style="color:#0284c7; text-decoration:none; font-weight:600;">+91 7389705477</a></p>
+          <p id="clientContactEmailContainer" style="margin:0; color:#334155;">Email: <a id="clientContactEmail" href="mailto:anandameleganza@gmail.com" style="color:#0284c7; text-decoration:none; font-weight:600;">anandameleganza@gmail.com</a></p>
         </div>
       </div>
+      
     </div>
   </div>
 
