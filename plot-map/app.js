@@ -52,6 +52,7 @@ const els = {
   tooltip: $('tooltip'), notice: $('notice'),
   zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'), amenityToggle: $('amenityToggle'),
   landmarks: $('landmarks'), amenities: $('amenities'),
+  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catNav: $('catNav'), catBackBtn: $('catBackBtn'), fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
   // admin tabs + landmarks
   axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'),
   axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'),
@@ -139,6 +140,7 @@ const state = {
   view: { lon: 0, lat: 0, fov: 70 }, home: { lon: 0, lat: 0, fov: 70 },
   savedView: null,                      // camera view stored in the alignment (WYSIWYG); null ⇒ auto-frame
   adminMode: 'look',                    // 'look' = drag rotates view; 'move' = drag repositions layout
+  selectedCategory: 'ALL', autoPan: true, lastUserTouch: Date.now(), audioCtx: null, audioPlaying: false,
 };
 let three = null, plotsDirty = false;
 const labelCache = new Map();           // id → reusable label Sprite (avoid texture churn on rebuild)
@@ -749,10 +751,17 @@ function computeHome() {
 // always painted — robust against background rAF throttling. Cheap for ~10–400
 // flat meshes; could be made on-demand later if idle GPU cost ever matters.
 function requestRender(rebuild = false) { if (rebuild) plotsDirty = true; }
+let cameraAnimTimer = null;
 function renderLoop() {
   requestAnimationFrame(renderLoop);
   if (!three) return;
   if (plotsDirty) { plotsDirty = false; rebuildPlots(); }
+
+  // Slow motion auto-pan (left to right) when enabled and user is idle
+  if (state.autoPan && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
+    state.view.lon = (state.view.lon + 0.00035) % TAU;
+  }
+
   updateCamera();
   three.renderer.render(three.scene, three.camera);
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
@@ -847,7 +856,156 @@ function wireViewControls() {
     applyAmenityVisibility();
   });
   applyAmenityVisibility();
+
+  // Category Drawer & Controls wiring
+  const touch = () => { state.lastUserTouch = Date.now(); };
+  el.addEventListener('pointerdown', touch);
+  el.addEventListener('wheel', touch);
+
+  els.catDrawerToggle?.addEventListener('click', () => {
+    els.catDrawer?.classList.toggle('is-collapsed');
+    const collapsed = els.catDrawer?.classList.contains('is-collapsed');
+    if (els.catToggleIco) els.catToggleIco.textContent = collapsed ? '›' : '‹';
+  });
+
+  els.catBackBtn?.addEventListener('click', () => {
+    touch();
+    applyCategoryFilter('ALL');
+    computeHome(); Object.assign(state.view, state.home); requestRender();
+  });
+
+  els.catNav?.querySelectorAll('.cat-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      touch();
+      applyCategoryFilter(btn.dataset.cat);
+    });
+  });
+
+  els.fsToggle?.addEventListener('click', toggleFullscreen);
+  els.audioToggle?.addEventListener('click', toggleAudio);
+  els.autoPanToggle?.addEventListener('click', () => {
+    state.autoPan = !state.autoPan;
+    els.autoPanToggle?.classList.toggle('is-active', state.autoPan);
+  });
+
   new ResizeObserver(debounce(onResize, 120)).observe(els.pano);
+}
+
+function animateCameraTo(targetLon, targetLat) {
+  if (cameraAnimTimer) clearInterval(cameraAnimTimer);
+  const steps = 35;
+  let step = 0;
+  let diffLon = targetLon - state.view.lon;
+  while (diffLon < -Math.PI) diffLon += TAU;
+  while (diffLon > Math.PI) diffLon -= TAU;
+  const startLon = state.view.lon;
+  const startLat = state.view.lat;
+  const diffLat = targetLat - startLat;
+
+  cameraAnimTimer = setInterval(() => {
+    step++;
+    const t = Math.sin((step / steps) * (Math.PI / 2));
+    state.view.lon = startLon + diffLon * t;
+    state.view.lat = startLat + diffLat * t;
+    requestRender();
+    if (step >= steps) {
+      clearInterval(cameraAnimTimer);
+      cameraAnimTimer = null;
+    }
+  }, 16);
+}
+
+function applyCategoryFilter(cat) {
+  state.selectedCategory = cat || 'ALL';
+  if (els.catNav) {
+    els.catNav.querySelectorAll('.cat-btn').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.cat === state.selectedCategory);
+    });
+  }
+
+  if (state.selectedCategory !== 'ALL' && !state.showLandmarks) {
+    state.showLandmarks = true;
+    applyLandmarkVisibility();
+  }
+
+  const matched = [];
+  state.landmarks.forEach((lm) => {
+    const d = lmDom.get(lm.id);
+    if (!d) return;
+
+    if (state.selectedCategory === 'ALL') {
+      d.banner.classList.remove('is-dimmed', 'is-cat-matched');
+      d.pin.classList.remove('is-dimmed', 'is-cat-matched');
+      d.line.classList.remove('is-dimmed', 'is-cat-matched');
+    } else {
+      const grp = ICON_CATEGORIES.find((g) => g.icons.includes(lm.icon));
+      const isMatch = grp && grp.category === state.selectedCategory;
+      if (isMatch) {
+        d.banner.classList.add('is-cat-matched');
+        d.banner.classList.remove('is-dimmed');
+        d.pin.classList.add('is-cat-matched');
+        d.pin.classList.remove('is-dimmed');
+        d.line.classList.add('is-cat-matched');
+        d.line.classList.remove('is-dimmed');
+        matched.push(lm);
+      } else {
+        d.banner.classList.add('is-dimmed');
+        d.banner.classList.remove('is-cat-matched');
+        d.pin.classList.add('is-dimmed');
+        d.pin.classList.remove('is-cat-matched');
+        d.line.classList.add('is-dimmed');
+        d.line.classList.remove('is-cat-matched');
+      }
+    }
+  });
+
+  if (matched.length > 0 && three) {
+    const dirs = matched.map((l) => dirFromLonLat(l.banner.lon, l.banner.lat));
+    const mean = new THREE.Vector3();
+    dirs.forEach((v) => mean.add(v));
+    mean.divideScalar(dirs.length).normalize();
+    const targetLon = (Math.atan2(-mean.x, mean.z) + TAU) % TAU;
+    const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
+    animateCameraTo(targetLon, targetLat);
+  }
+}
+
+function toggleAudio() {
+  if (!state.audioCtx) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      state.audioCtx = new AudioCtx();
+      const bufferSize = state.audioCtx.sampleRate * 2;
+      const buffer = state.audioCtx.createBuffer(1, bufferSize, state.audioCtx.sampleRate);
+      const output = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) output[i] = (Math.random() * 2 - 1) * 0.012;
+      const noise = state.audioCtx.createBufferSource();
+      noise.buffer = buffer; noise.loop = true;
+      const filter = state.audioCtx.createBiquadFilter();
+      filter.type = 'lowpass'; filter.frequency.value = 350;
+      noise.connect(filter); filter.connect(state.audioCtx.destination);
+      noise.start();
+      state.audioPlaying = true;
+    } catch {}
+  } else if (state.audioCtx.state === 'suspended') {
+    state.audioCtx.resume();
+    state.audioPlaying = true;
+  } else if (state.audioCtx.state === 'running') {
+    state.audioCtx.suspend();
+    state.audioPlaying = false;
+  }
+  if (els.audioToggle) {
+    els.audioToggle.textContent = state.audioPlaying ? '🔊' : '🔇';
+    els.audioToggle.classList.toggle('is-active', state.audioPlaying);
+  }
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  } else {
+    document.exitFullscreen?.().catch(() => {});
+  }
 }
 function onResize() {
   if (!three) return;
@@ -2347,6 +2505,7 @@ function rebuildLandmarkDOM() {
     lmDom.set(lm.id, { line, pin, banner });
   });
   renderLandmarks();
+  if (typeof applyCategoryFilter === 'function') applyCategoryFilter(state.selectedCategory);
 }
 function projectDir(dir, cam, W, H) {
   const p = dir.clone().multiplyScalar(R).project(cam);

@@ -103,7 +103,31 @@
       <div class="landmarks" id="landmarks" aria-hidden="true"></div>
       <!-- in-layout amenity icon-pins (clickable → info card + render lightbox), projected each frame -->
       <div class="amenities" id="amenities" aria-hidden="true"></div>
-    </div>
+    <!-- ─── Client Category Drawer (Left Panel Overlay) ────────────────────────── -->
+    <aside class="cat-drawer" id="catDrawer" aria-label="Landmark Categories">
+      <button class="cat-drawer-toggle" id="catDrawerToggle" type="button" aria-label="Toggle Category Panel" title="Toggle Categories">
+        <span class="cat-toggle-ico" id="catToggleIco">‹</span>
+      </button>
+      <div class="cat-drawer-inner">
+        <div class="cat-drawer-head">
+          <button class="cat-back-btn" id="catBackBtn" type="button">‹ BACK</button>
+        </div>
+        <nav class="cat-nav" id="catNav" aria-label="Categories">
+          <button class="cat-btn is-active" type="button" data-cat="ALL">ALL LANDMARKS</button>
+          <button class="cat-btn" type="button" data-cat="HEALTHCARE">HEALTHCARE</button>
+          <button class="cat-btn" type="button" data-cat="EDUCATION">EDUCATION</button>
+          <button class="cat-btn" type="button" data-cat="COMMERCIAL">COMMERCIAL</button>
+          <button class="cat-btn" type="button" data-cat="CONNECTIVITY">CONNECTIVITY</button>
+          <button class="cat-btn" type="button" data-cat="LIFESTYLE">LIFESTYLE</button>
+          <button class="cat-btn" type="button" data-cat="TEMPLE">TEMPLE</button>
+        </nav>
+        <div class="cat-drawer-foot">
+          <button class="btn btn-icon cat-foot-btn" id="fsToggle" type="button" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">⤢</button>
+          <button class="btn btn-icon cat-foot-btn" id="audioToggle" type="button" title="Toggle Sound" aria-label="Toggle Sound">🔇</button>
+          <button class="btn btn-icon cat-foot-btn is-active" id="autoPanToggle" type="button" title="Toggle Slow Motion Pan" aria-label="Toggle Slow Motion Pan">🔄</button>
+        </div>
+      </div>
+    </aside>
 
     <!-- look-around / zoom controls -->
     <div class="zoom-controls" role="group" aria-label="View controls">

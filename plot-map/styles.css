@@ -790,3 +790,154 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* ─── Client Category Drawer & Slow Motion Pan Controls ────────────────────── */
+.cat-drawer {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 250px;
+  max-width: 82vw;
+  z-index: 22;
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.cat-drawer.is-collapsed {
+  transform: translateX(-100%);
+}
+.cat-drawer-inner {
+  pointer-events: auto;
+  width: 100%; height: 100%;
+  background: rgba(30, 34, 43, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 18px 20px;
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+}
+.cat-drawer-head {
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cat-back-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.2s;
+}
+.cat-back-btn:hover {
+  color: #ffffff;
+}
+.cat-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+  flex: 1;
+  overflow-y: auto;
+}
+.cat-btn {
+  background: transparent;
+  border: none;
+  color: #d1d5db;
+  text-align: left;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.cat-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+.cat-btn.is-active {
+  background: #9ab33b; /* Vibrant lime-gold category highlight matching reference design */
+  color: #111111;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(154, 179, 59, 0.35);
+}
+.cat-drawer-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cat-foot-btn {
+  width: 38px; height: 38px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.cat-foot-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.cat-foot-btn.is-active {
+  background: rgba(212, 175, 55, 0.2);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.cat-drawer-toggle {
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: rgba(21, 23, 30, 0.94);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+  z-index: 25;
+  transition: all 0.2s ease;
+}
+.cat-drawer-toggle:hover {
+  background: var(--gold);
+  color: #000000;
+  border-color: #ffffff;
+  transform: translateY(-50%) scale(1.08);
+}
+.cat-drawer.is-collapsed .cat-toggle-ico {
+  display: inline-block;
+  transform: rotate(180deg);
+}
+
+/* Category matching landmark banner animations & styles */
+.lm-banner.is-dimmed {
+  opacity: 0.2;
+  filter: grayscale(0.6);
+  transform: scale(0.9);
+  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+}
+.lm-banner.is-cat-matched {
+  opacity: 1 !important;
+  filter: none !important;
+  transform: scale(1.08) !important;
+  box-shadow: 0 0 24px rgba(154, 179, 59, 0.7) !important;
+  border-color: #9ab33b !important;
+  z-index: 12 !important;
+}
