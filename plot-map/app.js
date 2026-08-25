@@ -862,28 +862,38 @@ function wireViewControls() {
   el.addEventListener('pointerdown', touch);
   el.addEventListener('wheel', touch);
 
-  els.catDrawerToggle?.addEventListener('click', () => {
+  if (els.catDrawer) {
+    ['pointerdown', 'pointerup', 'click', 'mousedown', 'mouseup', 'touchstart', 'touchend'].forEach((evt) => {
+      els.catDrawer.addEventListener(evt, (e) => e.stopPropagation());
+    });
+  }
+
+  els.catDrawerToggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
     els.catDrawer?.classList.toggle('is-collapsed');
     const collapsed = els.catDrawer?.classList.contains('is-collapsed');
     if (els.catToggleIco) els.catToggleIco.textContent = collapsed ? '›' : '‹';
   });
 
-  els.catBackBtn?.addEventListener('click', () => {
+  els.catBackBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
     touch();
     applyCategoryFilter('ALL');
     computeHome(); Object.assign(state.view, state.home); requestRender();
   });
 
   els.catNav?.querySelectorAll('.cat-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       touch();
       applyCategoryFilter(btn.dataset.cat);
     });
   });
 
-  els.fsToggle?.addEventListener('click', toggleFullscreen);
-  els.audioToggle?.addEventListener('click', toggleAudio);
-  els.autoPanToggle?.addEventListener('click', () => {
+  els.fsToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
+  els.audioToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleAudio(); });
+  els.autoPanToggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
     state.autoPan = !state.autoPan;
     els.autoPanToggle?.classList.toggle('is-active', state.autoPan);
   });
