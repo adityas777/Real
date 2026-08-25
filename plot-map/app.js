@@ -2516,8 +2516,20 @@ function projectDir(dir, cam, W, H) {
 function renderLandmarks() {
   if (!three || !els.landmarks || els.landmarks.hidden) return;
   const rect = els.pano.getBoundingClientRect(), W = rect.width, H = rect.height, cam = three.camera;
+  const filterCat = state.selectedCategory || 'ALL';
   for (const lm of state.landmarks) {
     const d = lmDom.get(lm.id); if (!d) continue;
+
+    // Strict category filtering: if a category is selected and lm icon does not match -> hide completely
+    if (filterCat !== 'ALL') {
+      const grp = ICON_CATEGORIES.find((g) => g.icons.includes(lm.icon));
+      const isMatch = grp && grp.category === filterCat;
+      if (!isMatch) {
+        d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
+        continue;
+      }
+    }
+
     const hp = projectDir(dirFromLonLat(lm.hotspot.lon, lm.hotspot.lat), cam, W, H);
     const bp = projectDir(dirFromLonLat(lm.banner.lon, lm.banner.lat), cam, W, H);
     const show = hp && bp;

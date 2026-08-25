@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-25T06:27:00.943Z",
+  "savedAt": "2026-08-25T06:33:22.691Z",
   "transform": {
     "tx": 1.3157,
     "ty": -0.2425,
@@ -9,9 +9,9 @@
     "rotationDeg": 2.5
   },
   "view": {
-    "lonDeg": 118.32,
+    "lonDeg": 167.15,
     "latDeg": -25.32,
-    "fov": 67
+    "fov": 90
   },
   "opacity": 0.5,
   "groundImage": {
