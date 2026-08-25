@@ -883,9 +883,13 @@ function wireViewControls() {
       if (act === 'landmarks') {
         if (els.catLevel1) els.catLevel1.hidden = true;
         if (els.catLevel2) els.catLevel2.hidden = false;
+        state.autoPan = true;
         applyCategoryFilter('ALL');
       } else if (act === 'aerial') {
-        computeHome(); Object.assign(state.view, state.home); requestRender();
+        computeHome();
+        const targetFov = Math.max(state.home.fov, 82);
+        animateCameraTo(state.home.lon, state.home.lat, targetFov);
+        state.autoPan = true;
       } else {
         const title = btn.textContent.replace('›', '').trim();
         showNotice(`<strong>${esc(title)}</strong> section selected.`);
@@ -920,7 +924,7 @@ function wireViewControls() {
   new ResizeObserver(debounce(onResize, 120)).observe(els.pano);
 }
 
-function animateCameraTo(targetLon, targetLat) {
+function animateCameraTo(targetLon, targetLat, targetFov = null) {
   if (cameraAnimTimer) clearInterval(cameraAnimTimer);
   const steps = 35;
   let step = 0;
@@ -930,12 +934,15 @@ function animateCameraTo(targetLon, targetLat) {
   const startLon = state.view.lon;
   const startLat = state.view.lat;
   const diffLat = targetLat - startLat;
+  const startFov = state.view.fov;
+  const diffFov = targetFov != null ? (targetFov - startFov) : 0;
 
   cameraAnimTimer = setInterval(() => {
     step++;
     const t = Math.sin((step / steps) * (Math.PI / 2));
     state.view.lon = startLon + diffLon * t;
     state.view.lat = startLat + diffLat * t;
+    if (targetFov != null) setFov(startFov + diffFov * t);
     requestRender();
     if (step >= steps) {
       clearInterval(cameraAnimTimer);
@@ -987,14 +994,16 @@ function applyCategoryFilter(cat) {
     }
   });
 
-  if (matched.length > 0 && three) {
-    const dirs = matched.map((l) => dirFromLonLat(l.banner.lon, l.banner.lat));
+  const targetList = state.selectedCategory === 'ALL' ? state.landmarks : matched;
+
+  if (targetList.length > 0 && three) {
+    const dirs = targetList.map((l) => dirFromLonLat(l.banner.lon, l.banner.lat));
     const mean = new THREE.Vector3();
     dirs.forEach((v) => mean.add(v));
     mean.divideScalar(dirs.length).normalize();
     const targetLon = Math.atan2(-mean.x, mean.z);
     const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
-    animateCameraTo(targetLon, targetLat);
+    animateCameraTo(targetLon, targetLat, 72);
   } else if (state.selectedCategory !== 'ALL') {
     showNotice(`No <strong>${esc(state.selectedCategory)}</strong> landmarks saved in this project yet. Add landmarks with airport/train/bus/highway icons in Admin mode and click <strong>Save</strong>.`);
   }
