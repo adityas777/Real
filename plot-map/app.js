@@ -84,11 +84,9 @@ const els = {
   traceDxfLayer: $('traceDxfLayer'), traceLayerSel: $('traceLayerSel'), traceCount: $('traceCount'), traceList: $('traceList'),
   traceStage: $('traceStage'), traceCanvas: $('traceCanvas'), traceEmpty: $('traceEmpty'),
   // custom menu admin + client elements
-  projCustomMenuBtn: $('projCustomMenuBtn'), projCustomDropdown: $('projCustomDropdown'),
+  projMenuBuilderBtn: $('projMenuBuilderBtn'), projMenuBuilderDropdown: $('projMenuBuilderDropdown'),
   catLevelSubMenu: $('catLevelSubMenu'), catSubMenuNav: $('catSubMenuNav'), catSubMenuBackBtn: $('catSubMenuBackBtn'),
-  adminLocationIntelModal: $('adminLocationIntelModal'), adminWalkthroughModal: $('adminWalkthroughModal'),
-  adminVirtualTourModal: $('adminVirtualTourModal'), adminGalleryModal: $('adminGalleryModal'),
-  adminBrochureModal: $('adminBrochureModal'), adminContactModal: $('adminContactModal'), adminCurrentMenuModal: $('adminCurrentMenuModal'),
+  adminNodeBuilderModal: $('adminNodeBuilderModal'),
   clientVideoModal: $('clientVideoModal'), clientGalleryModal: $('clientGalleryModal'),
   clientBrochureModal: $('clientBrochureModal'), clientContactModal: $('clientContactModal'),
 };
@@ -150,22 +148,9 @@ const state = {
   adminMode: 'look',                    // 'look' = drag rotates view; 'move' = drag repositions layout
   selectedCategory: 'ALL', autoPan: true, lastUserTouch: Date.now(), audioCtx: null, audioPlaying: false,
   menuConfig: {
-    location_intel: { enabled: false, videoUrl: '', videoName: '', videoBlob: null },
-    walkthrough_video: { enabled: false, videoUrl: '', videoName: '', videoBlob: null },
-    virtual_tour: { enabled: false, items: [] },
-    gallery: { enabled: false, images: [] },
-    brochure: { enabled: false, pdfUrl: '', pdfName: '', pdfBlob: null },
-    contact_us: {
-      enabled: true,
-      image: '',
-      imageName: '',
-      imageBlob: null,
-      title: 'Anandam Eleganza - Premium Villa Plots',
-      about: 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh',
-      phone: '+91 7389705477',
-      email: 'anandameleganza@gmail.com'
-    }
+    tree: []
   },
+  menuNavStack: [],
 };
 let three = null, plotsDirty = false;
 const labelCache = new Map();           // id → reusable label Sprite (avoid texture churn on rebuild)
@@ -1494,89 +1479,198 @@ async function refresh() { els.refreshBtn.disabled = true; try { const src = awa
 // ─── Alignment: load / save / admin UI ────────────────────────────────────────
 // An alignment = the overlay transform PLUS the camera view, so the client
 // reproduces exactly what the admin set up (WYSIWYG) instead of re-framing.
-function getCustomSections() {
-  const mc = state.menuConfig || {};
-  if (Array.isArray(mc.customSections) && mc.customSections.length) {
-    return mc.customSections.filter(s => s && s.enabled !== false);
+function getMenuTree() {
+  state.menuConfig = state.menuConfig || {};
+  if (Array.isArray(state.menuConfig.tree) && state.menuConfig.tree.length > 0) {
+    return state.menuConfig.tree;
+  }
+  const migrated = migrateLegacyMenuConfig(state.menuConfig);
+  state.menuConfig.tree = migrated;
+  return migrated;
+}
+
+function migrateLegacyMenuConfig(mc) {
+  if (!mc) return [];
+  if (Array.isArray(mc.tree) && mc.tree.length > 0) return mc.tree;
+
+  const tree = [];
+  const customSections = Array.isArray(mc.customSections) ? mc.customSections : [];
+
+  if (customSections.length > 0) {
+    customSections.forEach((sec, sIdx) => {
+      if (!sec || sec.enabled === false) return;
+      const type = sec.type;
+      const title = (sec.title || 'Section').trim();
+
+      if (type === 'contact_us') {
+        tree.push({
+          id: sec.id || `node_contact_${Date.now()}`,
+          title: title || 'CONTACT US',
+          kind: 'contact',
+          contact: {
+            title: sec.titleVal || sec.title || 'Anandam Eleganza - Premium Villa Plots',
+            about: sec.about || '',
+            phone: sec.phone || '',
+            email: sec.email || '',
+            image: sec.image || '',
+            imageName: sec.imageName || '',
+            imageBlob: sec.imageBlob || null
+          }
+        });
+      } else if (type === 'gallery') {
+        tree.push({
+          id: sec.id || `node_gallery_${Date.now()}_${sIdx}`,
+          title: title || 'GALLERY',
+          kind: 'child',
+          contentType: 'gallery',
+          content: {
+            images: Array.isArray(sec.images) ? sec.images.map(img => ({ name: img.name, url: img.url, blob: img.blob })) : []
+          }
+        });
+      } else {
+        let cType = 'video';
+        if (type === 'virtual_tour') cType = 'tour';
+        else if (type === 'brochure') cType = 'pdf';
+
+        const groups = Array.isArray(sec.groups) ? sec.groups : [];
+        const totalItems = groups.reduce((acc, g) => acc + (Array.isArray(g.items) ? g.items.length : 0), 0);
+
+        // Case B: Exactly 1 group with exactly 1 item -> collapse to single ChildNode
+        if (groups.length === 1 && totalItems === 1) {
+          const item = (groups[0].items && groups[0].items[0]) || {};
+          tree.push({
+            id: sec.id || `node_item_${Date.now()}_${sIdx}`,
+            title: title || item.name || 'Item',
+            kind: 'child',
+            contentType: cType,
+            content: {
+              url: item.url || item.videoUrl || item.pdfUrl || '',
+              fileName: item.fileName || item.videoName || item.pdfName || '',
+              fileBlob: item.fileBlob || item.videoBlob || item.pdfBlob || null
+            }
+          });
+        } else if (groups.length > 0) {
+          // Case A: Multi-group or multi-item -> preserve full group layer: Parent(Section) -> Parent(Group) -> Child(Item)
+          const sectionChildren = [];
+          
+          if (groups.length === 1) {
+            // Single group with multiple items: Section -> Items
+            const grp = groups[0];
+            (grp.items || []).forEach((item, iIdx) => {
+              sectionChildren.push({
+                id: item.id || `node_item_${Date.now()}_${sIdx}_${iIdx}`,
+                title: item.name || item.title || `Item ${iIdx + 1}`,
+                kind: 'child',
+                contentType: cType,
+                content: {
+                  url: item.url || item.videoUrl || item.pdfUrl || '',
+                  fileName: item.fileName || item.videoName || item.pdfName || '',
+                  fileBlob: item.fileBlob || item.videoBlob || item.pdfBlob || null
+                }
+              });
+            });
+          } else {
+            // Multiple groups: Section -> Group -> Items
+            groups.forEach((grp, gIdx) => {
+              const grpItems = Array.isArray(grp.items) ? grp.items : [];
+              const groupChildren = grpItems.map((item, iIdx) => ({
+                id: item.id || `node_subitem_${Date.now()}_${sIdx}_${gIdx}_${iIdx}`,
+                title: item.name || item.title || `Item ${iIdx + 1}`,
+                kind: 'child',
+                contentType: cType,
+                content: {
+                  url: item.url || item.videoUrl || item.pdfUrl || '',
+                  fileName: item.fileName || item.videoName || item.pdfName || '',
+                  fileBlob: item.fileBlob || item.videoBlob || item.pdfBlob || null
+                }
+              }));
+              sectionChildren.push({
+                id: grp.id || `node_grp_${Date.now()}_${sIdx}_${gIdx}`,
+                title: (grp.title || `Sub-Group ${gIdx + 1}`).trim(),
+                kind: 'parent',
+                children: groupChildren
+              });
+            });
+          }
+
+          tree.push({
+            id: sec.id || `node_sec_${Date.now()}_${sIdx}`,
+            title: title || 'CATEGORY',
+            kind: 'parent',
+            children: sectionChildren
+          });
+        }
+      }
+    });
   }
 
-  const legacy = [];
-  const secDefs = [
-    { key: 'location_intel', defaultTitle: 'LOCATION INTELLIGENCE' },
-    { key: 'walkthrough_video', defaultTitle: 'WALKTHROUGH VIDEO' },
-    { key: 'virtual_tour', defaultTitle: 'VIRTUAL TOUR' },
-    { key: 'gallery', defaultTitle: 'GALLERY' },
-    { key: 'brochure', defaultTitle: 'BROCHURE' },
-    { key: 'contact_us', defaultTitle: 'CONTACT US' }
-  ];
+  // Check top-level legacy keys if customSections was empty
+  if (tree.length === 0 && mc.contact_us && mc.contact_us.enabled) {
+    tree.push({
+      id: `node_contact_${Date.now()}`,
+      title: mc.contact_us.title || 'CONTACT US',
+      kind: 'contact',
+      contact: {
+        title: mc.contact_us.title || 'Anandam Eleganza - Premium Villa Plots',
+        about: mc.contact_us.about || '',
+        phone: mc.contact_us.phone || '',
+        email: mc.contact_us.email || '',
+        image: mc.contact_us.image || '',
+        imageName: mc.contact_us.imageName || '',
+        imageBlob: mc.contact_us.imageBlob || null
+      }
+    });
+  }
 
-  secDefs.forEach(({ key, defaultTitle }) => {
-    const sec = mc[key];
-    if (sec && sec.enabled) {
-      legacy.push({
-        id: `legacy_${key}`,
-        type: key,
-        title: (sec.title || defaultTitle).trim(),
-        enabled: true,
-        groups: Array.isArray(sec.groups) ? sec.groups : (sec.items ? [{ id: 'g1', title: 'GENERAL', items: sec.items }] : []),
-        items: sec.items || [],
-        images: sec.images || [],
-        image: sec.image || '',
-        imageName: sec.imageName || '',
-        about: sec.about || '',
-        phone: sec.phone || '',
-        email: sec.email || ''
-      });
+  // Idempotency: cleanup legacy keys so re-reads never re-migrate
+  delete mc.customSections;
+  delete mc.location_intel;
+  delete mc.walkthrough_video;
+  delete mc.virtual_tour;
+  delete mc.gallery;
+  delete mc.brochure;
+  delete mc.contact_us;
+
+  return tree;
+}
+
+function cleanNodeForSave(node) {
+  if (!node) return null;
+  const clean = {
+    id: node.id,
+    title: node.title || '',
+    kind: node.kind
+  };
+  if (node.kind === 'parent') {
+    clean.children = Array.isArray(node.children) ? node.children.map(cleanNodeForSave).filter(Boolean) : [];
+  } else if (node.kind === 'child') {
+    clean.contentType = node.contentType || 'link';
+    const c = node.content || {};
+    clean.content = {
+      url: c.url || '',
+      fileName: c.fileName || (c.fileBlob ? c.fileBlob.name : '')
+    };
+    if (clean.contentType === 'gallery') {
+      clean.content.images = Array.isArray(c.images) ? c.images.map(img => ({ name: img.name, url: img.url })) : [];
     }
-  });
-
-  state.menuConfig = state.menuConfig || {};
-  state.menuConfig.customSections = legacy;
-  return legacy;
+  } else if (node.kind === 'contact') {
+    const ct = node.contact || {};
+    clean.contact = {
+      title: ct.title || '',
+      about: ct.about || '',
+      phone: ct.phone || '',
+      email: ct.email || '',
+      image: ct.image || '',
+      imageName: ct.imageName || (ct.imageBlob ? ct.imageBlob.name : '')
+    };
+  }
+  return clean;
 }
 
 function menuConfigData() {
-  const sections = getCustomSections();
-  const cleanGroupItems = (groups) => {
-    if (!Array.isArray(groups)) return [];
-    return groups.map((g, gIdx) => ({
-      id: g.id || `grp_${gIdx + 1}`,
-      title: g.title || `Sub-Group ${gIdx + 1}`,
-      items: Array.isArray(g.items) ? g.items.map((i, iIdx) => {
-        const vName = i.videoName || i.fileName || (i.videoBlob || i.fileBlob ? (i.videoBlob || i.fileBlob).name : '');
-        const pName = i.pdfName || i.fileName || (i.pdfBlob || i.fileBlob ? (i.pdfBlob || i.fileBlob).name : '');
-        const fName = i.fileName || vName || pName || '';
-        const vUrl = i.videoUrl || i.url || '';
-        const pUrl = i.pdfUrl || i.url || '';
-        const mainUrl = i.url || vUrl || pUrl || fName || '';
-        return {
-          id: i.id || `item_${iIdx + 1}`,
-          name: i.name || i.title || '',
-          url: mainUrl,
-          videoUrl: vUrl || mainUrl,
-          videoName: vName || fName,
-          pdfUrl: pUrl || mainUrl,
-          pdfName: pName || fName,
-          fileName: fName
-        };
-      }) : []
-    }));
-  };
-
+  const tree = getMenuTree();
   return {
-    customSections: sections.map((sec, idx) => ({
-      id: sec.id || `sec_${Date.now()}_${idx}`,
-      type: sec.type,
-      title: sec.title || '',
-      enabled: true,
-      groups: cleanGroupItems(sec.groups),
-      images: Array.isArray(sec.images) ? sec.images.map(img => ({ name: img.name, url: img.url })) : [],
-      image: sec.image || '',
-      imageName: sec.imageName || '',
-      about: sec.about || '',
-      phone: sec.phone || '',
-      email: sec.email || ''
-    }))
+    tree: tree.map(cleanNodeForSave).filter(Boolean)
   };
 }
 
@@ -1833,31 +1927,32 @@ function collectCustomMenuFiles() {
     }
   };
 
-  const sections = getCustomSections();
-  sections.forEach((sec) => {
-    if (sec.type === 'gallery' && Array.isArray(sec.images)) {
-      sec.images.forEach(img => {
-        if (img.blob && img.name) addBlob(img.blob, img.name, 'image/jpeg');
-      });
-    } else if (sec.type === 'contact_us') {
-      if (sec.imageBlob && (sec.imageName || sec.image)) {
-        addBlob(sec.imageBlob, sec.imageName || sec.image, 'image/jpeg');
+  const traverse = (nodeList) => {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (node.kind === 'parent') {
+        traverse(node.children);
+      } else if (node.kind === 'child') {
+        const c = node.content || {};
+        if (c.fileBlob && c.fileName) {
+          const mime = c.fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : (c.fileName.toLowerCase().endsWith('.mp4') ? 'video/mp4' : 'application/octet-stream');
+          addBlob(c.fileBlob, c.fileName, mime);
+        }
+        if (node.contentType === 'gallery' && Array.isArray(c.images)) {
+          c.images.forEach(img => {
+            if (img.blob && img.name) addBlob(img.blob, img.name, 'image/jpeg');
+          });
+        }
+      } else if (node.kind === 'contact') {
+        const ct = node.contact || {};
+        if (ct.imageBlob && (ct.imageName || ct.image)) {
+          addBlob(ct.imageBlob, ct.imageName || ct.image, 'image/jpeg');
+        }
       }
-    } else {
-      const groups = Array.isArray(sec.groups) ? sec.groups : [];
-      groups.forEach((grp) => {
-        (grp.items || []).forEach((item) => {
-          const blob = item.fileBlob || item.videoBlob || item.pdfBlob;
-          const name = item.fileName || item.videoName || item.pdfName;
-          if (blob && name) {
-            const mime = name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : (name.toLowerCase().endsWith('.mp4') ? 'video/mp4' : 'application/octet-stream');
-            addBlob(blob, name, mime);
-          }
-        });
-      });
     }
-  });
+  };
 
+  traverse(getMenuTree());
   return files;
 }
 
@@ -3190,123 +3285,189 @@ function openLightbox(src, caption) {
   document.addEventListener('keydown', onLightboxKey); setTimeout(() => els.lightboxClose?.focus(), 0);
 }
 function closeLightbox() {
-  els.lightbox.classList.remove('open'); els.lightbox.setAttribute('aria-hidden', 'true'); els.lightboxImg.removeAttribute('src');
-  document.removeEventListener('keydown', onLightboxKey); lbLastFocused?.focus?.();
-}
-function onLightboxKey(e) { if (e.key === 'Escape') closeLightbox(); }
+  els.lightbox.classList.remove('open'); els.lightbox.setAttribute('aria-hidden', 'true'); els.lightboxI// ─── Custom Menu Setup & Client Integration (Tree-Based Menu Builder) ─────────
 
-// ─── Amenities persistence ────────────────────────────────────────────────────
-function parseAmenities(d) {
-  const arr = (d && Array.isArray(d.amenities)) ? d.amenities : (Array.isArray(d) ? d : []);
-  const ver = (d && d.savedAt) || '';                    // cache-bust token for committed render images
-  return arr.map((a, i) => {
-    const hs = normLL(a.hotspot);
-    const render = (a.render && a.render.file) ? a.render.file : (typeof a.render === 'string' ? a.render : null);
-    return { id: a.id || 'am' + (i + 1), name: (a.name || '').toString(), icon: AM_ICONS[a.icon] ? a.icon : 'clubhouse',
-      facing: (a.facing || '').toString(), size: (a.size || '').toString(), dimensions: (a.dimensions || '').toString(),
-      price: (a.price || '').toString(), block: (a.block || '').toString(), tour_url: (a.tour_url || '').toString(), notes: (a.notes || '').toString(),
-      render, renderBlob: a.renderBlob || null, _ver: ver, hotspot: hs };
-  }).filter((a) => a.hotspot);
-}
-function buildAmenitiesData() {
-  return { version: 1, note: 'Build91 in-layout amenities', savedAt: new Date().toISOString(),
-    amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes,
-      ...(a.render ? { render: { file: a.render } } : {}), hotspot: { lonDeg: +a.hotspot.lon.toFixed(2), latDeg: +a.hotspot.lat.toFixed(2) } })) };
-}
-async function loadAmenitiesFile() {
-  try { const r = await fetch(dataUrl('amenities.json'), { cache: 'no-store' }); if (!r.ok) return null; return parseAmenities(await r.json()); } catch { return null; }
-}
-function setAmenities(list) {
-  state.amenities.forEach((a) => { if (a._url) { try { URL.revokeObjectURL(a._url); } catch {} } });
-  state.amenities = list || []; state.amSel = null;
-  amSeq = state.amenities.reduce((m, a) => { const n = parseInt(String(a.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(n) ? n : 0); }, 0);
-  rebuildAmenityDOM(); refreshAmList(); applyAmenityVisibility();
-}
-async function saveAmenitiesAs() {
-  const files = [['amenities.json', JSON.stringify(buildAmenitiesData(), null, 2), 'application/json'],
-    ...state.amenities.filter((a) => a.renderBlob && a.render).map((a) => [baseName(a.render), a.renderBlob, 'image/jpeg'])];
-  await saveToProject(files, '<code>amenities.json</code>');
-}
-// generic downscale-to-blob (renders): keeps the longest side ≤ cap, re-encodes JPEG
-async function resizeImageToBlob(file, cap, mime = 'image/jpeg', q = 0.9) {
-  const bmp = await createImageBitmap(file);
-  const scale = Math.min(1, cap / Math.max(bmp.width, bmp.height));
-  const W = Math.max(1, Math.round(bmp.width * scale)), H = Math.max(1, Math.round(bmp.height * scale));
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
-  c.getContext('2d').drawImage(bmp, 0, 0, W, H); if (bmp.close) bmp.close();
-  const blob = await new Promise((res) => c.toBlob(res, mime, q));
-  return { blob, W, H };
-}
-
-// ─── Custom Menu Setup & Client Integration ────────────────────────────────────
-function getSectionSubItems(secKey) {
-  const mc = state.menuConfig || {};
-  const sec = mc[secKey] || {};
-  if (Array.isArray(sec.items) && sec.items.length) {
-    return sec.items.filter((i) => i && ((i.name || '').trim() || (i.url || '').trim() || (i.videoUrl || '').trim() || (i.pdfUrl || '').trim() || i.videoBlob || i.pdfBlob));
-  }
-  // Backward compatibility single item fallbacks
-  if (secKey === 'location_intel') {
-    if (sec.videoUrl || sec.videoBlob) {
-      return [{ id: 'li1', name: sec.title || 'Location Intelligence', videoUrl: sec.videoUrl, videoName: sec.videoName, videoBlob: sec.videoBlob }];
+function findNodeInfo(id, list = getMenuTree(), parent = null, depth = 1) {
+  for (let i = 0; i < list.length; i++) {
+    const node = list[i];
+    if (node.id === id) {
+      return { node, parent, index: i, list, depth };
     }
-  } else if (secKey === 'walkthrough_video') {
-    if (sec.videoUrl || sec.videoBlob) {
-      return [{ id: 'wv1', name: sec.title || 'Walkthrough Video', videoUrl: sec.videoUrl, videoName: sec.videoName, videoBlob: sec.videoBlob }];
-    }
-  } else if (secKey === 'brochure') {
-    if (sec.pdfUrl || sec.pdfBlob) {
-      return [{ id: 'br1', name: sec.title || 'Brochure PDF', pdfUrl: sec.pdfUrl, pdfName: sec.pdfName, pdfBlob: sec.pdfBlob }];
+    if (node.kind === 'parent' && Array.isArray(node.children)) {
+      const found = findNodeInfo(id, node.children, node, depth + 1);
+      if (found) return found;
     }
   }
-  return [];
+  return null;
 }
 
-function getSectionGroups(secKey) {
-  const mc = state.menuConfig || {};
-  const sec = mc[secKey] || {};
-  if (!sec || sec.enabled === false) return [];
-  if (Array.isArray(sec.groups)) {
-    return sec.groups.map((g, gIdx) => ({
-      id: g.id || `grp_${gIdx + 1}`,
-      title: g.title || `Sub-Group ${gIdx + 1}`,
-      items: Array.isArray(g.items) ? g.items.filter(i => i && ((i.name || '').trim() || (i.url || '').trim() || (i.videoUrl || '').trim() || (i.pdfUrl || '').trim() || i.fileName || i.videoName || i.pdfName || i.fileBlob || i.videoBlob || i.pdfBlob)) : []
-    }));
+function hasContactNodeInTree(list = getMenuTree()) {
+  for (const node of list) {
+    if (node.kind === 'contact') return true;
+    if (node.kind === 'parent' && Array.isArray(node.children)) {
+      if (hasContactNodeInTree(node.children)) return true;
+    }
   }
-  // Backward compatibility: wrap flat items into a single group only if sec.groups was never set
-  const flatItems = getSectionSubItems(secKey);
-  if (flatItems.length) {
-    return [{ id: 'grp_default', title: 'GENERAL', items: flatItems }];
-  }
-  return [];
+  return false;
 }
+
+function getValidParentFolders(excludeId = null, list = getMenuTree(), depth = 1, prefix = '') {
+  let options = [];
+  if (depth >= 3) return options; // Cannot nest children under Level 3
+  for (const node of list) {
+    if (node.kind === 'parent') {
+      if (excludeId && (node.id === excludeId)) continue;
+      const label = prefix ? `${prefix} › ${node.title}` : node.title;
+      options.push({ id: node.id, label, depth });
+      if (Array.isArray(node.children) && depth < 2) {
+        options = options.concat(getValidParentFolders(excludeId, node.children, depth + 1, label));
+      }
+    }
+  }
+  return options;
+}
+
+function addNode(parentId, nodeData) {
+  const tree = getMenuTree();
+  const newNode = Object.assign({ id: `node_${Date.now()}_${Math.floor(Math.random()*1000)}` }, nodeData);
+  if (!parentId || parentId === 'root') {
+    tree.push(newNode);
+  } else {
+    const info = findNodeInfo(parentId);
+    if (info && info.node && info.node.kind === 'parent') {
+      info.node.children = info.node.children || [];
+      info.node.children.push(newNode);
+    } else {
+      tree.push(newNode);
+    }
+  }
+  state.menuConfig.tree = tree;
+  return newNode;
+}
+
+function updateNode(nodeId, nodeData, targetParentId = undefined) {
+  const info = findNodeInfo(nodeId);
+  if (!info) return null;
+  const currentParentId = info.parent ? info.parent.id : 'root';
+  const updatedNode = Object.assign({}, info.node, nodeData);
+
+  if (targetParentId !== undefined && targetParentId !== currentParentId) {
+    // Moved to a different parent
+    info.list.splice(info.index, 1);
+    addNode(targetParentId, updatedNode);
+  } else {
+    info.list[info.index] = updatedNode;
+  }
+  return updatedNode;
+}
+
+function deleteNode(nodeId) {
+  const info = findNodeInfo(nodeId);
+  if (!info) return false;
+  info.list.splice(info.index, 1);
+  return true;
+}
+
+function moveNode(nodeId, direction) {
+  const info = findNodeInfo(nodeId);
+  if (!info) return false;
+  const { list, index } = info;
+  if (direction === 'up' && index > 0) {
+    const temp = list[index - 1];
+    list[index - 1] = list[index];
+    list[index] = temp;
+    return true;
+  } else if (direction === 'down' && index < list.length - 1) {
+    const temp = list[index + 1];
+    list[index + 1] = list[index];
+    list[index] = temp;
+    return true;
+  }
+  return false;
+}
+
+// ─── Client Sidebar Dynamic Rendering (Recursive Stack Navigation) ────────────
 
 function renderClientSidebar() {
-  if (!els.catNavL1) return;
-  let html = `
-    <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
-    <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
-  `;
+  const tree = getMenuTree();
+  const stack = state.menuNavStack || [];
 
-  const sections = getCustomSections();
-  sections.forEach((sec) => {
-    const title = (sec.title || 'SECTION').trim().toUpperCase();
-    html += `<button class="cat-btn cat-btn-sub" type="button" data-sec-id="${esc(sec.id)}">${esc(title)} <span class="cat-btn-arrow">›</span></button>`;
-  });
+  if (stack.length === 0) {
+    // Level 1: Root Navigation
+    if (els.catLevel1) els.catLevel1.hidden = false;
+    if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
+    if (els.catLevel2) els.catLevel2.hidden = true;
 
-  els.catNavL1.innerHTML = html;
-  wireClientSidebarButtons();
+    if (!els.catNavL1) return;
+    let html = `
+      <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
+      <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
+    `;
+
+    tree.forEach((node) => {
+      const title = (node.title || 'ITEM').trim().toUpperCase();
+      const isParent = node.kind === 'parent';
+      const arrow = isParent ? ' <span class="cat-btn-arrow">›</span>' : '';
+      html += `<button class="cat-btn ${isParent ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
+    });
+
+    els.catNavL1.innerHTML = html;
+    wireClientSidebarButtons();
+  } else {
+    // Level 2 / Level 3: Drilled-in Parent Navigation
+    if (els.catLevel1) els.catLevel1.hidden = true;
+    if (els.catLevel2) els.catLevel2.hidden = true;
+    if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = false;
+
+    const currentParent = stack[stack.length - 1];
+    const container = $('catSubMenuNav');
+    const titleEl = $('catSubMenuTitle');
+    if (titleEl) titleEl.textContent = (currentParent.title || 'SUB MENU').trim().toUpperCase();
+
+    if (!container) return;
+    const children = Array.isArray(currentParent.children) ? currentParent.children : [];
+
+    if (!children.length) {
+      container.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No items inside this category.</p>`;
+      return;
+    }
+
+    container.innerHTML = children.map((node) => {
+      const title = (node.title || 'ITEM').trim().toUpperCase();
+      const isParent = node.kind === 'parent';
+      const arrow = isParent ? ' <span class="cat-btn-arrow">›</span>' : '';
+      return `<button class="cat-btn ${isParent ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
+    }).join('');
+
+    container.querySelectorAll('.cat-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const nodeId = btn.dataset.nodeId;
+        const nodeInfo = findNodeInfo(nodeId);
+        if (!nodeInfo) return;
+        const node = nodeInfo.node;
+
+        if (node.kind === 'parent') {
+          state.menuNavStack.push(node);
+          renderClientSidebar();
+        } else {
+          openNodeContent(node);
+        }
+      });
+    });
+  }
 }
 
 function wireClientSidebarButtons() {
   if (!els.catNavL1) return;
   const touch = () => { state.lastUserTouch = Date.now(); };
+
   els.catNavL1.querySelectorAll('.cat-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       touch();
       const act = btn.dataset.act;
-      const secId = btn.dataset.secId;
+      const nodeId = btn.dataset.nodeId;
 
       if (act === 'landmarks') {
         if (els.catLevel1) els.catLevel1.hidden = true;
@@ -3318,191 +3479,135 @@ function wireClientSidebarButtons() {
         computeHome();
         animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
         state.autoPan = true;
-      } else if (secId) {
-        const sec = getCustomSections().find(s => s.id === secId);
-        if (!sec) return;
-        if (sec.type === 'gallery') {
-          openClientGalleryModal(sec);
-        } else if (sec.type === 'contact_us') {
-          openClientContactModal(sec);
+      } else if (nodeId) {
+        const nodeInfo = findNodeInfo(nodeId);
+        if (!nodeInfo) return;
+        const node = nodeInfo.node;
+
+        if (node.kind === 'parent') {
+          state.menuNavStack = [node];
+          renderClientSidebar();
         } else {
-          if (els.catLevel1) els.catLevel1.hidden = true;
-          if (els.catLevel2) els.catLevel2.hidden = true;
-          if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = false;
-          renderSubMenuNavBySecId(secId, null);
+          openNodeContent(node);
         }
       }
     });
   });
 }
 
-function renderSubMenuNavBySecId(secId, activeGroupIdx = null) {
-  const container = $('catSubMenuNav');
-  const titleEl = $('catSubMenuTitle');
-  if (!container) return;
-
-  const sec = getCustomSections().find(s => s.id === secId);
-  if (!sec) return;
-
-  const sectionTitle = (sec.title || 'SECTION').trim().toUpperCase();
-  const groups = Array.isArray(sec.groups) ? sec.groups.map((g, gIdx) => ({
-    id: g.id || `grp_${gIdx + 1}`,
-    title: g.title || `Sub-Group ${gIdx + 1}`,
-    items: Array.isArray(g.items) ? g.items.filter(i => i && ((i.name || '').trim() || (i.url || '').trim() || (i.videoUrl || '').trim() || (i.pdfUrl || '').trim() || i.fileName || i.videoName || i.pdfName || i.fileBlob || i.videoBlob || i.pdfBlob)) : []
-  })) : [];
-
-  if (!groups.length) {
-    if (titleEl) titleEl.textContent = sectionTitle;
-    container.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No sub-items configured in this section.</p>`;
+function openNodeContent(node) {
+  if (!node) return;
+  if (node.kind === 'contact') {
+    openClientContactModal(node.contact || {});
     return;
   }
+  if (node.kind === 'child') {
+    const cType = node.contentType || 'link';
+    const content = node.content || {};
 
-  if (activeGroupIdx === null && groups.length === 1 && (groups[0].title === 'GENERAL' || !groups[0].title)) {
-    activeGroupIdx = 0;
-  }
-
-  if (activeGroupIdx === null) {
-    // Level 2: Render Sub-Groups List
-    if (titleEl) titleEl.textContent = sectionTitle;
-    container.innerHTML = groups.map((grp, gIdx) => `
-      <button class="cat-btn cat-btn-sub" type="button" data-sec-id="${esc(secId)}" data-grp-idx="${gIdx}">
-        ${esc(grp.title.toUpperCase())} <span class="cat-btn-arrow">›</span>
-      </button>
-    `).join('');
-
-    container.querySelectorAll('.cat-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const sId = btn.dataset.secId;
-        const gIdx = parseInt(btn.dataset.grpIdx, 10);
-        renderSubMenuNavBySecId(sId, gIdx);
-      });
-    });
-  } else {
-    // Level 3: Render Items inside selected Sub-Group
-    const group = groups[activeGroupIdx] || groups[0];
-    const groupTitle = group.title ? group.title.trim().toUpperCase() : sectionTitle;
-    if (titleEl) titleEl.textContent = groupTitle;
-
-    let html = '';
-    if (groups.length > 1) {
-      html += `
-        <button class="cat-btn cat-btn-back" type="button" data-sec-id="${esc(secId)}" style="color:var(--gold,#facc15); font-weight:600; margin-bottom:6px;">
-          ‹ BACK TO SUB-GROUPS
-        </button>
-      `;
+    if (cType === 'video') {
+      openClientVideoModal(node.title || 'Video Player', content);
+    } else if (cType === 'pdf') {
+      openClientBrochureModal(content);
+    } else if (cType === 'gallery') {
+      openClientGalleryModal(content);
+    } else if (cType === 'tour') {
+      openClientTourModal(node.title || 'Virtual Tour', content);
+    } else if (cType === 'image') {
+      openClientImageModal(node.title || 'Image Viewer', content);
+    } else if (cType === 'link') {
+      const url = content.url || '';
+      if (url) {
+        window.open(url, '_blank');
+      } else {
+        showNotice(`No web link configured for "${node.title}".`);
+      }
     }
-
-    if (!group.items.length) {
-      html += `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No items in this sub-group.</p>`;
-    } else {
-      html += group.items.map((item, iIdx) => `
-        <button class="cat-btn" type="button" data-sec-id="${esc(secId)}" data-grp-idx="${activeGroupIdx}" data-item-idx="${iIdx}">
-          ${esc(item.name || item.title || `ITEM ${iIdx + 1}`)}
-        </button>
-      `).join('');
-    }
-
-    container.innerHTML = html;
-
-    const backBtn = container.querySelector('.cat-btn-back');
-    backBtn?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      renderSubMenuNavBySecId(secId, null);
-    });
-
-    container.querySelectorAll('.cat-btn:not(.cat-btn-back)').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const sId = btn.dataset.secId;
-        const gIdx = parseInt(btn.dataset.grpIdx, 10);
-        const iIdx = parseInt(btn.dataset.itemIdx, 10);
-        const targetSec = getCustomSections().find(s => s.id === sId);
-        const targetGroup = targetSec?.groups?.[gIdx];
-        const item = targetGroup?.items?.[iIdx];
-        if (item && targetSec) {
-          openSubItemModal(targetSec.type, item);
-        }
-      });
-    });
   }
 }
 
-function openSubItemModal(secKey, item) {
-  if (secKey === 'location_intel' || secKey === 'walkthrough_video') {
-    const title = item.name || (secKey === 'location_intel' ? 'Location Intelligence' : 'Walkthrough Video');
-    openClientVideoModal(title, item);
-  } else if (secKey === 'virtual_tour') {
-    let tourSrc = item.fileBlob || item.videoBlob ? URL.createObjectURL(item.fileBlob || item.videoBlob) : null;
-    if (!tourSrc && (item.fileName || item.videoName)) {
-      tourSrc = assetUrl(item.fileName || item.videoName);
-    }
-    if (!tourSrc && (item.url || item.videoUrl)) {
-      tourSrc = item.url || item.videoUrl;
-    }
-    if (tourSrc) {
-      openModal({ url: tourSrc, title: item.name });
-    } else {
-      showNotice(`No tour link or file configured for "${item.name || 'Virtual Tour'}".`);
-    }
-  } else if (secKey === 'brochure') {
-    openClientBrochureModal(item);
-  }
-}
+// ─── Viewer Dispatchers ───────────────────────────────────────────────────────
 
 function openClientVideoModal(title, config) {
-  let rawSrc = config.fileBlob || config.videoBlob ? URL.createObjectURL(config.fileBlob || config.videoBlob) : null;
-  if (!rawSrc && (config.videoName || config.fileName)) {
-    rawSrc = assetUrl(config.videoName || config.fileName);
+  let rawSrc = config.fileBlob ? URL.createObjectURL(config.fileBlob) : null;
+  if (!rawSrc && config.fileName) {
+    rawSrc = assetUrl(config.fileName);
   }
-  if (!rawSrc && (config.videoUrl || config.url)) {
-    rawSrc = config.videoUrl || config.url;
+  if (!rawSrc && config.url) {
+    rawSrc = config.url;
   }
   if (!rawSrc) {
-    showNotice(`No video uploaded or URL configured for ${title}.`);
+    showNotice(`No video uploaded or URL configured for "${title}".`);
     return;
   }
-  openModal({ url: rawSrc, title: title });
-}
 
-function isYoutubeUrl(url) {
-  return /youtube\.com|youtu\.be/i.test(url || '');
-}
-function getYoutubeEmbedUrl(url) {
-  const m = (url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|watch\?.+&v=))([\w-]{11})/i);
-  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1` : url;
-}
-function isVimeoUrl(url) {
-  return /vimeo\.com/i.test(url || '');
-}
-function getVimeoEmbedUrl(url) {
-  const m = (url || '').match(/vimeo\.com\/(?:video\/)?(\d+)/i);
-  return m ? `https://player.vimeo.com/video/${m[1]}?autoplay=1` : url;
-}
+  const isYt = isYoutubeUrl(rawSrc);
+  const isVim = isVimeoUrl(rawSrc);
+  const isDirect = /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(rawSrc) || rawSrc.startsWith('blob:');
 
-let currentGalleryIdx = 0;
-let activeEditingSecId = null;
+  if (els.clientVideoModal) {
+    const titleEl = $('clientVideoTitle');
+    const player = $('clientVideoPlayer');
+    const iframe = $('clientVideoIframe');
 
-function upsertCustomSection(type, data) {
-  const sections = getCustomSections();
-  if (activeEditingSecId) {
-    const idx = sections.findIndex(s => s.id === activeEditingSecId);
-    if (idx !== -1) {
-      sections[idx] = Object.assign({}, sections[idx], data, { id: activeEditingSecId, type, enabled: true });
+    if (titleEl) titleEl.textContent = title;
+
+    if (isYt || isVim || (!isDirect && /^https?:\/\//i.test(rawSrc))) {
+      if (player) { player.style.display = 'none'; player.pause(); player.src = ''; }
+      if (iframe) {
+        iframe.style.display = 'block';
+        iframe.src = isYt ? getYoutubeEmbedUrl(rawSrc) : (isVim ? getVimeoEmbedUrl(rawSrc) : rawSrc);
+      }
     } else {
-      sections.push(Object.assign({}, data, { id: activeEditingSecId, type, enabled: true }));
+      if (iframe) { iframe.style.display = 'none'; iframe.src = 'about:blank'; }
+      if (player) {
+        player.style.display = 'block';
+        player.src = rawSrc;
+        player.play().catch(() => {});
+      }
     }
+
+    openCustomModal(els.clientVideoModal);
   } else {
-    sections.push(Object.assign({}, data, { id: `sec_${Date.now()}_${Math.floor(Math.random()*1000)}`, type, enabled: true }));
+    openModal({ url: rawSrc, title });
   }
-  state.menuConfig.customSections = sections;
 }
 
-function openClientGalleryModal(sec) {
+function openClientTourModal(title, config) {
+  let tourSrc = config.fileBlob ? URL.createObjectURL(config.fileBlob) : null;
+  if (!tourSrc && config.fileName) {
+    tourSrc = assetUrl(config.fileName);
+  }
+  if (!tourSrc && config.url) {
+    tourSrc = config.url;
+  }
+  if (tourSrc) {
+    openModal({ url: tourSrc, title });
+  } else {
+    showNotice(`No virtual tour link or file configured for "${title}".`);
+  }
+}
+
+function openClientImageModal(title, config) {
+  let imgSrc = config.fileBlob ? URL.createObjectURL(config.fileBlob) : null;
+  if (!imgSrc && config.fileName) {
+    imgSrc = assetUrl(config.fileName);
+  }
+  if (!imgSrc && config.url) {
+    imgSrc = config.url;
+  }
+  if (imgSrc) {
+    openLightbox(imgSrc, title);
+  } else {
+    showNotice(`No image uploaded or URL configured for "${title}".`);
+  }
+}
+
+function openClientGalleryModal(content) {
   if (!els.clientGalleryModal) return;
-  const images = sec.images || [];
+  const images = content.images || [];
   if (!images.length) {
-    showNotice('No gallery images uploaded yet.');
+    showNotice('No gallery photos uploaded yet.');
     return;
   }
   state.currentGalleryImages = images;
@@ -3513,6 +3618,7 @@ function openClientGalleryModal(sec) {
   els.clientGalleryModal.setAttribute('aria-hidden', 'false');
 }
 
+let currentGalleryIdx = 0;
 function updateGallerySlide(idx) {
   const images = state.currentGalleryImages || [];
   if (!images.length) return;
@@ -3532,27 +3638,26 @@ function updateGallerySlide(idx) {
     activeImg.src = src;
     setTimeout(() => { activeImg.style.opacity = '1'; }, 50);
   }
-  if (imgName) imgName.textContent = img.name || `Image ${currentGalleryIdx + 1}`;
+  if (imgName) imgName.textContent = img.name || `Photo ${currentGalleryIdx + 1}`;
   if (imgCounter) imgCounter.textContent = `(${currentGalleryIdx + 1} / ${images.length})`;
 
   if (prevBtn) prevBtn.style.display = images.length > 1 ? 'flex' : 'none';
   if (nextBtn) nextBtn.style.display = images.length > 1 ? 'flex' : 'none';
 }
 
-function openClientBrochureModal(item = null) {
+function openClientBrochureModal(b = {}) {
   if (!els.clientBrochureModal) return;
   const frame = $('clientBrochureFrame');
   const btn = $('clientBrochureDownload');
-  const b = item || {};
   let src = null;
 
   // Priority 1: in-memory blob from device upload
-  if (b.fileBlob || b.pdfBlob) {
-    src = URL.createObjectURL(b.fileBlob || b.pdfBlob);
+  if (b.fileBlob) {
+    src = URL.createObjectURL(b.fileBlob);
   }
   // Priority 2: direct URL or Google Drive link
-  if (!src && (b.pdfUrl || b.url)) {
-    const rawUrl = (b.pdfUrl || b.url).trim();
+  if (!src && b.url) {
+    const rawUrl = b.url.trim();
     const gdrive = rawUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
     if (gdrive) {
       src = `https://drive.google.com/file/d/${gdrive[1]}/preview`;
@@ -3563,8 +3668,8 @@ function openClientBrochureModal(item = null) {
     }
   }
   // Priority 3: saved filename (served from project assets)
-  if (!src && (b.pdfName || b.fileName)) {
-    src = assetUrl(b.pdfName || b.fileName);
+  if (!src && b.fileName) {
+    src = assetUrl(b.fileName);
   }
 
   if (!src) {
@@ -3572,21 +3677,20 @@ function openClientBrochureModal(item = null) {
     return;
   }
   if (frame) frame.src = src;
-  if (btn) { btn.href = src; btn.download = b.pdfName || b.fileName || b.name || 'brochure.pdf'; }
+  if (btn) { btn.href = src; btn.download = b.fileName || b.name || 'brochure.pdf'; }
   els.clientBrochureModal.classList.add('open');
   els.clientBrochureModal.setAttribute('aria-hidden', 'false');
 }
 
-function openClientContactModal(sec) {
+function openClientContactModal(c = {}) {
   if (!els.clientContactModal) return;
-  const c = sec || {};
   const title = $('clientContactTitle');
   const about = $('clientContactAbout');
   const phone = $('clientContactPhone');
   const email = $('clientContactEmail');
   const img = $('clientContactImg');
 
-  if (title) title.textContent = c.titleVal || c.title || 'Anandam Eleganza - Premium Villa Plots';
+  if (title) title.textContent = c.title || 'Anandam Eleganza - Premium Villa Plots';
   if (about) about.textContent = c.about || 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh';
   if (phone) {
     const num = c.phone || '+91 7389705477';
@@ -3609,163 +3713,511 @@ function openClientContactModal(sec) {
   els.clientContactModal.setAttribute('aria-hidden', 'false');
 }
 
-function renderCurrentMenuAdminPanel() {
-  const treeEl = $('projCurrentMenuDropdown');
+function isYoutubeUrl(url) {
+  return /youtube\.com|youtu\.be/i.test(url || '');
+}
+function getYoutubeEmbedUrl(url) {
+  const m = (url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|watch\?.+&v=))([\w-]{11})/i);
+  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1` : url;
+}
+function isVimeoUrl(url) {
+  return /vimeo\.com/i.test(url || '');
+}
+function getVimeoEmbedUrl(url) {
+  const m = (url || '').match(/vimeo\.com\/(?:video\/)?(\d+)/i);
+  return m ? `https://player.vimeo.com/video/${m[1]}?autoplay=1` : url;
+}
+
+// ─── Admin Tree View & Unified Node Builder Modal ─────────────────────────────
+
+let activeEditingNodeId = null;
+let activeNodeBuilderKind = 'parent'; // 'parent' | 'child' | 'contact'
+let pendingNodeFileBlob = null;
+let pendingNodeFileName = '';
+let pendingContactImageBlob = null;
+let pendingContactImageName = '';
+let pendingGalleryImages = [];
+
+async function syncCustomMenuFilesToDisk() {
+  try {
+    const files = collectCustomMenuFiles();
+    if (files.length) {
+      await serverSave(files);
+    }
+  } catch (e) {
+    console.warn('Auto-sync menu files:', e);
+  }
+}
+
+function renderAdminMenuTree() {
+  const treeEl = $('projMenuBuilderDropdown');
   if (!treeEl) return;
 
-  const sections = getCustomSections();
-  const iconMap = {
-    location_intel: '📍',
-    walkthrough_video: '🎬',
-    virtual_tour: '🌐',
-    gallery: '🖼️',
-    brochure: '📄',
-    contact_us: '📞'
-  };
-
+  const tree = getMenuTree();
   let html = `
-    <div style="font-size:11px; font-weight:700; color:var(--gold,#facc15); padding:6px 10px 8px; border-bottom:1px solid rgba(255,255,255,0.1); text-transform:uppercase; letter-spacing:0.5px;">
-      👁️ CURRENT CLIENT SIDEBAR MENU
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border-bottom:1px solid rgba(255,255,255,0.1);">
+      <span style="font-size:11px; font-weight:700; color:var(--gold,#facc15); text-transform:uppercase; letter-spacing:0.5px;">
+        📋 CLIENT MENU BUILDER
+      </span>
+      <button type="button" class="btn btn-primary" id="adminAddRootNodeBtn" style="font-size:10px; padding:3px 8px; font-weight:700;">＋ Add Item</button>
     </div>
+    <div style="padding:6px; display:flex; flex-direction:column; gap:4px;">
   `;
 
-  if (!sections.length) {
-    html += `<p style="padding:10px; font-size:11.5px; color:var(--text-mute); text-align:center; margin:0;">No active custom menu sections.<br/>Click <strong>📋 Menu ▾</strong> to add sections.</p>`;
+  if (!tree.length) {
+    html += `<p style="padding:16px 8px; font-size:11.5px; color:var(--text-mute); text-align:center; margin:0;">No menu items created yet.<br/>Click <strong>＋ Add Item</strong> above to create categories or content.</p>`;
   } else {
-    sections.forEach((sec) => {
-      const icon = iconMap[sec.type] || '📁';
-      const title = (sec.title || 'SECTION').trim().toUpperCase();
+    const kindIcons = {
+      parent: '📁',
+      contact: '📞',
+      video: '🎬',
+      pdf: '📄',
+      gallery: '🖼️',
+      tour: '🌐',
+      image: '🖼️',
+      link: '🔗'
+    };
 
-      html += `
-        <div class="menu-tree-section" style="margin-top:6px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:6px 8px;">
-          <div class="menu-tree-sec-head" style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
-            <span class="menu-tree-sec-title" style="font-weight:700; font-size:11.5px; color:var(--gold,#facc15); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${icon} ${esc(title)}</span>
-            <div style="display:flex; gap:4px; flex-shrink:0;">
-              <button type="button" class="menu-tree-edit-btn" data-edit-type="${esc(sec.type)}" data-edit-sec-id="${esc(sec.id)}" style="font-size:10px; font-weight:600; padding:2px 6px; background:rgba(250,204,21,0.15); color:var(--gold,#facc15); border:1px solid rgba(250,204,21,0.3); border-radius:4px; cursor:pointer;">✏️ Edit</button>
-              <button type="button" class="menu-tree-del-btn" data-del-sec-id="${esc(sec.id)}" style="font-size:10px; font-weight:600; padding:2px 6px; background:rgba(244,63,94,0.15); color:var(--danger,#f43f5e); border:1px solid rgba(244,63,94,0.3); border-radius:4px; cursor:pointer;">🗑️ Delete</button>
-            </div>
+    const renderNodeItem = (node, depth, index, totalSiblings) => {
+      let icon = '📄';
+      if (node.kind === 'parent') icon = kindIcons.parent;
+      else if (node.kind === 'contact') icon = kindIcons.contact;
+      else icon = kindIcons[node.contentType] || '📄';
+
+      const title = (node.title || 'Untitled').trim();
+      const indent = (depth - 1) * 16;
+      const canAddChild = node.kind === 'parent' && depth < 3;
+
+      let nodeHtml = `
+        <div class="tree-node-item" style="display:flex; align-items:center; justify-content:space-between; gap:6px; padding:5px 6px; padding-left:${indent + 6}px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.07); border-radius:6px; margin-bottom:2px;">
+          <div style="display:flex; align-items:center; gap:6px; min-width:0; flex:1;">
+            <span style="font-size:14px; flex-shrink:0;">${icon}</span>
+            <span style="font-size:11.5px; font-weight:600; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(title)}">${esc(title)}</span>
           </div>
+          <div style="display:flex; align-items:center; gap:3px; flex-shrink:0;">
+            <button type="button" class="btn btn-ghost tree-btn-up" data-node-id="${esc(node.id)}" title="Move Up" style="font-size:10px; padding:2px 4px;" ${index === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>↑</button>
+            <button type="button" class="btn btn-ghost tree-btn-down" data-node-id="${esc(node.id)}" title="Move Down" style="font-size:10px; padding:2px 4px;" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>↓</button>
+            ${canAddChild ? `<button type="button" class="btn btn-ghost tree-btn-add-inside" data-parent-id="${esc(node.id)}" title="Add item inside this folder" style="font-size:10px; padding:2px 5px; color:var(--gold,#facc15);">＋</button>` : ''}
+            <button type="button" class="btn btn-ghost tree-btn-edit" data-node-id="${esc(node.id)}" title="Edit Item" style="font-size:10px; padding:2px 5px; color:var(--gold,#facc15);">✏️</button>
+            <button type="button" class="btn btn-ghost tree-btn-del" data-node-id="${esc(node.id)}" title="Delete Item" style="font-size:10px; padding:2px 5px; color:var(--danger,#f43f5e);">🗑️</button>
+          </div>
+        </div>
       `;
 
-      if (sec.type === 'gallery') {
-        const imgs = sec.images || [];
-        html += `<div class="menu-tree-group" style="margin-left:6px; padding-left:6px; border-left:2px solid rgba(255,255,255,0.1); font-size:10.5px; color:#cbd5e1;">Images (${imgs.length})</div>`;
-      } else if (sec.type === 'contact_us') {
-        html += `<div class="menu-tree-group" style="margin-left:6px; padding-left:6px; border-left:2px solid rgba(255,255,255,0.1); font-size:10.5px; color:#cbd5e1;">Contact Card</div>`;
-      } else {
-        const groups = Array.isArray(sec.groups) ? sec.groups : [];
-        if (!groups.length) {
-          html += `<div class="menu-tree-group" style="margin-left:6px; padding-left:6px; font-size:10.5px; color:var(--text-mute);">(No sub-items)</div>`;
-        } else {
-          groups.forEach((grp) => {
-            html += `
-              <div class="menu-tree-group" style="margin-left:6px; padding-left:6px; border-left:2px solid rgba(255,255,255,0.1); margin-top:4px;">
-                <div class="menu-tree-grp-title" style="font-weight:600; font-size:11px; color:#e2e8f0;">📂 ${esc(grp.title)}</div>
-            `;
-            (grp.items || []).forEach((item) => {
-              const itemLabel = item.name || item.title || 'Item';
-              const hasUpload = !!(item.fileBlob || item.videoBlob || item.pdfBlob || item.fileName || item.videoName || item.pdfName);
-              const hasUrl = !!(item.url || item.videoUrl || item.pdfUrl);
-              const badge = hasUpload ? '📁 File' : (hasUrl ? '🔗 Link' : '');
-              html += `
-                <div class="menu-tree-item" style="font-size:10px; color:#94a3b8; margin-left:6px; padding:1px 0; display:flex; justify-content:space-between; gap:4px;">
-                  <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">• ${esc(itemLabel)}</span>
-                  ${badge ? `<span style="font-size:8.5px; padding:1px 4px; border-radius:3px; background:rgba(255,255,255,0.08);">${badge}</span>` : ''}
-                </div>
-              `;
-            });
-            html += `</div>`;
-          });
-        }
+      if (node.kind === 'parent' && Array.isArray(node.children)) {
+        node.children.forEach((child, cIdx) => {
+          nodeHtml += renderNodeItem(child, depth + 1, cIdx, node.children.length);
+        });
       }
 
-      html += `</div>`;
+      return nodeHtml;
+    };
+
+    tree.forEach((rootNode, rIdx) => {
+      html += renderNodeItem(rootNode, 1, rIdx, tree.length);
     });
   }
 
+  html += `</div>`;
   treeEl.innerHTML = html;
 
-  // Edit listeners
-  treeEl.querySelectorAll('[data-edit-sec-id]').forEach((btn) => {
+  // Add Root Button
+  $('adminAddRootNodeBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    treeEl.hidden = true;
+    $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
+    openNodeBuilderModal(null, 'root');
+  });
+
+  // Reorder Up
+  treeEl.querySelectorAll('.tree-btn-up:not([disabled])').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      treeEl.hidden = true;
-      $('projCurrentMenuBtn')?.setAttribute('aria-expanded', 'false');
-      const type = btn.dataset.editType;
-      const secId = btn.dataset.editSecId;
-      openAdminMenuModal(type, secId);
+      const id = btn.dataset.nodeId;
+      if (moveNode(id, 'up')) {
+        onAlignmentChanged();
+        renderClientSidebar();
+        renderAdminMenuTree();
+      }
     });
   });
 
-  // Delete listeners
-  treeEl.querySelectorAll('[data-del-sec-id]').forEach((btn) => {
+  // Reorder Down
+  treeEl.querySelectorAll('.tree-btn-down:not([disabled])').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const secId = btn.dataset.delSecId;
-      if (secId) {
-        state.menuConfig.customSections = getCustomSections().filter(s => s.id !== secId);
+      const id = btn.dataset.nodeId;
+      if (moveNode(id, 'down')) {
         onAlignmentChanged();
         renderClientSidebar();
-        renderCurrentMenuAdminPanel();
+        renderAdminMenuTree();
+      }
+    });
+  });
+
+  // Add Inside Parent
+  treeEl.querySelectorAll('.tree-btn-add-inside').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      treeEl.hidden = true;
+      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
+      const parentId = btn.dataset.parentId;
+      openNodeBuilderModal(null, parentId);
+    });
+  });
+
+  // Edit Node
+  treeEl.querySelectorAll('.tree-btn-edit').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      treeEl.hidden = true;
+      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
+      const id = btn.dataset.nodeId;
+      openNodeBuilderModal(id);
+    });
+  });
+
+  // Delete Node
+  treeEl.querySelectorAll('.tree-btn-del').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.nodeId;
+      if (id && deleteNode(id)) {
+        onAlignmentChanged();
+        renderClientSidebar();
+        renderAdminMenuTree();
       }
     });
   });
 }
 
-function initCustomMenuAdminAndClient() {
-  // Admin 📋 Menu ▾ dropdown toggling
-  els.projCustomMenuBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (!els.projCustomDropdown) return;
-    const isHidden = els.projCustomDropdown.hidden;
-    els.projCustomDropdown.hidden = !isHidden;
-    els.projCustomMenuBtn.setAttribute('aria-expanded', String(isHidden));
-    const currentDropdown = $('projCurrentMenuDropdown');
-    if (currentDropdown) currentDropdown.hidden = true;
+function openNodeBuilderModal(nodeId = null, defaultParentId = 'root') {
+  activeEditingNodeId = nodeId;
+  const info = nodeId ? findNodeInfo(nodeId) : null;
+  const node = info ? info.node : null;
+  const currentParentId = info ? (info.parent ? info.parent.id : 'root') : defaultParentId;
+
+  const modalTitle = $('nodeBuilderModalTitle');
+  if (modalTitle) modalTitle.textContent = node ? `✏️ Edit "${node.title}"` : '✨ Add Menu Item';
+
+  // Determine kind
+  activeNodeBuilderKind = node ? node.kind : 'parent';
+
+  // Contact singleton check
+  const contactExists = hasContactNodeInTree();
+  const isEditingCurrentContact = node && node.kind === 'contact';
+  const contactTab = $('nodeKindContactTab');
+  const contactNote = $('contactAlreadyExistsNote');
+  if (contactTab) {
+    if (contactExists && !isEditingCurrentContact) {
+      contactTab.disabled = true;
+      contactTab.style.opacity = '0.35';
+      contactTab.style.cursor = 'not-allowed';
+      if (contactNote) contactNote.style.display = 'block';
+    } else {
+      contactTab.disabled = false;
+      contactTab.style.opacity = '1';
+      contactTab.style.cursor = 'pointer';
+      if (contactNote) contactNote.style.display = 'none';
+    }
+  }
+
+  // Populate Placement Selector (Depth 1 & 2 only)
+  const placementSel = $('nodePlacementSelect');
+  if (placementSel) {
+    placementSel.innerHTML = '<option value="root">📁 Top Level (Main Menu)</option>';
+    const validParents = getValidParentFolders(node ? node.id : null);
+    validParents.forEach((p) => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `📁 ${p.label}`;
+      placementSel.appendChild(opt);
+    });
+    placementSel.value = currentParentId;
+  }
+
+  // Enforce Depth-3 Cap on Folder Option
+  const checkDepthCapForFolder = () => {
+    const selectedPId = placementSel?.value || 'root';
+    const parentInfo = selectedPId !== 'root' ? findNodeInfo(selectedPId) : null;
+    const parentDepth = parentInfo ? parentInfo.depth : 0;
+    const folderTab = document.querySelector('.node-kind-tab[data-kind="parent"]');
+    if (folderTab) {
+      if (parentDepth >= 2) {
+        folderTab.disabled = true;
+        folderTab.style.opacity = '0.35';
+        folderTab.style.cursor = 'not-allowed';
+        if (activeNodeBuilderKind === 'parent') {
+          setNodeBuilderKind('child');
+        }
+      } else {
+        folderTab.disabled = false;
+        folderTab.style.opacity = '1';
+        folderTab.style.cursor = 'pointer';
+      }
+    }
+  };
+
+  placementSel?.addEventListener('change', checkDepthCapForFolder);
+
+  // Set Title
+  const titleInput = $('nodeTitleInput');
+  if (titleInput) titleInput.value = node ? node.title : '';
+
+  // Reset / Populate Content & File fields
+  pendingNodeFileBlob = null;
+  pendingNodeFileName = (node && node.content ? node.content.fileName : '') || '';
+  pendingContactImageBlob = null;
+  pendingContactImageName = (node && node.contact ? node.contact.imageName : '') || '';
+  pendingGalleryImages = (node && node.content && Array.isArray(node.content.images)) ? [...node.content.images] : [];
+
+  const typeSel = $('nodeContentTypeSelect');
+  if (typeSel) typeSel.value = (node && node.contentType) ? node.contentType : 'video';
+
+  const urlInput = $('nodeUrlInput');
+  if (urlInput) urlInput.value = (node && node.content ? node.content.url : '') || '';
+
+  const fileInput = $('nodeFileInput');
+  if (fileInput) fileInput.value = '';
+  const fileStatus = $('nodeFileStatus');
+  if (fileStatus) fileStatus.textContent = pendingNodeFileName ? `Current file: ${pendingNodeFileName}` : 'No file chosen';
+
+  renderNodeGalleryPreviews();
+
+  // Contact fields
+  const contact = (node && node.contact) ? node.contact : {};
+  if ($('nodeContactTitle')) $('nodeContactTitle').value = contact.title || '';
+  if ($('nodeContactAbout')) $('nodeContactAbout').value = contact.about || '';
+  if ($('nodeContactPhone')) $('nodeContactPhone').value = contact.phone || '';
+  if ($('nodeContactEmail')) $('nodeContactEmail').value = contact.email || '';
+  if ($('nodeContactImageFile')) $('nodeContactImageFile').value = '';
+  const contactStatus = $('nodeContactImageStatus');
+  if (contactStatus) contactStatus.textContent = pendingContactImageName ? `Current image: ${pendingContactImageName}` : (contact.image ? `Current: ${contact.image}` : 'No image selected');
+
+  setNodeBuilderKind(activeNodeBuilderKind);
+  checkDepthCapForFolder();
+
+  openCustomModal(els.adminNodeBuilderModal);
+}
+
+function setNodeBuilderKind(kind) {
+  activeNodeBuilderKind = kind;
+
+  document.querySelectorAll('.node-kind-tab').forEach((tab) => {
+    tab.classList.toggle('is-active', tab.dataset.kind === kind);
   });
 
-  // Admin 👁️ Current Menu ▾ dropdown toggling
-  const currentMenuBtn = $('projCurrentMenuBtn');
-  const currentDropdown = $('projCurrentMenuDropdown');
+  const titleGroup = $('nodeTitleGroup');
+  const childFields = $('nodeChildFields');
+  const contactFields = $('nodeContactFields');
 
-  currentMenuBtn?.addEventListener('click', (e) => {
+  if (titleGroup) titleGroup.style.display = kind === 'contact' ? 'none' : 'block';
+  if (childFields) childFields.style.display = kind === 'child' ? 'block' : 'none';
+  if (contactFields) contactFields.style.display = kind === 'contact' ? 'block' : 'none';
+
+  updateContentTypeFields();
+}
+
+function updateContentTypeFields() {
+  const typeSel = $('nodeContentTypeSelect');
+  const cType = typeSel ? typeSel.value : 'video';
+  const singleGroup = $('nodeSingleContentGroup');
+  const galleryGroup = $('nodeGalleryContentGroup');
+  const fileGroup = $('nodeFileUploadGroup');
+  const urlLabel = $('nodeUrlLabel');
+  const fileLabel = $('nodeFileLabel');
+
+  if (cType === 'gallery') {
+    if (singleGroup) singleGroup.style.display = 'none';
+    if (galleryGroup) galleryGroup.style.display = 'block';
+  } else {
+    if (singleGroup) singleGroup.style.display = 'block';
+    if (galleryGroup) galleryGroup.style.display = 'none';
+
+    if (cType === 'video') {
+      if (urlLabel) urlLabel.textContent = 'Video Link (YouTube, Vimeo, MP4 URL):';
+      if (fileLabel) fileLabel.textContent = 'Or Upload Video File (.mp4):';
+      if (fileGroup) fileGroup.style.display = 'block';
+    } else if (cType === 'pdf') {
+      if (urlLabel) urlLabel.textContent = 'PDF URL / Google Drive Link:';
+      if (fileLabel) fileLabel.textContent = 'Or Upload PDF File (.pdf):';
+      if (fileGroup) fileGroup.style.display = 'block';
+    } else if (cType === 'tour') {
+      if (urlLabel) urlLabel.textContent = '360 Virtual Tour URL (3DVista / Kuula):';
+      if (fileLabel) fileLabel.textContent = 'Or Upload Standalone Tour Zip / HTML:';
+      if (fileGroup) fileGroup.style.display = 'block';
+    } else if (cType === 'image') {
+      if (urlLabel) urlLabel.textContent = 'Image URL:';
+      if (fileLabel) fileLabel.textContent = 'Or Upload Image File:';
+      if (fileGroup) fileGroup.style.display = 'block';
+    } else if (cType === 'link') {
+      if (urlLabel) urlLabel.textContent = 'External Web URL (opens in new tab):';
+      if (fileGroup) fileGroup.style.display = 'none';
+    }
+  }
+}
+
+function renderNodeGalleryPreviews() {
+  const container = $('nodeGalleryPreviews');
+  if (!container) return;
+  container.innerHTML = pendingGalleryImages.map((img, i) => {
+    const src = img.blob ? URL.createObjectURL(img.blob) : assetUrl(img.url || img.name);
+    return `
+      <div class="gallery-preview-item" style="position:relative; width:64px; height:64px; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.2);">
+        <img src="${esc(src)}" alt="${esc(img.name)}" style="width:100%; height:100%; object-fit:cover;" />
+        <button type="button" class="gallery-preview-remove" data-idx="${i}" style="position:absolute; top:2px; right:2px; width:18px; height:18px; background:rgba(0,0,0,0.7); color:#fff; border:none; border-radius:50%; font-size:10px; cursor:pointer;">✕</button>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.gallery-preview-remove').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx, 10);
+      pendingGalleryImages.splice(idx, 1);
+      renderNodeGalleryPreviews();
+    });
+  });
+}
+
+function initCustomMenuAdminAndClient() {
+  // Menu Builder Dropdown Toggle
+  const btn = $('projMenuBuilderBtn');
+  const dropdown = $('projMenuBuilderDropdown');
+
+  btn?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!currentDropdown) return;
-    const isHidden = currentDropdown.hidden;
-    currentDropdown.hidden = !isHidden;
-    currentMenuBtn.setAttribute('aria-expanded', String(isHidden));
+    if (!dropdown) return;
+    const isHidden = dropdown.hidden;
+    dropdown.hidden = !isHidden;
+    btn.setAttribute('aria-expanded', String(isHidden));
     if (isHidden) {
-      if (els.projCustomDropdown) els.projCustomDropdown.hidden = true;
-      els.projCustomMenuBtn?.setAttribute('aria-expanded', 'false');
-      renderCurrentMenuAdminPanel();
+      renderAdminMenuTree();
     }
   });
 
   document.addEventListener('click', () => {
-    if (els.projCustomDropdown) {
-      els.projCustomDropdown.hidden = true;
-      els.projCustomMenuBtn?.setAttribute('aria-expanded', 'false');
-    }
-    if (currentDropdown) {
-      currentDropdown.hidden = true;
-      currentMenuBtn?.setAttribute('aria-expanded', 'false');
+    if (dropdown) {
+      dropdown.hidden = true;
+      btn?.setAttribute('aria-expanded', 'false');
     }
   });
 
-  els.projCustomDropdown?.querySelectorAll('button[data-menu-act]').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+  dropdown?.addEventListener('click', (e) => e.stopPropagation());
+
+  // Modal Kind Tabs
+  document.querySelectorAll('.node-kind-tab').forEach((tab) => {
+    tab.addEventListener('click', (e) => {
       e.stopPropagation();
-      els.projCustomDropdown.hidden = true;
-      const act = btn.dataset.menuAct;
-      openAdminMenuModal(act, null); // Fresh new section
+      if (tab.disabled) return;
+      setNodeBuilderKind(tab.dataset.kind);
     });
   });
 
-  // Generic Sub-Menu back button
+  // Content Type Switcher
+  $('nodeContentTypeSelect')?.addEventListener('change', updateContentTypeFields);
+
+  // File Upload Handlers
+  $('nodeFileInput')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      pendingNodeFileBlob = file;
+      pendingNodeFileName = file.name;
+      const status = $('nodeFileStatus');
+      if (status) status.textContent = `Selected: ${file.name}`;
+    }
+  });
+
+  $('nodeGalleryFilesInput')?.addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach((f) => {
+      pendingGalleryImages.push({ name: f.name, blob: f, url: `sample/${f.name}` });
+    });
+    renderNodeGalleryPreviews();
+  });
+
+  $('nodeContactImageFile')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      pendingContactImageBlob = file;
+      pendingContactImageName = file.name;
+      const status = $('nodeContactImageStatus');
+      if (status) status.textContent = `Selected: ${file.name}`;
+    }
+  });
+
+  // Modal Save Handler
+  $('nodeBuilderSaveBtn')?.addEventListener('click', async () => {
+    const parentId = $('nodePlacementSelect')?.value || 'root';
+    const kind = activeNodeBuilderKind;
+
+    let title = ($('nodeTitleInput')?.value || '').trim();
+    if (kind === 'contact') {
+      title = ($('nodeContactTitle')?.value || '').trim() || 'CONTACT US';
+    }
+    if (!title) {
+      title = kind === 'parent' ? 'FOLDER' : (kind === 'contact' ? 'CONTACT US' : 'ITEM');
+    }
+
+    const nodeData = {
+      title,
+      kind
+    };
+
+    if (kind === 'parent') {
+      nodeData.children = activeEditingNodeId ? (findNodeInfo(activeEditingNodeId)?.node?.children || []) : [];
+    } else if (kind === 'child') {
+      const cType = $('nodeContentTypeSelect')?.value || 'video';
+      nodeData.contentType = cType;
+      const url = ($('nodeUrlInput')?.value || '').trim();
+
+      const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
+      const existingContent = existingNode?.content || {};
+
+      nodeData.content = {
+        url,
+        fileName: pendingNodeFileName || existingContent.fileName || '',
+        fileBlob: pendingNodeFileBlob || existingContent.fileBlob || null
+      };
+
+      if (cType === 'gallery') {
+        nodeData.content.images = pendingGalleryImages;
+      }
+    } else if (kind === 'contact') {
+      const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
+      const existingContact = existingNode?.contact || {};
+
+      nodeData.contact = {
+        title,
+        about: ($('nodeContactAbout')?.value || '').trim(),
+        phone: ($('nodeContactPhone')?.value || '').trim(),
+        email: ($('nodeContactEmail')?.value || '').trim(),
+        image: pendingContactImageName ? `sample/${pendingContactImageName}` : (existingContact.image || ''),
+        imageName: pendingContactImageName || existingContact.imageName || '',
+        imageBlob: pendingContactImageBlob || existingContact.imageBlob || null
+      };
+    }
+
+    if (activeEditingNodeId) {
+      updateNode(activeEditingNodeId, nodeData, parentId);
+    } else {
+      addNode(parentId, nodeData);
+    }
+
+    closeCustomModal(els.adminNodeBuilderModal);
+    onAlignmentChanged();
+    renderClientSidebar();
+    renderAdminMenuTree();
+    await syncCustomMenuFilesToDisk();
+  });
+
+  // Client Sub-Menu back button
   $('catSubMenuBackBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
-    if (els.catLevel1) els.catLevel1.hidden = false;
+    if (state.menuNavStack && state.menuNavStack.length > 0) {
+      state.menuNavStack.pop();
+      renderClientSidebar();
+    }
   });
 
   // Gallery Lightbox Navigation
@@ -3789,177 +4241,6 @@ function initCustomMenuAdminAndClient() {
     }
   });
 
-  async function syncCustomMenuFilesToDisk() {
-    try {
-      const files = collectCustomMenuFiles();
-      if (files.length) {
-        await serverSave(files);
-      }
-    } catch (e) {
-      console.warn('Auto-sync custom menu files:', e);
-    }
-  }
-
-  // Setup Admin Modals
-  // 1. Location Intel Modal
-  $('adminLocIntelAddBtn')?.addEventListener('click', () => {
-    addAdminSubGroup('adminLocIntelList');
-  });
-  $('adminLocIntelSave')?.addEventListener('click', async () => {
-    const title = ($('adminLocIntelSectionTitle')?.value || '').trim() || 'LOCATION INTELLIGENCE';
-    const groups = getAdminSubGroups('adminLocIntelList');
-    upsertCustomSection('location_intel', { title, groups, items: groups.flatMap(g => g.items || []) });
-    closeCustomModal(els.adminLocationIntelModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-    await syncCustomMenuFilesToDisk();
-  });
-  $('adminLocIntelClear')?.addEventListener('click', () => {
-    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
-    closeCustomModal(els.adminLocationIntelModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-  });
-
-  // 2. Walkthrough Video Modal
-  $('adminWalkthroughAddBtn')?.addEventListener('click', () => {
-    addAdminSubGroup('adminWalkthroughList');
-  });
-  $('adminWalkthroughSave')?.addEventListener('click', async () => {
-    const title = ($('adminWalkthroughSectionTitle')?.value || '').trim() || 'WALKTHROUGH VIDEO';
-    const groups = getAdminSubGroups('adminWalkthroughList');
-    upsertCustomSection('walkthrough_video', { title, groups, items: groups.flatMap(g => g.items || []) });
-    closeCustomModal(els.adminWalkthroughModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-    await syncCustomMenuFilesToDisk();
-  });
-  $('adminWalkthroughClear')?.addEventListener('click', () => {
-    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
-    closeCustomModal(els.adminWalkthroughModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-  });
-
-  // 3. Virtual Tour Modal
-  $('adminVtAddBtn')?.addEventListener('click', () => {
-    addAdminSubGroup('adminVtList');
-  });
-  $('adminVtSave')?.addEventListener('click', async () => {
-    const title = ($('adminVtSectionTitle')?.value || '').trim() || 'VIRTUAL TOUR';
-    const groups = getAdminSubGroups('adminVtList');
-    upsertCustomSection('virtual_tour', { title, groups, items: groups.flatMap(g => g.items || []) });
-    closeCustomModal(els.adminVirtualTourModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-    await syncCustomMenuFilesToDisk();
-  });
-  $('adminVtClear')?.addEventListener('click', () => {
-    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
-    closeCustomModal(els.adminVirtualTourModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-  });
-
-  // 4. Gallery Modal
-  $('adminGalleryFiles')?.addEventListener('change', (e) => {
-    const files = Array.from(e.target.files || []);
-    if (!state.tempGalleryImages) state.tempGalleryImages = [];
-    files.forEach((f) => {
-      state.tempGalleryImages.push({ name: f.name, blob: f, url: `sample/${f.name}` });
-    });
-    renderAdminGalleryPreviews();
-  });
-  $('adminGallerySave')?.addEventListener('click', async () => {
-    const title = ($('adminGallerySectionTitle')?.value || '').trim() || 'GALLERY';
-    const images = state.tempGalleryImages || [];
-    upsertCustomSection('gallery', { title, images });
-    closeCustomModal(els.adminGalleryModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-    await syncCustomMenuFilesToDisk();
-  });
-  $('adminGalleryClear')?.addEventListener('click', () => {
-    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
-    closeCustomModal(els.adminGalleryModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-  });
-
-  // 5. Brochure Modal
-  $('adminBrochureAddBtn')?.addEventListener('click', () => {
-    addAdminSubGroup('adminBrochureList');
-  });
-  $('adminBrochureSave')?.addEventListener('click', async () => {
-    const title = ($('adminBrochureSectionTitle')?.value || '').trim() || 'BROCHURE';
-    const groups = getAdminSubGroups('adminBrochureList');
-    upsertCustomSection('brochure', { title, groups, items: groups.flatMap(g => g.items || []) });
-    closeCustomModal(els.adminBrochureModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-    await syncCustomMenuFilesToDisk();
-  });
-  $('adminBrochureClear')?.addEventListener('click', () => {
-    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
-    closeCustomModal(els.adminBrochureModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-  });
-
-  // 6. Contact Us Modal
-  $('adminContactSave')?.addEventListener('click', async () => {
-    const sectionTitle = ($('adminContactSectionTitle')?.value || '').trim() || 'CONTACT US';
-    const fileInput = $('adminContactImageFile');
-    const file = fileInput?.files?.[0];
-    const title = ($('adminContactTitle')?.value || '').trim();
-    const about = ($('adminContactAbout')?.value || '').trim();
-    const phone = ($('adminContactPhone')?.value || '').trim();
-    const email = ($('adminContactEmail')?.value || '').trim();
-
-    const existingSec = activeEditingSecId ? getCustomSections().find(s => s.id === activeEditingSecId) : {};
-
-    upsertCustomSection('contact_us', {
-      title: sectionTitle,
-      imageBlob: file || existingSec?.imageBlob,
-      imageName: file ? file.name : (existingSec?.imageName || ''),
-      image: file ? `sample/${file.name}` : (existingSec?.image || ''),
-      titleVal: title,
-      about,
-      phone,
-      email
-    });
-    closeCustomModal(els.adminContactModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-    await syncCustomMenuFilesToDisk();
-  });
-  $('adminContactClear')?.addEventListener('click', () => {
-    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
-    closeCustomModal(els.adminContactModal);
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderCurrentMenuAdminPanel();
-  });
-
-  // Modal Close buttons (data-close)
-  document.querySelectorAll('.custom-feature-modal [data-close]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const modal = btn.closest('.modal');
-      if (modal) closeCustomModal(modal);
-    });
-  });
-
   // Client Contact Close
   const hideContactModal = () => {
     if (els.clientContactModal) {
@@ -3970,236 +4251,14 @@ function initCustomMenuAdminAndClient() {
   };
   $('clientContactClose')?.addEventListener('click', hideContactModal);
   els.clientContactModal?.querySelector('.contact-modal-backdrop')?.addEventListener('click', hideContactModal);
-}
 
-function addAdminSubGroup(containerId, groupData = {}) {
-  const container = typeof containerId === 'string' ? $(containerId) : containerId;
-  if (!container) return;
-
-  const card = document.createElement('div');
-  card.className = 'sub-group-card';
-  const groupTitle = groupData.title || groupData.name || '';
-
-  card.innerHTML = `
-    <div class="sub-group-header">
-      <input type="text" placeholder="Sub-Domain / Sub-Group Title (e.g. Kitchen Videos)" class="sub-group-title-input form-input-text" value="${esc(groupTitle)}" />
-      <button type="button" class="btn btn-ghost sub-group-del-btn" title="Delete Sub-Group" style="color:var(--danger,#f43f5e); font-size:12px; padding:4px 8px;">✕ Delete Sub-Group</button>
-    </div>
-    <div class="sub-group-body">
-      <!-- Items list inside this group -->
-    </div>
-    <button type="button" class="btn btn-ghost sub-group-add-item-btn" style="margin-top:8px; font-size:12px;">＋ Add Item</button>
-  `;
-
-  const groupBody = card.querySelector('.sub-group-body');
-  const addItemBtn = card.querySelector('.sub-group-add-item-btn');
-  const delGroupBtn = card.querySelector('.sub-group-del-btn');
-
-  const items = Array.isArray(groupData.items) ? groupData.items : [];
-  if (items.length) {
-    items.forEach(item => addAdminSubItemRow(groupBody, item));
-  } else {
-    addAdminSubItemRow(groupBody, {});
-  }
-
-  addItemBtn?.addEventListener('click', () => {
-    addAdminSubItemRow(groupBody, {});
-  });
-
-  delGroupBtn?.addEventListener('click', () => {
-    card.remove();
-  });
-
-  container.appendChild(card);
-}
-
-function getAdminSubGroups(containerId) {
-  const container = typeof containerId === 'string' ? $(containerId) : containerId;
-  if (!container) return [];
-  const listId = typeof containerId === 'string' ? containerId : container.id;
-  const groups = [];
-
-  container.querySelectorAll('.sub-group-card').forEach((card, gIdx) => {
-    const title = (card.querySelector('.sub-group-title-input')?.value || '').trim() || `Sub-Group ${gIdx + 1}`;
-    const groupBody = card.querySelector('.sub-group-body');
-    const items = getAdminSubItemRows(groupBody);
-
-    groups.push({
-      id: `grp_${gIdx + 1}`,
-      title,
-      items
+  // Modal Close buttons (data-close)
+  document.querySelectorAll('.custom-feature-modal [data-close]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const modal = btn.closest('.modal');
+      if (modal) closeCustomModal(modal);
     });
   });
-
-  return groups;
-}
-
-function addAdminSubItemRow(containerId, itemData = {}) {
-  const list = typeof containerId === 'string' ? $(containerId) : containerId;
-  if (!list) return;
-
-  const row = document.createElement('div');
-  row.className = 'vt-item-row sub-item-row';
-  row.style.display = 'flex';
-  row.style.gap = '8px';
-  row.style.alignItems = 'center';
-  row.style.marginBottom = '8px';
-  row.style.width = '100%';
-
-  const existingFileName = itemData.fileName || itemData.videoName || itemData.pdfName || '';
-  const fileLabel = existingFileName ? `File: ${existingFileName}` : 'Upload File';
-  const urlValue = itemData.url || itemData.videoUrl || itemData.pdfUrl || '';
-
-  row.innerHTML = `
-    <input type="text" placeholder="Title (e.g. Living Room)" class="sub-name form-input-text" style="flex:1; min-width:110px;" value="${esc(itemData.name || itemData.title || '')}" />
-    <input type="text" placeholder="Link / URL (YouTube, 3DVista, PDF, MP4)" class="sub-url form-input-text" style="flex:1.5; min-width:130px;" value="${esc(urlValue)}" />
-    <label class="btn btn-ghost sub-file-label" style="font-size:11px; padding:6px 10px; cursor:pointer; white-space:nowrap; border:1px dashed rgba(255,255,255,0.25); display:inline-flex; align-items:center; gap:4px;" title="Upload file from device">
-      📁 <span class="sub-file-text">${esc(fileLabel)}</span>
-      <input type="file" class="sub-file-input" hidden />
-    </label>
-    <button type="button" class="btn btn-ghost sub-del-btn" title="Delete Item" style="color:var(--danger,#f43f5e); font-size:14px; padding:4px 8px;">✕</button>
-  `;
-
-  const fileInput = row.querySelector('.sub-file-input');
-  const fileText = row.querySelector('.sub-file-text');
-
-  if (itemData.fileBlob || itemData.videoBlob || itemData.pdfBlob) {
-    row._fileBlob = itemData.fileBlob || itemData.videoBlob || itemData.pdfBlob;
-    row._fileName = existingFileName || row._fileBlob.name;
-    row._videoBlob = row._fileBlob;
-    row._videoName = row._fileName;
-    row._pdfBlob = row._fileBlob;
-    row._pdfName = row._fileName;
-  }
-
-  if (fileInput) {
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        row._fileBlob = file;
-        row._fileName = file.name;
-        row._videoBlob = file;
-        row._videoName = file.name;
-        row._pdfBlob = file;
-        row._pdfName = file.name;
-        if (fileText) fileText.textContent = `File: ${file.name}`;
-      }
-    });
-  }
-
-  row.querySelector('.sub-del-btn')?.addEventListener('click', () => row.remove());
-  list.appendChild(row);
-}
-
-function getAdminSubItemRows(containerId) {
-  const list = typeof containerId === 'string' ? $(containerId) : containerId;
-  if (!list) return [];
-  const items = [];
-  list.querySelectorAll('.sub-item-row, .vt-item-row').forEach((row, idx) => {
-    const name = (row.querySelector('.sub-name, .vt-name')?.value || '').trim();
-    const urlVal = (row.querySelector('.sub-url, .vt-url')?.value || '').trim();
-
-    const videoBlob = row._videoBlob || null;
-    const videoName = row._videoName || (videoBlob ? videoBlob.name : '');
-    const pdfBlob = row._pdfBlob || null;
-    const pdfName = row._pdfName || (pdfBlob ? pdfBlob.name : '');
-
-    if (name || urlVal || videoBlob || videoName || pdfBlob || pdfName) {
-      items.push({
-        id: `item_${idx + 1}`,
-        name: name || `Item ${idx + 1}`,
-        url: urlVal,
-        videoUrl: urlVal,
-        pdfUrl: urlVal,
-        videoBlob,
-        videoName,
-        pdfBlob,
-        pdfName
-      });
-    }
-  });
-  return items;
-}
-
-function openAdminMenuModal(act, sectionId = null) {
-  activeEditingSecId = sectionId;
-  const sections = getCustomSections();
-  const existingSec = sectionId ? sections.find(s => s.id === sectionId) : null;
-
-  if (act === 'current_menu') {
-    renderCurrentMenuAdminPanel();
-    openCustomModal(els.adminCurrentMenuModal);
-    return;
-  }
-
-  if (act === 'location_intel') {
-    if ($('adminLocIntelSectionTitle')) $('adminLocIntelSectionTitle').value = existingSec ? (existingSec.title || '') : '';
-    const list = $('adminLocIntelList');
-    if (list) {
-      list.innerHTML = '';
-      const groups = existingSec ? existingSec.groups : [];
-      if (groups && groups.length) {
-        groups.forEach((grp) => addAdminSubGroup('adminLocIntelList', grp));
-      } else {
-        addAdminSubGroup('adminLocIntelList', {});
-      }
-    }
-    openCustomModal(els.adminLocationIntelModal);
-  } else if (act === 'walkthrough_video') {
-    if ($('adminWalkthroughSectionTitle')) $('adminWalkthroughSectionTitle').value = existingSec ? (existingSec.title || '') : '';
-    const list = $('adminWalkthroughList');
-    if (list) {
-      list.innerHTML = '';
-      const groups = existingSec ? existingSec.groups : [];
-      if (groups && groups.length) {
-        groups.forEach((grp) => addAdminSubGroup('adminWalkthroughList', grp));
-      } else {
-        addAdminSubGroup('adminWalkthroughList', {});
-      }
-    }
-    openCustomModal(els.adminWalkthroughModal);
-  } else if (act === 'virtual_tour') {
-    if ($('adminVtSectionTitle')) $('adminVtSectionTitle').value = existingSec ? (existingSec.title || '') : '';
-    const list = $('adminVtList');
-    if (list) {
-      list.innerHTML = '';
-      const groups = existingSec ? existingSec.groups : [];
-      if (groups && groups.length) {
-        groups.forEach((grp) => addAdminSubGroup('adminVtList', grp));
-      } else {
-        addAdminSubGroup('adminVtList', {});
-      }
-    }
-    openCustomModal(els.adminVirtualTourModal);
-  } else if (act === 'gallery') {
-    if ($('adminGallerySectionTitle')) $('adminGallerySectionTitle').value = existingSec ? (existingSec.title || '') : '';
-    state.tempGalleryImages = existingSec && Array.isArray(existingSec.images) ? [...existingSec.images] : [];
-    renderAdminGalleryPreviews();
-    openCustomModal(els.adminGalleryModal);
-  } else if (act === 'brochure') {
-    if ($('adminBrochureSectionTitle')) $('adminBrochureSectionTitle').value = existingSec ? (existingSec.title || '') : '';
-    const list = $('adminBrochureList');
-    if (list) {
-      list.innerHTML = '';
-      const groups = existingSec ? existingSec.groups : [];
-      if (groups && groups.length) {
-        groups.forEach((grp) => addAdminSubGroup('adminBrochureList', grp));
-      } else {
-        addAdminSubGroup('adminBrochureList', {});
-      }
-    }
-    openCustomModal(els.adminBrochureModal);
-  } else if (act === 'contact_us') {
-    const c = existingSec || {};
-    if ($('adminContactSectionTitle')) $('adminContactSectionTitle').value = c.title || '';
-    if ($('adminContactTitle')) $('adminContactTitle').value = c.titleVal || c.title || '';
-    if ($('adminContactAbout')) $('adminContactAbout').value = c.about || '';
-    if ($('adminContactPhone')) $('adminContactPhone').value = c.phone || '';
-    if ($('adminContactEmail')) $('adminContactEmail').value = c.email || '';
-    const status = $('adminContactImageStatus');
-    if (status) status.textContent = c.imageName ? `Current image: ${c.imageName}` : (c.image ? `Current: ${c.image}` : 'No image selected');
-    openCustomModal(els.adminContactModal);
-  }
 }
 
 function openCustomModal(modalEl) {
@@ -4216,47 +4275,6 @@ function closeCustomModal(modalEl) {
   if (video) { video.pause(); video.src = ''; }
   const iframe = modalEl.querySelector('iframe');
   if (iframe) iframe.src = 'about:blank';
-  const embed = modalEl.querySelector('embed');
-  if (embed) embed.removeAttribute('src');
-}
-
-function populateAdminVtList() {
-  const list = $('adminVtList');
-  if (!list) return;
-  list.innerHTML = '';
-  const items = state.menuConfig.virtual_tour?.items || [];
-  if (items.length === 0) {
-    addAdminSubItemRow('adminVtList', {});
-  } else {
-    items.forEach(item => addAdminSubItemRow('adminVtList', item));
-  }
-}
-
-function addAdminVtRow(name, url) {
-  addAdminSubItemRow('adminVtList', { name, url });
-}
-
-function renderAdminGalleryPreviews() {
-  const container = $('adminGalleryPreviews');
-  if (!container) return;
-  const images = state.tempGalleryImages || [];
-  container.innerHTML = images.map((img, i) => {
-    const src = img.blob ? URL.createObjectURL(img.blob) : assetUrl(img.url || img.name);
-    return `
-      <div class="gallery-preview-item">
-        <img src="${esc(src)}" alt="${esc(img.name)}" />
-        <button type="button" class="gallery-preview-remove" data-idx="${i}">✕</button>
-      </div>
-    `;
-  }).join('');
-
-  container.querySelectorAll('.gallery-preview-remove').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const idx = parseInt(btn.dataset.idx, 10);
-      if (state.tempGalleryImages) state.tempGalleryImages.splice(idx, 1);
-      renderAdminGalleryPreviews();
-    });
-  });
 }
 
 // ─── Boot ───────────────────────────────────────────────────────────────────

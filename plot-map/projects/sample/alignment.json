@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-26T07:59:10.264Z",
+  "savedAt": "2026-08-26T09:07:25.442Z",
   "transform": {
     "tx": 1.3157,
     "ty": -0.2425,
@@ -26,7 +26,7 @@
       {
         "id": "sec_1787729788330_19",
         "type": "walkthrough_video",
-        "title": "JUSTIN",
+        "title": "VIDEO 1",
         "enabled": true,
         "groups": [
           {
@@ -38,20 +38,20 @@
                 "name": "FSDASD",
                 "url": "Century Modern(1).mp4",
                 "videoUrl": "Century Modern(1).mp4",
-                "videoName": "Century Modern(1).mp4",
+                "videoName": "Button Link Bug.mp4",
                 "pdfUrl": "Century Modern(1).mp4",
-                "pdfName": "Century Modern(1).mp4",
-                "fileName": "Century Modern(1).mp4"
+                "pdfName": "Button Link Bug.mp4",
+                "fileName": "Button Link Bug.mp4"
               },
               {
                 "id": "item_2",
                 "name": "DASD",
                 "url": "Hero Video 3 (1).mp4",
                 "videoUrl": "Hero Video 3 (1).mp4",
-                "videoName": "Hero Video 3 (1).mp4",
+                "videoName": "Recording 2026-02-18 165830.mp4",
                 "pdfUrl": "Hero Video 3 (1).mp4",
-                "pdfName": "Hero Video 3 (1).mp4",
-                "fileName": "Hero Video 3 (1).mp4"
+                "pdfName": "Recording 2026-02-18 165830.mp4",
+                "fileName": "Recording 2026-02-18 165830.mp4"
               }
             ]
           },
@@ -64,10 +64,10 @@
                 "name": "SDAS",
                 "url": "Button Link Bug 2.mp4",
                 "videoUrl": "Button Link Bug 2.mp4",
-                "videoName": "Button Link Bug 2.mp4",
+                "videoName": "",
                 "pdfUrl": "Button Link Bug 2.mp4",
-                "pdfName": "Button Link Bug 2.mp4",
-                "fileName": "Button Link Bug 2.mp4"
+                "pdfName": "",
+                "fileName": ""
               }
             ]
           }
@@ -94,20 +94,20 @@
                 "name": "ADEDE",
                 "url": "Century Modern(1).mp4",
                 "videoUrl": "Century Modern(1).mp4",
-                "videoName": "Century Modern(1).mp4",
+                "videoName": "Recording 2026-02-18 165830.mp4",
                 "pdfUrl": "Century Modern(1).mp4",
-                "pdfName": "Century Modern(1).mp4",
-                "fileName": "Century Modern(1).mp4"
+                "pdfName": "Recording 2026-02-18 165830.mp4",
+                "fileName": "Recording 2026-02-18 165830.mp4"
               },
               {
                 "id": "item_2",
                 "name": "ADSD",
                 "url": "Century Modern(1).mp4",
                 "videoUrl": "Century Modern(1).mp4",
-                "videoName": "Century Modern(1).mp4",
+                "videoName": "Hero Video 3 (1).mp4",
                 "pdfUrl": "Century Modern(1).mp4",
-                "pdfName": "Century Modern(1).mp4",
-                "fileName": "Century Modern(1).mp4"
+                "pdfName": "Hero Video 3 (1).mp4",
+                "fileName": "Hero Video 3 (1).mp4"
               }
             ]
           }
@@ -135,7 +135,7 @@
       {
         "id": "sec_1787730538040_499",
         "type": "gallery",
-        "title": "ALASKA",
+        "title": "GALLERY",
         "enabled": true,
         "groups": [],
         "images": [
@@ -177,6 +177,46 @@
                 "pdfUrl": "JD_Build91_SDE AI Intern.pdf",
                 "pdfName": "JD_Build91_SDE AI Intern.pdf",
                 "fileName": "JD_Build91_SDE AI Intern.pdf"
+              }
+            ]
+          }
+        ],
+        "images": [],
+        "image": "",
+        "imageName": "",
+        "about": "",
+        "phone": "",
+        "email": ""
+      },
+      {
+        "id": "sec_1787734504686_49",
+        "type": "walkthrough_video",
+        "title": "Showcase Video",
+        "enabled": true,
+        "groups": [
+          {
+            "id": "grp_1",
+            "title": "Exterior",
+            "items": [
+              {
+                "id": "item_1",
+                "name": "Test 1",
+                "url": "",
+                "videoUrl": "",
+                "videoName": "",
+                "pdfUrl": "",
+                "pdfName": "",
+                "fileName": ""
+              },
+              {
+                "id": "item_2",
+                "name": "Test 2",
+                "url": "",
+                "videoUrl": "",
+                "videoName": "",
+                "pdfUrl": "",
+                "pdfName": "",
+                "fileName": ""
               }
             ]
           }

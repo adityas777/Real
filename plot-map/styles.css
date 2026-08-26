@@ -1066,8 +1066,19 @@ body.is-admin .cat-drawer { display: none !important; }
   display: flex !important;
   flex-direction: column !important;
 }
-  border-radius: 14px;
-  box-shadow: var(--shadow);
+.node-kind-tab {
+  transition: all 0.15s ease;
+}
+.node-kind-tab.is-active {
+  border-color: var(--gold, #facc15) !important;
+  background: rgba(250, 204, 21, 0.15) !important;
+  color: #fff !important;
+}
+.tree-node-item {
+  transition: background 0.12s ease;
+}
+.tree-node-item:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
 }
 .custom-modal-body {
   padding: 20px;
