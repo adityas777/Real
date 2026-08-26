@@ -433,36 +433,28 @@
       </div>
       <div class="modal-body custom-modal-body" style="padding:18px;">
         
-        <!-- STEP 1: What are you adding? (Choice Cards) -->
+        <!-- STEP 1: What are you adding? (Notion-style Compact Choice Rows) -->
         <div id="wizardStep1" class="wizard-step">
-          <p class="custom-modal-desc" style="font-size:13px; font-weight:600; color:#f8fafc; margin:0 0 14px 0;">What type of item are you adding?</p>
-          <div class="wizard-cards-grid" style="display:flex; flex-direction:column; gap:10px;">
+          <p class="custom-modal-desc" style="font-size:12.5px; font-weight:600; color:#f8fafc; margin:0 0 10px 0;">What type of item are you adding?</p>
+          <div class="wizard-rows-grid" style="display:flex; flex-direction:column; gap:6px;">
             
-            <button type="button" class="wizard-choice-card" data-choice="parent">
-              <div class="wizard-card-icon">📁</div>
-              <div class="wizard-card-info">
-                <div class="wizard-card-title">Folder</div>
-                <div class="wizard-card-desc">Groups other items together. Doesn't open anything itself.</div>
-              </div>
+            <button type="button" class="wizard-choice-row" data-choice="parent">
+              <span class="wizard-row-icon">📁</span>
+              <span class="wizard-row-title">Folder</span>
+              <span class="wizard-row-desc">Groups other items together.</span>
             </button>
             
-            <button type="button" class="wizard-choice-card" data-choice="child">
-              <div class="wizard-card-icon">📄</div>
-              <div class="wizard-card-info">
-                <div class="wizard-card-title">Content Item</div>
-                <div class="wizard-card-desc">A single video, PDF, image, gallery, or virtual tour link.</div>
-              </div>
+            <button type="button" class="wizard-choice-row" data-choice="child">
+              <span class="wizard-row-icon">📄</span>
+              <span class="wizard-row-title">Content Item</span>
+              <span class="wizard-row-desc">Single video, PDF, image, gallery, or tour.</span>
             </button>
             
-            <button type="button" class="wizard-choice-card" id="wizardChoiceContact" data-choice="contact">
-              <div class="wizard-card-icon">📞</div>
-              <div class="wizard-card-info">
-                <div class="wizard-card-title-row" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                  <span class="wizard-card-title">Contact Card</span>
-                  <span class="wizard-card-badge" id="wizardContactBadge" style="display:none; font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(250,204,21,0.2); color:#facc15;">✓ Already Added — Click to Edit</span>
-                </div>
-                <div class="wizard-card-desc">The project's contact info card.</div>
-              </div>
+            <button type="button" class="wizard-choice-row" id="wizardChoiceContact" data-choice="contact">
+              <span class="wizard-row-icon">📞</span>
+              <span class="wizard-row-title">Contact Card</span>
+              <span class="wizard-row-desc">Project contact info.</span>
+              <span class="wizard-card-badge" id="wizardContactBadge" style="display:none; font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(250,204,21,0.2); color:#facc15; margin-left:auto;">✓ Already Added</span>
             </button>
             
           </div>

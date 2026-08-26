@@ -3377,18 +3377,36 @@ function getValidParentFolders(excludeId = null, list = getMenuTree(), depth = 1
 
 function addNode(parentId, nodeData) {
   const tree = getMenuTree();
-  const newNode = Object.assign({ id: `node_${Date.now()}_${Math.floor(Math.random()*1000)}` }, nodeData);
-  if (!parentId || parentId === 'root') {
-    tree.push(newNode);
-  } else {
+  const newNode = Object.assign({ id: nodeData.id || `node_${Date.now()}_${Math.floor(Math.random()*1000)}` }, nodeData);
+  
+  let targetList = tree;
+  if (parentId && parentId !== 'root') {
     const info = findNodeInfo(parentId);
     if (info && info.node && info.node.kind === 'parent') {
       info.node.children = info.node.children || [];
-      info.node.children.push(newNode);
-    } else {
-      tree.push(newNode);
+      targetList = info.node.children;
     }
   }
+
+  // Deduplication check: prevent duplicate node ID or matching title+kind+content within the same parent
+  const isDuplicate = targetList.some((existing) => {
+    if (existing.id === newNode.id) return true;
+    if (existing.kind === newNode.kind && existing.title === newNode.title) {
+      if (newNode.kind === 'child' && existing.content && newNode.content) {
+        return (existing.content.url && existing.content.url === newNode.content.url) ||
+               (existing.content.fileName && existing.content.fileName === newNode.content.fileName);
+      }
+      if (newNode.kind === 'parent') return true;
+    }
+    return false;
+  });
+
+  if (isDuplicate) {
+    console.warn('[MenuBuilder] Blocked duplicate node addition:', newNode.title);
+    return null;
+  }
+
+  targetList.push(newNode);
   state.menuConfig.tree = tree;
   return newNode;
 }
@@ -3881,48 +3899,47 @@ function renderAdminMenuTree() {
         else if (node.contentType) subtitle = node.contentType.toUpperCase();
       }
 
+      let inlineTag = '';
+      if (isFolder) inlineTag = `(${childCount})`;
+      else if (isContact) inlineTag = '· Singleton';
+      else if (node.contentType) inlineTag = `· ${node.contentType.toUpperCase()}`;
+
       let nodeHtml = `
-        <div class="${rowClass}" data-node-id="${esc(node.id)}" style="margin-left:${indent}px;">
+        <div class="${rowClass}" data-node-id="${esc(node.id)}" style="padding-left:${indent + 8}px;">
           
           <!-- Guide line indicator for nested levels -->
-          ${depth > 1 ? `<div style="position:absolute; left:-12px; top:0; bottom:0; width:1px; background:rgba(255,255,255,0.12);"></div>` : ''}
+          ${depth > 1 ? `<div style="position:absolute; left:${indent - 8}px; top:0; bottom:0; width:1px; background:rgba(255,255,255,0.12);"></div>` : ''}
 
           <div style="display:flex; align-items:center; gap:6px; min-width:0; flex:1;">
             ${isFolder ? `
               <span class="tree-chevron ${isCollapsed ? 'is-collapsed' : ''}" data-folder-id="${esc(node.id)}" title="${isCollapsed ? 'Expand folder' : 'Collapse folder'}">▼</span>
-            ` : '<span style="width:14px;"></span>'}
+            ` : '<span style="width:12px; flex-shrink:0;"></span>'}
             <span style="font-size:14px; flex-shrink:0;">${icon}</span>
-            
-            <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
-              <div style="display:flex; align-items:center; gap:4px; min-width:0;">
-                <span style="font-size:12px; font-weight:${isFolder ? '700' : '600'}; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(title)}">${esc(title)}</span>
-                ${isFolder ? `<span class="tree-count-badge">(${childCount})</span>` : ''}
-                ${isContact ? `<span style="font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px; background:rgba(56,189,248,0.2); color:#38bdf8; margin-left:4px;">SINGLETON</span>` : ''}
-              </div>
-              ${subtitle ? `<span style="font-size:10px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${esc(subtitle)}">${esc(subtitle)}</span>` : ''}
-            </div>
+            <span class="tree-title-text" title="${esc(title)}">${esc(title)}</span>
+            <span class="tree-inline-tag">${esc(inlineTag)}</span>
           </div>
 
-          <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-            ${canAddChild ? `<button type="button" class="tree-btn-add-inside" data-parent-id="${esc(node.id)}" title="Add menu item inside this folder">＋ Add inside</button>` : ''}
-            
-            <!-- Clean Overflow Trigger (⋯) -->
-            <div style="position:relative;">
-              <button type="button" class="tree-overflow-trigger" data-node-id="${esc(node.id)}" title="More Actions">⋯</button>
-              <div class="tree-overflow-menu" id="treeOverflow_${esc(node.id)}" hidden>
-                <button type="button" class="tree-overflow-item tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
-                  <span>↑</span> <span>Move Up</span>
+          <!-- Clean Overflow Trigger (⋯) -->
+          <div style="position:relative; flex-shrink:0; margin-left:auto;">
+            <button type="button" class="tree-overflow-trigger" data-node-id="${esc(node.id)}" title="More Actions">⋯</button>
+            <div class="tree-overflow-menu" id="treeOverflow_${esc(node.id)}" hidden>
+              ${canAddChild ? `
+                <button type="button" class="tree-overflow-item is-add-inside tree-btn-add-inside" data-parent-id="${esc(node.id)}">
+                  <span>＋</span> <span>Add item inside</span>
                 </button>
-                <button type="button" class="tree-overflow-item tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
-                  <span>↓</span> <span>Move Down</span>
-                </button>
-                <button type="button" class="tree-overflow-item tree-act-edit" data-node-id="${esc(node.id)}">
-                  <span>✏️</span> <span>Edit Item</span>
-                </button>
-                <button type="button" class="tree-overflow-item is-danger tree-act-del" data-node-id="${esc(node.id)}">
-                  <span>🗑️</span> <span>Delete Item</span>
-                </button>
-              </div>
+              ` : ''}
+              <button type="button" class="tree-overflow-item tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
+                <span>↑</span> <span>Move Up</span>
+              </button>
+              <button type="button" class="tree-overflow-item tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
+                <span>↓</span> <span>Move Down</span>
+              </button>
+              <button type="button" class="tree-overflow-item tree-act-edit" data-node-id="${esc(node.id)}">
+                <span>✏️</span> <span>Edit Item</span>
+              </button>
+              <button type="button" class="tree-overflow-item is-danger tree-act-del" data-node-id="${esc(node.id)}">
+                <span>🗑️</span> <span>Delete Item</span>
+              </button>
             </div>
           </div>
         </div>
@@ -3969,7 +3986,7 @@ function renderAdminMenuTree() {
     });
   });
 
-  // Add Inside Folder
+  // Add Inside Folder (now inside ⋯ overflow menu)
   treeEl.querySelectorAll('.tree-btn-add-inside').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -4030,18 +4047,38 @@ function renderAdminMenuTree() {
     });
   });
 
-  // Delete Node
+  // Delete Node with distinct non-empty folder warning
   treeEl.querySelectorAll('.tree-act-del').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.dataset.nodeId;
-      if (id && deleteNode(id)) {
-        onAlignmentChanged();
-        renderClientSidebar();
-        renderAdminMenuTree();
+      const info = findNodeInfo(id);
+      if (info && info.node) {
+        const node = info.node;
+        const count = countTotalDescendants(node);
+        let confirmed = false;
+        if (node.kind === 'parent' && count > 0) {
+          confirmed = confirm(`Delete '${node.title}' and its ${count} items inside?\n\nThis will permanently delete all contents inside this folder.`);
+        } else {
+          confirmed = confirm(`Are you sure you want to delete '${node.title}'?`);
+        }
+        if (confirmed && deleteNode(id)) {
+          onAlignmentChanged();
+          renderClientSidebar();
+          renderAdminMenuTree();
+        }
       }
     });
   });
+}
+
+function countTotalDescendants(node) {
+  if (!node || node.kind !== 'parent' || !Array.isArray(node.children)) return 0;
+  let count = node.children.length;
+  node.children.forEach((child) => {
+    count += countTotalDescendants(child);
+  });
+  return count;
 }
 
 // ─── Guided Wizard Implementation ──────────────────────────────────────────
@@ -4054,7 +4091,7 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root') {
 
   // Initialize Wizard State
   wizardState = {
-    step: nodeId ? (node.kind === 'parent' ? 2 : (node.kind === 'contact' ? 2 : 2)) : 1,
+    step: nodeId ? 2 : 1, // Edit mode stays on step 2 (single-screen form)
     mode: nodeId ? 'edit' : 'create',
     editingNodeId: nodeId,
     presetParentId: defaultParentId,
@@ -4120,42 +4157,54 @@ function updateWizardStepUI() {
     if (el) el.style.display = 'none';
   });
 
-  // Calculate total steps based on branch
-  let totalSteps = 4;
-  if (wizardState.kind === 'parent') totalSteps = 3; // Step 1 -> Step 2a -> Step 3
-  else if (wizardState.kind === 'contact') totalSteps = 2; // Step 1 -> Step 2c
-
-  // Skip Placement Step if parentId was preset via "+ Add inside"
+  const isEditing = wizardState.mode === 'edit';
   const isPlacementPreset = wizardState.presetParentId && wizardState.presetParentId !== 'root' && wizardState.mode === 'create';
-  if (isPlacementPreset && wizardState.step === 3) {
-    wizardState.selectedPlacement = wizardState.presetParentId;
-    wizardState.step = 4; // Skip to confirm
+
+  // Determine total steps for creation wizard path
+  let totalSteps = 4;
+  if (wizardState.kind === 'contact') {
+    totalSteps = 1;
+  } else if (wizardState.kind === 'parent') {
+    totalSteps = isPlacementPreset ? 2 : 3;
+  } else if (wizardState.kind === 'child') {
+    totalSteps = isPlacementPreset ? 2 : 4;
   }
 
   // Active step view resolution
   let activeStepId = 'wizardStep1';
-  if (wizardState.step === 1) {
-    activeStepId = 'wizardStep1';
-  } else if (wizardState.step === 2) {
+
+  if (isEditing) {
+    // Single-screen form pre-filled with node's fields when editing!
     if (wizardState.kind === 'parent') activeStepId = 'wizardStep2a_Folder';
     else if (wizardState.kind === 'child') activeStepId = 'wizardStep2b_Content';
     else if (wizardState.kind === 'contact') activeStepId = 'wizardStep2c_Contact';
-  } else if (wizardState.step === 3) {
-    activeStepId = 'wizardStep3_Placement';
-    renderPlacementPicker();
-  } else if (wizardState.step === 4) {
-    activeStepId = 'wizardStep4_Confirm';
-    renderWizardSummary();
+  } else {
+    // Multi-step Creation Wizard
+    if (wizardState.step === 1) {
+      activeStepId = 'wizardStep1';
+    } else if (wizardState.step === 2) {
+      if (wizardState.kind === 'parent') activeStepId = 'wizardStep2a_Folder';
+      else if (wizardState.kind === 'child') activeStepId = 'wizardStep2b_Content';
+      else if (wizardState.kind === 'contact') activeStepId = 'wizardStep2c_Contact';
+    } else if (wizardState.step === 3) {
+      activeStepId = 'wizardStep3_Placement';
+      renderPlacementPicker();
+    } else if (wizardState.step === 4) {
+      activeStepId = 'wizardStep4_Confirm';
+      renderWizardSummary();
+    }
   }
 
   const activeEl = $(activeStepId);
   if (activeEl) activeEl.style.display = 'block';
 
-  // Step Counter Indicator
+  // Step Counter Indicator Label
   const indicator = $('wizardStepIndicator');
   if (indicator) {
-    if (wizardState.mode === 'edit') {
-      indicator.textContent = 'Edit Mode';
+    if (isEditing) {
+      indicator.textContent = 'Single-Screen Edit';
+    } else if (wizardState.kind === 'contact') {
+      indicator.textContent = 'Contact Details';
     } else {
       indicator.textContent = `Step ${wizardState.step} of ${totalSteps}`;
     }
@@ -4164,14 +4213,18 @@ function updateWizardStepUI() {
   // Back button visibility
   const backBtn = $('wizardBackBtn');
   if (backBtn) {
-    backBtn.style.visibility = (wizardState.step === 1 || wizardState.mode === 'edit') ? 'hidden' : 'visible';
+    backBtn.style.visibility = (wizardState.step === 1 || isEditing || wizardState.kind === 'contact') ? 'hidden' : 'visible';
   }
 
   // Next / Save button text
   const nextBtn = $('wizardNextBtn');
   if (nextBtn) {
-    if (wizardState.step === totalSteps || wizardState.step === 4 || wizardState.mode === 'edit') {
-      nextBtn.textContent = 'Save Item';
+    if (isEditing) {
+      nextBtn.textContent = 'Save Changes';
+      nextBtn.classList.remove('btn-ghost');
+      nextBtn.classList.add('btn-primary');
+    } else if (wizardState.step === totalSteps || wizardState.step === 4 || (isPlacementPreset && wizardState.step === 2)) {
+      nextBtn.textContent = wizardState.kind === 'parent' ? 'Create Folder' : 'Save Item';
       nextBtn.classList.remove('btn-ghost');
       nextBtn.classList.add('btn-primary');
     } else {
@@ -4179,7 +4232,7 @@ function updateWizardStepUI() {
     }
   }
 
-  // Step 2b Content Type Card active state
+  // Content type card active state
   document.querySelectorAll('.wizard-type-card').forEach((card) => {
     card.classList.toggle('is-active', card.dataset.type === wizardState.contentType);
   });
@@ -4377,8 +4430,8 @@ function initCustomMenuAdminAndClient() {
 
   dropdown?.addEventListener('click', (e) => e.stopPropagation());
 
-  // ─── Step 1 Choice Cards Selection ─────────────────────────────
-  document.querySelectorAll('.wizard-choice-card').forEach((card) => {
+  // ─── Step 1 Choice Rows Selection ─────────────────────────────
+  document.querySelectorAll('.wizard-choice-row').forEach((card) => {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
       const choice = card.dataset.choice;
@@ -4457,67 +4510,74 @@ function initCustomMenuAdminAndClient() {
     }
   });
 
-  // ─── Save Execution Helper ──────────────────────────────────────
+  // ─── Save Execution Helper (with async execution lock) ─────────
+  let isSavingWizard = false;
   const executeWizardSave = async () => {
-    const parentId = wizardState.selectedPlacement || 'root';
-    const kind = wizardState.kind;
+    if (isSavingWizard) return null;
+    isSavingWizard = true;
+    try {
+      const parentId = wizardState.selectedPlacement || 'root';
+      const kind = wizardState.kind;
 
-    let title = wizardState.title.trim();
-    if (kind === 'parent') {
-      title = ($('wizardFolderTitleInput')?.value || '').trim() || 'FOLDER';
-    } else if (kind === 'child') {
-      title = ($('wizardContentTitleInput')?.value || '').trim() || 'ITEM';
-    } else if (kind === 'contact') {
-      title = ($('wizardContactTitle')?.value || '').trim() || 'CONTACT US';
-    }
-
-    const nodeData = { title, kind };
-
-    if (kind === 'parent') {
-      nodeData.children = activeEditingNodeId ? (findNodeInfo(activeEditingNodeId)?.node?.children || []) : [];
-    } else if (kind === 'child') {
-      nodeData.contentType = wizardState.contentType;
-      const url = ($('wizardUrlInput')?.value || '').trim();
-
-      const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
-      const existingContent = existingNode?.content || {};
-
-      nodeData.content = {
-        url,
-        fileName: pendingNodeFileName || existingContent.fileName || '',
-        fileBlob: pendingNodeFileBlob || existingContent.fileBlob || null
-      };
-
-      if (wizardState.contentType === 'gallery') {
-        nodeData.content.images = pendingGalleryImages;
+      let title = wizardState.title.trim();
+      if (kind === 'parent') {
+        title = ($('wizardFolderTitleInput')?.value || '').trim() || 'FOLDER';
+      } else if (kind === 'child') {
+        title = ($('wizardContentTitleInput')?.value || '').trim() || 'ITEM';
+      } else if (kind === 'contact') {
+        title = ($('wizardContactTitle')?.value || '').trim() || 'CONTACT US';
       }
-    } else if (kind === 'contact') {
-      const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
-      const existingContact = existingNode?.contact || {};
 
-      nodeData.contact = {
-        title,
-        about: ($('wizardContactAbout')?.value || '').trim(),
-        phone: ($('wizardContactPhone')?.value || '').trim(),
-        email: ($('wizardContactEmail')?.value || '').trim(),
-        image: pendingContactImageName ? `sample/${pendingContactImageName}` : (existingContact.image || ''),
-        imageName: pendingContactImageName || existingContact.imageName || '',
-        imageBlob: pendingContactImageBlob || existingContact.imageBlob || null
-      };
+      const nodeData = { title, kind };
+
+      if (kind === 'parent') {
+        nodeData.children = activeEditingNodeId ? (findNodeInfo(activeEditingNodeId)?.node?.children || []) : [];
+      } else if (kind === 'child') {
+        nodeData.contentType = wizardState.contentType;
+        const url = ($('wizardUrlInput')?.value || '').trim();
+
+        const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
+        const existingContent = existingNode?.content || {};
+
+        nodeData.content = {
+          url,
+          fileName: pendingNodeFileName || existingContent.fileName || '',
+          fileBlob: pendingNodeFileBlob || existingContent.fileBlob || null
+        };
+
+        if (wizardState.contentType === 'gallery') {
+          nodeData.content.images = pendingGalleryImages;
+        }
+      } else if (kind === 'contact') {
+        const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
+        const existingContact = existingNode?.contact || {};
+
+        nodeData.contact = {
+          title,
+          about: ($('wizardContactAbout')?.value || '').trim(),
+          phone: ($('wizardContactPhone')?.value || '').trim(),
+          email: ($('wizardContactEmail')?.value || '').trim(),
+          image: pendingContactImageName ? `sample/${pendingContactImageName}` : (existingContact.image || ''),
+          imageName: pendingContactImageName || existingContact.imageName || '',
+          imageBlob: pendingContactImageBlob || existingContact.imageBlob || null
+        };
+      }
+
+      let createdOrUpdatedNode = null;
+      if (activeEditingNodeId) {
+        createdOrUpdatedNode = updateNode(activeEditingNodeId, nodeData, parentId);
+      } else {
+        createdOrUpdatedNode = addNode(parentId, nodeData);
+      }
+
+      onAlignmentChanged();
+      renderClientSidebar();
+      renderAdminMenuTree();
+      await syncCustomMenuFilesToDisk();
+      return createdOrUpdatedNode;
+    } finally {
+      isSavingWizard = false;
     }
-
-    let createdOrUpdatedNode = null;
-    if (activeEditingNodeId) {
-      createdOrUpdatedNode = updateNode(activeEditingNodeId, nodeData, parentId);
-    } else {
-      createdOrUpdatedNode = addNode(parentId, nodeData);
-    }
-
-    onAlignmentChanged();
-    renderClientSidebar();
-    renderAdminMenuTree();
-    await syncCustomMenuFilesToDisk();
-    return createdOrUpdatedNode;
   };
 
   // ─── Folder Quick-Add Branch Prompt Options ─────────────────────
