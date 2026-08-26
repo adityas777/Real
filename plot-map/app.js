@@ -3919,28 +3919,15 @@ function renderAdminMenuTree() {
             <span class="tree-inline-tag">${esc(inlineTag)}</span>
           </div>
 
-          <!-- Clean Overflow Trigger (⋯) -->
-          <div style="position:relative; flex-shrink:0; margin-left:auto;">
-            <button type="button" class="tree-overflow-trigger" data-node-id="${esc(node.id)}" title="More Actions">⋯</button>
-            <div class="tree-overflow-menu" id="treeOverflow_${esc(node.id)}" hidden>
-              ${canAddChild ? `
-                <button type="button" class="tree-overflow-item is-add-inside tree-btn-add-inside" data-parent-id="${esc(node.id)}">
-                  <span>＋</span> <span>Add item inside</span>
-                </button>
-              ` : ''}
-              <button type="button" class="tree-overflow-item tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
-                <span>↑</span> <span>Move Up</span>
-              </button>
-              <button type="button" class="tree-overflow-item tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
-                <span>↓</span> <span>Move Down</span>
-              </button>
-              <button type="button" class="tree-overflow-item tree-act-edit" data-node-id="${esc(node.id)}">
-                <span>✏️</span> <span>Edit Item</span>
-              </button>
-              <button type="button" class="tree-overflow-item is-danger tree-act-del" data-node-id="${esc(node.id)}">
-                <span>🗑️</span> <span>Delete Item</span>
-              </button>
-            </div>
+          <!-- Right-Corner Direct Action Buttons -->
+          <div class="tree-row-actions">
+            ${canAddChild ? `
+              <button type="button" class="tree-btn-action tree-btn-add-inside" data-parent-id="${esc(node.id)}" title="Add item inside this folder">＋ Add</button>
+            ` : ''}
+            <button type="button" class="tree-btn-action tree-act-edit" data-node-id="${esc(node.id)}" title="Edit item">✏️ Edit</button>
+            <button type="button" class="tree-btn-action is-danger tree-act-del" data-node-id="${esc(node.id)}" title="Delete item">🗑️</button>
+            <button type="button" class="tree-btn-action tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.25; cursor:not-allowed;"' : ''} title="Move Up">↑</button>
+            <button type="button" class="tree-btn-action tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.25; cursor:not-allowed;"' : ''} title="Move Down">↓</button>
           </div>
         </div>
       `;
@@ -3986,7 +3973,7 @@ function renderAdminMenuTree() {
     });
   });
 
-  // Add Inside Folder (now inside ⋯ overflow menu)
+  // Add Inside Folder
   treeEl.querySelectorAll('.tree-btn-add-inside').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3994,19 +3981,6 @@ function renderAdminMenuTree() {
       $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
       const parentId = btn.dataset.parentId;
       openNodeBuilderModal(null, parentId);
-    });
-  });
-
-  // Overflow Menu (⋯) Toggles & Actions
-  treeEl.querySelectorAll('.tree-overflow-trigger').forEach((trig) => {
-    trig.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const nodeId = trig.dataset.nodeId;
-      const menu = $(`treeOverflow_${nodeId}`);
-      if (!menu) return;
-      const isHidden = menu.hidden;
-      treeEl.querySelectorAll('.tree-overflow-menu').forEach((m) => m.hidden = true);
-      menu.hidden = !isHidden;
     });
   });
 

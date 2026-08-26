@@ -1758,68 +1758,65 @@ body.is-admin .cat-drawer { display: none !important; }
   flex-shrink: 0;
 }
 
-.tree-overflow-trigger {
-  width: 26px;
-  height: 26px;
-  display: grid;
-  place-items: center;
-  font-size: 14px;
-  color: #94a3b8;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  cursor: pointer;
+.tree-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   margin-left: auto;
 }
-.tree-overflow-trigger:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #f8fafc;
-  border-color: rgba(255, 255, 255, 0.2);
+
+.tree-btn-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
 }
 
-/* Tree Overflow Menu Popover */
-.tree-overflow-menu {
-  position: absolute;
-  right: 8px;
-  top: calc(100% + 2px);
-  z-index: 99;
-  background: #0f172a;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  min-width: 145px;
+.tree-btn-action:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.16);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.25);
 }
-.tree-overflow-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 11.5px;
-  color: #e2e8f0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-  white-space: nowrap;
-}
-.tree-overflow-item:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-.tree-overflow-item.is-add-inside {
+
+.tree-btn-action.tree-act-edit {
   color: var(--gold, #facc15);
-  font-weight: 600;
+  background: rgba(250, 204, 21, 0.08);
+  border-color: rgba(250, 204, 21, 0.25);
 }
-.tree-overflow-item.is-danger {
-  color: var(--danger, #f43f5e);
+.tree-btn-action.tree-act-edit:hover {
+  background: rgba(250, 204, 21, 0.22);
+  border-color: var(--gold, #facc15);
 }
-.tree-overflow-item.is-danger:hover {
-  background: rgba(244, 63, 94, 0.15);
+
+.tree-btn-action.tree-btn-add-inside {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+.tree-btn-action.tree-btn-add-inside:hover {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: #38bdf8;
+}
+
+.tree-btn-action.is-danger {
+  color: #f43f5e;
+  padding: 0 5px;
+}
+.tree-btn-action.is-danger:hover {
+  background: rgba(244, 63, 94, 0.2);
+  border-color: #f43f5e;
 }
 
 
