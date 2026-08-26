@@ -1041,13 +1041,31 @@ body.is-admin .cat-drawer { display: none !important; }
 
 /* ─── Feature Modals General ────────────────────────────────────────────────── */
 .custom-feature-modal {
-  z-index: 100;
+  z-index: 1000;
+}
+.custom-feature-modal.open {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1000 !important;
 }
 .feature-modal-dialog {
-  width: 560px;
-  max-width: 92vw;
-  background: var(--panel);
-  border: 1px solid var(--line);
+  position: relative !important;
+  inset: auto !important;
+  width: 580px !important;
+  max-width: 92vw !important;
+  max-height: 85vh !important;
+  margin: auto !important;
+  background: var(--panel, #181d28) !important;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.15)) !important;
+  border-radius: 14px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8) !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
   border-radius: 14px;
   box-shadow: var(--shadow);
 }
@@ -1365,8 +1383,177 @@ body.is-admin .cat-drawer { display: none !important; }
     height: 240px;
     flex: none;
   }
-  .contact-modal-right {
-    padding: 24px 20px;
-  }
 }
+
+/* ─── Sub-Group Cards & Multi-Level Admin UI ────────────────────────────── */
+.sub-group-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+.sub-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sub-group-title-input {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: #f8fafc;
+}
+.sub-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ─── Admin Current Menu Structure Popover ───────────────────────────────── */
+.proj-current-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 52;
+  width: 320px;
+  max-width: 90vw;
+  background: var(--panel, #181d28);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.15));
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: pop .18s var(--ease);
+}
+.proj-current-menu-popover[hidden] {
+  display: none !important;
+}
+.proj-current-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--line-soft, rgba(255, 255, 255, 0.08));
+}
+.proj-current-menu-head strong {
+  font-size: 13px;
+  color: var(--text, #f8fafc);
+  display: block;
+}
+.proj-current-menu-sub {
+  font-size: 10.5px;
+  color: var(--text-mute, #94a3b8);
+  margin: 2px 0 0 0;
+}
+.proj-current-menu-close {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  font-size: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-mute, #94a3b8);
+  cursor: pointer;
+}
+.proj-current-menu-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text, #ffffff);
+}
+.proj-current-menu-body {
+  padding: 10px;
+  max-height: 380px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.menu-tree-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.menu-tree-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.menu-tree-sec-title {
+  font-weight: 700;
+  font-size: 11.5px;
+  color: var(--gold, #facc15);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-tree-edit-btn {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  background: rgba(250, 204, 21, 0.12);
+  color: var(--gold, #facc15);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.menu-tree-edit-btn:hover {
+  background: rgba(250, 204, 21, 0.25);
+}
+.menu-tree-group {
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(255, 255, 255, 0.1);
+  margin-top: 4px;
+}
+.menu-tree-grp-title {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text, #e2e8f0);
+  margin-bottom: 2px;
+}
+.menu-tree-item {
+  font-size: 10.5px;
+  color: var(--text-mute, #94a3b8);
+  margin-left: 6px;
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.menu-tree-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-tree-item-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-mute, #94a3b8);
+  flex-shrink: 0;
+}
+
+
 

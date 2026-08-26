@@ -88,7 +88,7 @@ const els = {
   catLevelSubMenu: $('catLevelSubMenu'), catSubMenuNav: $('catSubMenuNav'), catSubMenuBackBtn: $('catSubMenuBackBtn'),
   adminLocationIntelModal: $('adminLocationIntelModal'), adminWalkthroughModal: $('adminWalkthroughModal'),
   adminVirtualTourModal: $('adminVirtualTourModal'), adminGalleryModal: $('adminGalleryModal'),
-  adminBrochureModal: $('adminBrochureModal'), adminContactModal: $('adminContactModal'),
+  adminBrochureModal: $('adminBrochureModal'), adminContactModal: $('adminContactModal'), adminCurrentMenuModal: $('adminCurrentMenuModal'),
   clientVideoModal: $('clientVideoModal'), clientGalleryModal: $('clientGalleryModal'),
   clientBrochureModal: $('clientBrochureModal'), clientContactModal: $('clientContactModal'),
 };
@@ -1494,23 +1494,89 @@ async function refresh() { els.refreshBtn.disabled = true; try { const src = awa
 // ─── Alignment: load / save / admin UI ────────────────────────────────────────
 // An alignment = the overlay transform PLUS the camera view, so the client
 // reproduces exactly what the admin set up (WYSIWYG) instead of re-framing.
-function menuConfigData() {
+function getCustomSections() {
   const mc = state.menuConfig || {};
-  return {
-    location_intel: { enabled: !!mc.location_intel?.enabled, videoUrl: mc.location_intel?.videoUrl || '', videoName: mc.location_intel?.videoName || '' },
-    walkthrough_video: { enabled: !!mc.walkthrough_video?.enabled, videoUrl: mc.walkthrough_video?.videoUrl || '', videoName: mc.walkthrough_video?.videoName || '' },
-    virtual_tour: { enabled: !!mc.virtual_tour?.enabled, items: Array.isArray(mc.virtual_tour?.items) ? mc.virtual_tour.items : [] },
-    gallery: { enabled: !!mc.gallery?.enabled, images: Array.isArray(mc.gallery?.images) ? mc.gallery.images.map(img => ({ name: img.name, url: img.url })) : [] },
-    brochure: { enabled: !!mc.brochure?.enabled, pdfUrl: mc.brochure?.pdfUrl || '', pdfName: mc.brochure?.pdfName || '' },
-    contact_us: {
-      enabled: !!mc.contact_us?.enabled,
-      image: mc.contact_us?.image || '',
-      imageName: mc.contact_us?.imageName || '',
-      title: mc.contact_us?.title || '',
-      about: mc.contact_us?.about || '',
-      phone: mc.contact_us?.phone || '',
-      email: mc.contact_us?.email || ''
+  if (Array.isArray(mc.customSections) && mc.customSections.length) {
+    return mc.customSections.filter(s => s && s.enabled !== false);
+  }
+
+  const legacy = [];
+  const secDefs = [
+    { key: 'location_intel', defaultTitle: 'LOCATION INTELLIGENCE' },
+    { key: 'walkthrough_video', defaultTitle: 'WALKTHROUGH VIDEO' },
+    { key: 'virtual_tour', defaultTitle: 'VIRTUAL TOUR' },
+    { key: 'gallery', defaultTitle: 'GALLERY' },
+    { key: 'brochure', defaultTitle: 'BROCHURE' },
+    { key: 'contact_us', defaultTitle: 'CONTACT US' }
+  ];
+
+  secDefs.forEach(({ key, defaultTitle }) => {
+    const sec = mc[key];
+    if (sec && sec.enabled) {
+      legacy.push({
+        id: `legacy_${key}`,
+        type: key,
+        title: (sec.title || defaultTitle).trim(),
+        enabled: true,
+        groups: Array.isArray(sec.groups) ? sec.groups : (sec.items ? [{ id: 'g1', title: 'GENERAL', items: sec.items }] : []),
+        items: sec.items || [],
+        images: sec.images || [],
+        image: sec.image || '',
+        imageName: sec.imageName || '',
+        about: sec.about || '',
+        phone: sec.phone || '',
+        email: sec.email || ''
+      });
     }
+  });
+
+  state.menuConfig = state.menuConfig || {};
+  state.menuConfig.customSections = legacy;
+  return legacy;
+}
+
+function menuConfigData() {
+  const sections = getCustomSections();
+  const cleanGroupItems = (groups) => {
+    if (!Array.isArray(groups)) return [];
+    return groups.map((g, gIdx) => ({
+      id: g.id || `grp_${gIdx + 1}`,
+      title: g.title || `Sub-Group ${gIdx + 1}`,
+      items: Array.isArray(g.items) ? g.items.map((i, iIdx) => {
+        const vName = i.videoName || i.fileName || (i.videoBlob || i.fileBlob ? (i.videoBlob || i.fileBlob).name : '');
+        const pName = i.pdfName || i.fileName || (i.pdfBlob || i.fileBlob ? (i.pdfBlob || i.fileBlob).name : '');
+        const fName = i.fileName || vName || pName || '';
+        const vUrl = i.videoUrl || i.url || '';
+        const pUrl = i.pdfUrl || i.url || '';
+        const mainUrl = i.url || vUrl || pUrl || fName || '';
+        return {
+          id: i.id || `item_${iIdx + 1}`,
+          name: i.name || i.title || '',
+          url: mainUrl,
+          videoUrl: vUrl || mainUrl,
+          videoName: vName || fName,
+          pdfUrl: pUrl || mainUrl,
+          pdfName: pName || fName,
+          fileName: fName
+        };
+      }) : []
+    }));
+  };
+
+  return {
+    customSections: sections.map((sec, idx) => ({
+      id: sec.id || `sec_${Date.now()}_${idx}`,
+      type: sec.type,
+      title: sec.title || '',
+      enabled: true,
+      groups: cleanGroupItems(sec.groups),
+      images: Array.isArray(sec.images) ? sec.images.map(img => ({ name: img.name, url: img.url })) : [],
+      image: sec.image || '',
+      imageName: sec.imageName || '',
+      about: sec.about || '',
+      phone: sec.phone || '',
+      email: sec.email || ''
+    }))
   };
 }
 
@@ -1759,6 +1825,42 @@ async function fetchReferencedImages(haveNames) {
   }
   return out;
 }
+function collectCustomMenuFiles() {
+  const files = [];
+  const addBlob = (blob, filename, mime) => {
+    if (blob && filename) {
+      files.push([baseName(filename), blob, mime || 'application/octet-stream']);
+    }
+  };
+
+  const sections = getCustomSections();
+  sections.forEach((sec) => {
+    if (sec.type === 'gallery' && Array.isArray(sec.images)) {
+      sec.images.forEach(img => {
+        if (img.blob && img.name) addBlob(img.blob, img.name, 'image/jpeg');
+      });
+    } else if (sec.type === 'contact_us') {
+      if (sec.imageBlob && (sec.imageName || sec.image)) {
+        addBlob(sec.imageBlob, sec.imageName || sec.image, 'image/jpeg');
+      }
+    } else {
+      const groups = Array.isArray(sec.groups) ? sec.groups : [];
+      groups.forEach((grp) => {
+        (grp.items || []).forEach((item) => {
+          const blob = item.fileBlob || item.videoBlob || item.pdfBlob;
+          const name = item.fileName || item.videoName || item.pdfName;
+          if (blob && name) {
+            const mime = name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : (name.toLowerCase().endsWith('.mp4') ? 'video/mp4' : 'application/octet-stream');
+            addBlob(blob, name, mime);
+          }
+        });
+      });
+    }
+  });
+
+  return files;
+}
+
 // one-click export of the whole site to the server-side project directory
 async function exportSite() {
   const hasGeom = state.geom.length > 0;
@@ -1791,11 +1893,7 @@ async function exportSite() {
     ...state.amenities.filter((a) => a.renderBlob && a.render).map((a) => [baseName(a.render), a.renderBlob, 'image/jpeg']),
     ...state.landmarks.filter((l) => l.renderBlob && l.render).map((l) => [baseName(l.render), l.renderBlob, 'image/jpeg']),
     // custom menu files (videos, pdfs, images)
-    ...(state.menuConfig?.location_intel?.items ? state.menuConfig.location_intel.items.filter(i => i.videoBlob).map(i => [baseName(i.videoName || 'location_intel.mp4'), i.videoBlob, 'video/mp4']) : (state.menuConfig?.location_intel?.videoBlob ? [[baseName(state.menuConfig.location_intel.videoName || 'location_intel.mp4'), state.menuConfig.location_intel.videoBlob, 'video/mp4']] : [])),
-    ...(state.menuConfig?.walkthrough_video?.items ? state.menuConfig.walkthrough_video.items.filter(i => i.videoBlob).map(i => [baseName(i.videoName || 'walkthrough.mp4'), i.videoBlob, 'video/mp4']) : (state.menuConfig?.walkthrough_video?.videoBlob ? [[baseName(state.menuConfig.walkthrough_video.videoName || 'walkthrough.mp4'), state.menuConfig.walkthrough_video.videoBlob, 'video/mp4']] : [])),
-    ...(state.menuConfig?.brochure?.items ? state.menuConfig.brochure.items.filter(i => i.pdfBlob).map(i => [baseName(i.pdfName || 'brochure.pdf'), i.pdfBlob, 'application/pdf']) : (state.menuConfig?.brochure?.pdfBlob ? [[baseName(state.menuConfig.brochure.pdfName || 'brochure.pdf'), state.menuConfig.brochure.pdfBlob, 'application/pdf']] : [])),
-    ...(state.menuConfig?.contact_us?.imageBlob ? [[baseName(state.menuConfig.contact_us.imageName || 'contact_bg.png'), state.menuConfig.contact_us.imageBlob, 'image/png']] : []),
-    ...(state.menuConfig?.gallery?.images ? state.menuConfig.gallery.images.filter(img => img.blob).map(img => [baseName(img.name), img.blob, 'image/jpeg']) : []),
+    ...collectCustomMenuFiles()
   ];
   // saving to a different project → copy over the on-disk images too, so the clone is complete
   if (state.projectId !== BOOT_PROJECT) {
@@ -3164,35 +3262,36 @@ function getSectionSubItems(secKey) {
   return [];
 }
 
+function getSectionGroups(secKey) {
+  const mc = state.menuConfig || {};
+  const sec = mc[secKey] || {};
+  if (!sec || sec.enabled === false) return [];
+  if (Array.isArray(sec.groups)) {
+    return sec.groups.map((g, gIdx) => ({
+      id: g.id || `grp_${gIdx + 1}`,
+      title: g.title || `Sub-Group ${gIdx + 1}`,
+      items: Array.isArray(g.items) ? g.items.filter(i => i && ((i.name || '').trim() || (i.url || '').trim() || (i.videoUrl || '').trim() || (i.pdfUrl || '').trim() || i.fileName || i.videoName || i.pdfName || i.fileBlob || i.videoBlob || i.pdfBlob)) : []
+    }));
+  }
+  // Backward compatibility: wrap flat items into a single group only if sec.groups was never set
+  const flatItems = getSectionSubItems(secKey);
+  if (flatItems.length) {
+    return [{ id: 'grp_default', title: 'GENERAL', items: flatItems }];
+  }
+  return [];
+}
+
 function renderClientSidebar() {
   if (!els.catNavL1) return;
-  const mc = state.menuConfig || {};
   let html = `
     <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
     <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
   `;
 
-  const sections = [
-    { key: 'location_intel', defaultTitle: 'LOCATION INTELLIGENCE' },
-    { key: 'walkthrough_video', defaultTitle: 'WALKTHROUGH VIDEO' },
-    { key: 'virtual_tour', defaultTitle: 'VIRTUAL TOUR' },
-    { key: 'gallery', defaultTitle: 'GALLERY' },
-    { key: 'brochure', defaultTitle: 'BROCHURE' },
-    { key: 'contact_us', defaultTitle: 'CONTACT US' }
-  ];
-
-  sections.forEach(({ key, defaultTitle }) => {
-    const sec = mc[key];
-    if (!sec || !sec.enabled) return;
-    const title = (sec.title || defaultTitle).trim().toUpperCase();
-    const items = getSectionSubItems(key);
-
-    const isSub = key === 'virtual_tour' || key === 'walkthrough_video' || key === 'location_intel' || key === 'brochure' || items.length > 0;
-    if (isSub) {
-      html += `<button class="cat-btn cat-btn-sub" type="button" data-act="${key}">${esc(title)} <span class="cat-btn-arrow">›</span></button>`;
-    } else {
-      html += `<button class="cat-btn" type="button" data-act="${key}">${esc(title)}</button>`;
-    }
+  const sections = getCustomSections();
+  sections.forEach((sec) => {
+    const title = (sec.title || 'SECTION').trim().toUpperCase();
+    html += `<button class="cat-btn cat-btn-sub" type="button" data-sec-id="${esc(sec.id)}">${esc(title)} <span class="cat-btn-arrow">›</span></button>`;
   });
 
   els.catNavL1.innerHTML = html;
@@ -3207,6 +3306,8 @@ function wireClientSidebarButtons() {
       e.stopPropagation();
       touch();
       const act = btn.dataset.act;
+      const secId = btn.dataset.secId;
+
       if (act === 'landmarks') {
         if (els.catLevel1) els.catLevel1.hidden = true;
         if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
@@ -3217,60 +3318,114 @@ function wireClientSidebarButtons() {
         computeHome();
         animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
         state.autoPan = true;
-      } else if (act === 'gallery') {
-        openClientGalleryModal();
-      } else if (act === 'contact_us') {
-        openClientContactModal();
-      } else if (['location_intel', 'walkthrough_video', 'virtual_tour', 'brochure'].includes(act)) {
-        if (els.catLevel1) els.catLevel1.hidden = true;
-        if (els.catLevel2) els.catLevel2.hidden = true;
-        if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = false;
-        renderSubMenuNav(act);
+      } else if (secId) {
+        const sec = getCustomSections().find(s => s.id === secId);
+        if (!sec) return;
+        if (sec.type === 'gallery') {
+          openClientGalleryModal(sec);
+        } else if (sec.type === 'contact_us') {
+          openClientContactModal(sec);
+        } else {
+          if (els.catLevel1) els.catLevel1.hidden = true;
+          if (els.catLevel2) els.catLevel2.hidden = true;
+          if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = false;
+          renderSubMenuNavBySecId(secId, null);
+        }
       }
     });
   });
 }
 
-function renderSubMenuNav(secKey) {
+function renderSubMenuNavBySecId(secId, activeGroupIdx = null) {
   const container = $('catSubMenuNav');
   const titleEl = $('catSubMenuTitle');
   if (!container) return;
 
-  const mc = state.menuConfig || {};
-  const sec = mc[secKey] || {};
-  const defaultTitles = {
-    location_intel: 'LOCATION INTELLIGENCE',
-    walkthrough_video: 'WALKTHROUGH VIDEO',
-    virtual_tour: 'VIRTUAL TOUR',
-    brochure: 'BROCHURE'
-  };
-  const title = (sec.title || defaultTitles[secKey] || 'SUB MENU').trim().toUpperCase();
-  if (titleEl) titleEl.textContent = title;
+  const sec = getCustomSections().find(s => s.id === secId);
+  if (!sec) return;
 
-  const items = getSectionSubItems(secKey);
-  if (!items.length) {
-    container.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No items configured in this section.</p>`;
+  const sectionTitle = (sec.title || 'SECTION').trim().toUpperCase();
+  const groups = Array.isArray(sec.groups) ? sec.groups.map((g, gIdx) => ({
+    id: g.id || `grp_${gIdx + 1}`,
+    title: g.title || `Sub-Group ${gIdx + 1}`,
+    items: Array.isArray(g.items) ? g.items.filter(i => i && ((i.name || '').trim() || (i.url || '').trim() || (i.videoUrl || '').trim() || (i.pdfUrl || '').trim() || i.fileName || i.videoName || i.pdfName || i.fileBlob || i.videoBlob || i.pdfBlob)) : []
+  })) : [];
+
+  if (!groups.length) {
+    if (titleEl) titleEl.textContent = sectionTitle;
+    container.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No sub-items configured in this section.</p>`;
     return;
   }
 
-  container.innerHTML = items.map((item, idx) => `
-    <button class="cat-btn" type="button" data-sec-key="${secKey}" data-item-idx="${idx}">
-      ${esc(item.name || item.title || `ITEM ${idx + 1}`)}
-    </button>
-  `).join('');
+  if (activeGroupIdx === null && groups.length === 1 && (groups[0].title === 'GENERAL' || !groups[0].title)) {
+    activeGroupIdx = 0;
+  }
 
-  container.querySelectorAll('.cat-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const sKey = btn.dataset.secKey;
-      const idx = parseInt(btn.dataset.itemIdx, 10);
-      const subItems = getSectionSubItems(sKey);
-      const item = subItems[idx];
-      if (item) {
-        openSubItemModal(sKey, item);
-      }
+  if (activeGroupIdx === null) {
+    // Level 2: Render Sub-Groups List
+    if (titleEl) titleEl.textContent = sectionTitle;
+    container.innerHTML = groups.map((grp, gIdx) => `
+      <button class="cat-btn cat-btn-sub" type="button" data-sec-id="${esc(secId)}" data-grp-idx="${gIdx}">
+        ${esc(grp.title.toUpperCase())} <span class="cat-btn-arrow">›</span>
+      </button>
+    `).join('');
+
+    container.querySelectorAll('.cat-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sId = btn.dataset.secId;
+        const gIdx = parseInt(btn.dataset.grpIdx, 10);
+        renderSubMenuNavBySecId(sId, gIdx);
+      });
     });
-  });
+  } else {
+    // Level 3: Render Items inside selected Sub-Group
+    const group = groups[activeGroupIdx] || groups[0];
+    const groupTitle = group.title ? group.title.trim().toUpperCase() : sectionTitle;
+    if (titleEl) titleEl.textContent = groupTitle;
+
+    let html = '';
+    if (groups.length > 1) {
+      html += `
+        <button class="cat-btn cat-btn-back" type="button" data-sec-id="${esc(secId)}" style="color:var(--gold,#facc15); font-weight:600; margin-bottom:6px;">
+          ‹ BACK TO SUB-GROUPS
+        </button>
+      `;
+    }
+
+    if (!group.items.length) {
+      html += `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No items in this sub-group.</p>`;
+    } else {
+      html += group.items.map((item, iIdx) => `
+        <button class="cat-btn" type="button" data-sec-id="${esc(secId)}" data-grp-idx="${activeGroupIdx}" data-item-idx="${iIdx}">
+          ${esc(item.name || item.title || `ITEM ${iIdx + 1}`)}
+        </button>
+      `).join('');
+    }
+
+    container.innerHTML = html;
+
+    const backBtn = container.querySelector('.cat-btn-back');
+    backBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      renderSubMenuNavBySecId(secId, null);
+    });
+
+    container.querySelectorAll('.cat-btn:not(.cat-btn-back)').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sId = btn.dataset.secId;
+        const gIdx = parseInt(btn.dataset.grpIdx, 10);
+        const iIdx = parseInt(btn.dataset.itemIdx, 10);
+        const targetSec = getCustomSections().find(s => s.id === sId);
+        const targetGroup = targetSec?.groups?.[gIdx];
+        const item = targetGroup?.items?.[iIdx];
+        if (item && targetSec) {
+          openSubItemModal(targetSec.type, item);
+        }
+      });
+    });
+  }
 }
 
 function openSubItemModal(secKey, item) {
@@ -3278,20 +3433,36 @@ function openSubItemModal(secKey, item) {
     const title = item.name || (secKey === 'location_intel' ? 'Location Intelligence' : 'Walkthrough Video');
     openClientVideoModal(title, item);
   } else if (secKey === 'virtual_tour') {
-    if (item.url) openModal({ url: item.url, title: item.name });
+    let tourSrc = item.fileBlob || item.videoBlob ? URL.createObjectURL(item.fileBlob || item.videoBlob) : null;
+    if (!tourSrc && (item.fileName || item.videoName)) {
+      tourSrc = assetUrl(item.fileName || item.videoName);
+    }
+    if (!tourSrc && (item.url || item.videoUrl)) {
+      tourSrc = item.url || item.videoUrl;
+    }
+    if (tourSrc) {
+      openModal({ url: tourSrc, title: item.name });
+    } else {
+      showNotice(`No tour link or file configured for "${item.name || 'Virtual Tour'}".`);
+    }
   } else if (secKey === 'brochure') {
-    openSingleBrochureModal(item);
+    openClientBrochureModal(item);
   }
 }
 
 function openClientVideoModal(title, config) {
-  let rawSrc = config.videoBlob ? URL.createObjectURL(config.videoBlob) : (config.videoUrl || '');
+  let rawSrc = config.fileBlob || config.videoBlob ? URL.createObjectURL(config.fileBlob || config.videoBlob) : null;
+  if (!rawSrc && (config.videoName || config.fileName)) {
+    rawSrc = assetUrl(config.videoName || config.fileName);
+  }
+  if (!rawSrc && (config.videoUrl || config.url)) {
+    rawSrc = config.videoUrl || config.url;
+  }
   if (!rawSrc) {
     showNotice(`No video uploaded or URL configured for ${title}.`);
     return;
   }
-  const src = assetUrl(rawSrc);
-  openModal({ url: src, title: title });
+  openModal({ url: rawSrc, title: title });
 }
 
 function isYoutubeUrl(url) {
@@ -3310,15 +3481,32 @@ function getVimeoEmbedUrl(url) {
 }
 
 let currentGalleryIdx = 0;
+let activeEditingSecId = null;
 
-function openClientGalleryModal(startIdx = 0) {
+function upsertCustomSection(type, data) {
+  const sections = getCustomSections();
+  if (activeEditingSecId) {
+    const idx = sections.findIndex(s => s.id === activeEditingSecId);
+    if (idx !== -1) {
+      sections[idx] = Object.assign({}, sections[idx], data, { id: activeEditingSecId, type, enabled: true });
+    } else {
+      sections.push(Object.assign({}, data, { id: activeEditingSecId, type, enabled: true }));
+    }
+  } else {
+    sections.push(Object.assign({}, data, { id: `sec_${Date.now()}_${Math.floor(Math.random()*1000)}`, type, enabled: true }));
+  }
+  state.menuConfig.customSections = sections;
+}
+
+function openClientGalleryModal(sec) {
   if (!els.clientGalleryModal) return;
-  const images = state.menuConfig.gallery?.images || [];
+  const images = sec.images || [];
   if (!images.length) {
     showNotice('No gallery images uploaded yet.');
     return;
   }
-  currentGalleryIdx = Math.max(0, Math.min(startIdx, images.length - 1));
+  state.currentGalleryImages = images;
+  currentGalleryIdx = 0;
   updateGallerySlide(currentGalleryIdx);
 
   els.clientGalleryModal.classList.add('open');
@@ -3326,7 +3514,7 @@ function openClientGalleryModal(startIdx = 0) {
 }
 
 function updateGallerySlide(idx) {
-  const images = state.menuConfig.gallery?.images || [];
+  const images = state.currentGalleryImages || [];
   if (!images.length) return;
 
   currentGalleryIdx = (idx + images.length) % images.length;
@@ -3351,32 +3539,54 @@ function updateGallerySlide(idx) {
   if (nextBtn) nextBtn.style.display = images.length > 1 ? 'flex' : 'none';
 }
 
-function openClientBrochureModal() {
+function openClientBrochureModal(item = null) {
   if (!els.clientBrochureModal) return;
   const frame = $('clientBrochureFrame');
   const btn = $('clientBrochureDownload');
-  const b = state.menuConfig.brochure || {};
-  const src = b.pdfBlob ? URL.createObjectURL(b.pdfBlob) : (b.pdfUrl ? assetUrl(b.pdfUrl) : '');
+  const b = item || {};
+  let src = null;
+
+  // Priority 1: in-memory blob from device upload
+  if (b.fileBlob || b.pdfBlob) {
+    src = URL.createObjectURL(b.fileBlob || b.pdfBlob);
+  }
+  // Priority 2: direct URL or Google Drive link
+  if (!src && (b.pdfUrl || b.url)) {
+    const rawUrl = (b.pdfUrl || b.url).trim();
+    const gdrive = rawUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (gdrive) {
+      src = `https://drive.google.com/file/d/${gdrive[1]}/preview`;
+    } else if (/^(https?:|\/\/|data:|blob:)/i.test(rawUrl)) {
+      src = rawUrl;
+    } else {
+      src = assetUrl(rawUrl);
+    }
+  }
+  // Priority 3: saved filename (served from project assets)
+  if (!src && (b.pdfName || b.fileName)) {
+    src = assetUrl(b.pdfName || b.fileName);
+  }
+
   if (!src) {
-    showNotice('No PDF brochure uploaded yet.');
+    showNotice('No PDF brochure uploaded or URL configured yet.');
     return;
   }
   if (frame) frame.src = src;
-  if (btn) { btn.href = src; btn.download = b.pdfName || 'brochure.pdf'; }
+  if (btn) { btn.href = src; btn.download = b.pdfName || b.fileName || b.name || 'brochure.pdf'; }
   els.clientBrochureModal.classList.add('open');
   els.clientBrochureModal.setAttribute('aria-hidden', 'false');
 }
 
-function openClientContactModal() {
+function openClientContactModal(sec) {
   if (!els.clientContactModal) return;
-  const c = state.menuConfig.contact_us || {};
+  const c = sec || {};
   const title = $('clientContactTitle');
   const about = $('clientContactAbout');
   const phone = $('clientContactPhone');
   const email = $('clientContactEmail');
   const img = $('clientContactImg');
 
-  if (title) title.textContent = c.title || 'Anandam Eleganza - Premium Villa Plots';
+  if (title) title.textContent = c.titleVal || c.title || 'Anandam Eleganza - Premium Villa Plots';
   if (about) about.textContent = c.about || 'Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh';
   if (phone) {
     const num = c.phone || '+91 7389705477';
@@ -3399,20 +3609,146 @@ function openClientContactModal() {
   els.clientContactModal.setAttribute('aria-hidden', 'false');
 }
 
+function renderCurrentMenuAdminPanel() {
+  const treeEl = $('projCurrentMenuDropdown');
+  if (!treeEl) return;
+
+  const sections = getCustomSections();
+  const iconMap = {
+    location_intel: '📍',
+    walkthrough_video: '🎬',
+    virtual_tour: '🌐',
+    gallery: '🖼️',
+    brochure: '📄',
+    contact_us: '📞'
+  };
+
+  let html = `
+    <div style="font-size:11px; font-weight:700; color:var(--gold,#facc15); padding:6px 10px 8px; border-bottom:1px solid rgba(255,255,255,0.1); text-transform:uppercase; letter-spacing:0.5px;">
+      👁️ CURRENT CLIENT SIDEBAR MENU
+    </div>
+  `;
+
+  if (!sections.length) {
+    html += `<p style="padding:10px; font-size:11.5px; color:var(--text-mute); text-align:center; margin:0;">No active custom menu sections.<br/>Click <strong>📋 Menu ▾</strong> to add sections.</p>`;
+  } else {
+    sections.forEach((sec) => {
+      const icon = iconMap[sec.type] || '📁';
+      const title = (sec.title || 'SECTION').trim().toUpperCase();
+
+      html += `
+        <div class="menu-tree-section" style="margin-top:6px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:6px 8px;">
+          <div class="menu-tree-sec-head" style="display:flex; align-items:center; justify-content:space-between; gap:6px;">
+            <span class="menu-tree-sec-title" style="font-weight:700; font-size:11.5px; color:var(--gold,#facc15); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${icon} ${esc(title)}</span>
+            <div style="display:flex; gap:4px; flex-shrink:0;">
+              <button type="button" class="menu-tree-edit-btn" data-edit-type="${esc(sec.type)}" data-edit-sec-id="${esc(sec.id)}" style="font-size:10px; font-weight:600; padding:2px 6px; background:rgba(250,204,21,0.15); color:var(--gold,#facc15); border:1px solid rgba(250,204,21,0.3); border-radius:4px; cursor:pointer;">✏️ Edit</button>
+              <button type="button" class="menu-tree-del-btn" data-del-sec-id="${esc(sec.id)}" style="font-size:10px; font-weight:600; padding:2px 6px; background:rgba(244,63,94,0.15); color:var(--danger,#f43f5e); border:1px solid rgba(244,63,94,0.3); border-radius:4px; cursor:pointer;">🗑️ Delete</button>
+            </div>
+          </div>
+      `;
+
+      if (sec.type === 'gallery') {
+        const imgs = sec.images || [];
+        html += `<div class="menu-tree-group" style="margin-left:6px; padding-left:6px; border-left:2px solid rgba(255,255,255,0.1); font-size:10.5px; color:#cbd5e1;">Images (${imgs.length})</div>`;
+      } else if (sec.type === 'contact_us') {
+        html += `<div class="menu-tree-group" style="margin-left:6px; padding-left:6px; border-left:2px solid rgba(255,255,255,0.1); font-size:10.5px; color:#cbd5e1;">Contact Card</div>`;
+      } else {
+        const groups = Array.isArray(sec.groups) ? sec.groups : [];
+        if (!groups.length) {
+          html += `<div class="menu-tree-group" style="margin-left:6px; padding-left:6px; font-size:10.5px; color:var(--text-mute);">(No sub-items)</div>`;
+        } else {
+          groups.forEach((grp) => {
+            html += `
+              <div class="menu-tree-group" style="margin-left:6px; padding-left:6px; border-left:2px solid rgba(255,255,255,0.1); margin-top:4px;">
+                <div class="menu-tree-grp-title" style="font-weight:600; font-size:11px; color:#e2e8f0;">📂 ${esc(grp.title)}</div>
+            `;
+            (grp.items || []).forEach((item) => {
+              const itemLabel = item.name || item.title || 'Item';
+              const hasUpload = !!(item.fileBlob || item.videoBlob || item.pdfBlob || item.fileName || item.videoName || item.pdfName);
+              const hasUrl = !!(item.url || item.videoUrl || item.pdfUrl);
+              const badge = hasUpload ? '📁 File' : (hasUrl ? '🔗 Link' : '');
+              html += `
+                <div class="menu-tree-item" style="font-size:10px; color:#94a3b8; margin-left:6px; padding:1px 0; display:flex; justify-content:space-between; gap:4px;">
+                  <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">• ${esc(itemLabel)}</span>
+                  ${badge ? `<span style="font-size:8.5px; padding:1px 4px; border-radius:3px; background:rgba(255,255,255,0.08);">${badge}</span>` : ''}
+                </div>
+              `;
+            });
+            html += `</div>`;
+          });
+        }
+      }
+
+      html += `</div>`;
+    });
+  }
+
+  treeEl.innerHTML = html;
+
+  // Edit listeners
+  treeEl.querySelectorAll('[data-edit-sec-id]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      treeEl.hidden = true;
+      $('projCurrentMenuBtn')?.setAttribute('aria-expanded', 'false');
+      const type = btn.dataset.editType;
+      const secId = btn.dataset.editSecId;
+      openAdminMenuModal(type, secId);
+    });
+  });
+
+  // Delete listeners
+  treeEl.querySelectorAll('[data-del-sec-id]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const secId = btn.dataset.delSecId;
+      if (secId) {
+        state.menuConfig.customSections = getCustomSections().filter(s => s.id !== secId);
+        onAlignmentChanged();
+        renderClientSidebar();
+        renderCurrentMenuAdminPanel();
+      }
+    });
+  });
+}
+
 function initCustomMenuAdminAndClient() {
-  // Admin custom menu dropdown toggling
+  // Admin 📋 Menu ▾ dropdown toggling
   els.projCustomMenuBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!els.projCustomDropdown) return;
     const isHidden = els.projCustomDropdown.hidden;
     els.projCustomDropdown.hidden = !isHidden;
     els.projCustomMenuBtn.setAttribute('aria-expanded', String(isHidden));
+    const currentDropdown = $('projCurrentMenuDropdown');
+    if (currentDropdown) currentDropdown.hidden = true;
+  });
+
+  // Admin 👁️ Current Menu ▾ dropdown toggling
+  const currentMenuBtn = $('projCurrentMenuBtn');
+  const currentDropdown = $('projCurrentMenuDropdown');
+
+  currentMenuBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!currentDropdown) return;
+    const isHidden = currentDropdown.hidden;
+    currentDropdown.hidden = !isHidden;
+    currentMenuBtn.setAttribute('aria-expanded', String(isHidden));
+    if (isHidden) {
+      if (els.projCustomDropdown) els.projCustomDropdown.hidden = true;
+      els.projCustomMenuBtn?.setAttribute('aria-expanded', 'false');
+      renderCurrentMenuAdminPanel();
+    }
   });
 
   document.addEventListener('click', () => {
     if (els.projCustomDropdown) {
       els.projCustomDropdown.hidden = true;
       els.projCustomMenuBtn?.setAttribute('aria-expanded', 'false');
+    }
+    if (currentDropdown) {
+      currentDropdown.hidden = true;
+      currentMenuBtn?.setAttribute('aria-expanded', 'false');
     }
   });
 
@@ -3421,7 +3757,7 @@ function initCustomMenuAdminAndClient() {
       e.stopPropagation();
       els.projCustomDropdown.hidden = true;
       const act = btn.dataset.menuAct;
-      openAdminMenuModal(act);
+      openAdminMenuModal(act, null); // Fresh new section
     });
   });
 
@@ -3453,131 +3789,136 @@ function initCustomMenuAdminAndClient() {
     }
   });
 
+  async function syncCustomMenuFilesToDisk() {
+    try {
+      const files = collectCustomMenuFiles();
+      if (files.length) {
+        await serverSave(files);
+      }
+    } catch (e) {
+      console.warn('Auto-sync custom menu files:', e);
+    }
+  }
+
   // Setup Admin Modals
   // 1. Location Intel Modal
   $('adminLocIntelAddBtn')?.addEventListener('click', () => {
-    addAdminSubItemRow('adminLocIntelList');
+    addAdminSubGroup('adminLocIntelList');
   });
-  $('adminLocIntelSave')?.addEventListener('click', () => {
-    const title = ($('adminLocIntelSectionTitle')?.value || '').trim();
-    const items = getAdminSubItemRows('adminLocIntelList');
-    state.menuConfig.location_intel = {
-      title,
-      enabled: items.length > 0,
-      items
-    };
+  $('adminLocIntelSave')?.addEventListener('click', async () => {
+    const title = ($('adminLocIntelSectionTitle')?.value || '').trim() || 'LOCATION INTELLIGENCE';
+    const groups = getAdminSubGroups('adminLocIntelList');
+    upsertCustomSection('location_intel', { title, groups, items: groups.flatMap(g => g.items || []) });
     closeCustomModal(els.adminLocationIntelModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
+    await syncCustomMenuFilesToDisk();
   });
   $('adminLocIntelClear')?.addEventListener('click', () => {
-    state.menuConfig.location_intel.enabled = false;
-    state.menuConfig.location_intel.items = [];
+    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
     closeCustomModal(els.adminLocationIntelModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
   });
 
   // 2. Walkthrough Video Modal
   $('adminWalkthroughAddBtn')?.addEventListener('click', () => {
-    addAdminSubItemRow('adminWalkthroughList');
+    addAdminSubGroup('adminWalkthroughList');
   });
-  $('adminWalkthroughSave')?.addEventListener('click', () => {
-    const title = ($('adminWalkthroughSectionTitle')?.value || '').trim();
-    const items = getAdminSubItemRows('adminWalkthroughList');
-    state.menuConfig.walkthrough_video = {
-      title,
-      enabled: items.length > 0,
-      items
-    };
+  $('adminWalkthroughSave')?.addEventListener('click', async () => {
+    const title = ($('adminWalkthroughSectionTitle')?.value || '').trim() || 'WALKTHROUGH VIDEO';
+    const groups = getAdminSubGroups('adminWalkthroughList');
+    upsertCustomSection('walkthrough_video', { title, groups, items: groups.flatMap(g => g.items || []) });
     closeCustomModal(els.adminWalkthroughModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
+    await syncCustomMenuFilesToDisk();
   });
   $('adminWalkthroughClear')?.addEventListener('click', () => {
-    state.menuConfig.walkthrough_video.enabled = false;
-    state.menuConfig.walkthrough_video.items = [];
+    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
     closeCustomModal(els.adminWalkthroughModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
   });
 
   // 3. Virtual Tour Modal
   $('adminVtAddBtn')?.addEventListener('click', () => {
-    addAdminSubItemRow('adminVtList');
+    addAdminSubGroup('adminVtList');
   });
-  $('adminVtSave')?.addEventListener('click', () => {
-    const title = ($('adminVtSectionTitle')?.value || '').trim();
-    const items = getAdminSubItemRows('adminVtList');
-    state.menuConfig.virtual_tour = {
-      title,
-      enabled: items.length > 0,
-      items
-    };
+  $('adminVtSave')?.addEventListener('click', async () => {
+    const title = ($('adminVtSectionTitle')?.value || '').trim() || 'VIRTUAL TOUR';
+    const groups = getAdminSubGroups('adminVtList');
+    upsertCustomSection('virtual_tour', { title, groups, items: groups.flatMap(g => g.items || []) });
     closeCustomModal(els.adminVirtualTourModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
+    await syncCustomMenuFilesToDisk();
   });
   $('adminVtClear')?.addEventListener('click', () => {
-    state.menuConfig.virtual_tour.enabled = false;
-    state.menuConfig.virtual_tour.items = [];
+    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
     closeCustomModal(els.adminVirtualTourModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
   });
 
   // 4. Gallery Modal
   $('adminGalleryFiles')?.addEventListener('change', (e) => {
     const files = Array.from(e.target.files || []);
-    if (!state.menuConfig.gallery.images) state.menuConfig.gallery.images = [];
+    if (!state.tempGalleryImages) state.tempGalleryImages = [];
     files.forEach((f) => {
-      state.menuConfig.gallery.images.push({ name: f.name, blob: f, url: `sample/${f.name}` });
+      state.tempGalleryImages.push({ name: f.name, blob: f, url: `sample/${f.name}` });
     });
     renderAdminGalleryPreviews();
   });
-  $('adminGallerySave')?.addEventListener('click', () => {
-    const title = ($('adminGallerySectionTitle')?.value || '').trim();
-    state.menuConfig.gallery.title = title;
-    state.menuConfig.gallery.enabled = (state.menuConfig.gallery.images?.length || 0) > 0;
+  $('adminGallerySave')?.addEventListener('click', async () => {
+    const title = ($('adminGallerySectionTitle')?.value || '').trim() || 'GALLERY';
+    const images = state.tempGalleryImages || [];
+    upsertCustomSection('gallery', { title, images });
     closeCustomModal(els.adminGalleryModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
+    await syncCustomMenuFilesToDisk();
   });
   $('adminGalleryClear')?.addEventListener('click', () => {
-    state.menuConfig.gallery.enabled = false;
-    state.menuConfig.gallery.images = [];
+    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
     closeCustomModal(els.adminGalleryModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
   });
 
   // 5. Brochure Modal
   $('adminBrochureAddBtn')?.addEventListener('click', () => {
-    addAdminSubItemRow('adminBrochureList');
+    addAdminSubGroup('adminBrochureList');
   });
-  $('adminBrochureSave')?.addEventListener('click', () => {
-    const title = ($('adminBrochureSectionTitle')?.value || '').trim();
-    const items = getAdminSubItemRows('adminBrochureList');
-    state.menuConfig.brochure = {
-      title,
-      enabled: items.length > 0,
-      items
-    };
+  $('adminBrochureSave')?.addEventListener('click', async () => {
+    const title = ($('adminBrochureSectionTitle')?.value || '').trim() || 'BROCHURE';
+    const groups = getAdminSubGroups('adminBrochureList');
+    upsertCustomSection('brochure', { title, groups, items: groups.flatMap(g => g.items || []) });
     closeCustomModal(els.adminBrochureModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
+    await syncCustomMenuFilesToDisk();
   });
   $('adminBrochureClear')?.addEventListener('click', () => {
-    state.menuConfig.brochure.enabled = false;
-    state.menuConfig.brochure.items = [];
+    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
     closeCustomModal(els.adminBrochureModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
   });
 
   // 6. Contact Us Modal
-  $('adminContactSave')?.addEventListener('click', () => {
-    const sectionTitle = ($('adminContactSectionTitle')?.value || '').trim();
+  $('adminContactSave')?.addEventListener('click', async () => {
+    const sectionTitle = ($('adminContactSectionTitle')?.value || '').trim() || 'CONTACT US';
     const fileInput = $('adminContactImageFile');
     const file = fileInput?.files?.[0];
     const title = ($('adminContactTitle')?.value || '').trim();
@@ -3585,26 +3926,30 @@ function initCustomMenuAdminAndClient() {
     const phone = ($('adminContactPhone')?.value || '').trim();
     const email = ($('adminContactEmail')?.value || '').trim();
 
-    state.menuConfig.contact_us = {
-      title: sectionTitle || 'CONTACT US',
-      enabled: true,
-      imageBlob: file || state.menuConfig.contact_us.imageBlob,
-      imageName: file ? file.name : state.menuConfig.contact_us.imageName,
-      image: file ? `sample/${file.name}` : state.menuConfig.contact_us.image,
-      title,
+    const existingSec = activeEditingSecId ? getCustomSections().find(s => s.id === activeEditingSecId) : {};
+
+    upsertCustomSection('contact_us', {
+      title: sectionTitle,
+      imageBlob: file || existingSec?.imageBlob,
+      imageName: file ? file.name : (existingSec?.imageName || ''),
+      image: file ? `sample/${file.name}` : (existingSec?.image || ''),
+      titleVal: title,
       about,
       phone,
       email
-    };
+    });
     closeCustomModal(els.adminContactModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
+    await syncCustomMenuFilesToDisk();
   });
   $('adminContactClear')?.addEventListener('click', () => {
-    state.menuConfig.contact_us.enabled = false;
+    if (activeEditingSecId) state.menuConfig.customSections = getCustomSections().filter(s => s.id !== activeEditingSecId);
     closeCustomModal(els.adminContactModal);
     onAlignmentChanged();
     renderClientSidebar();
+    renderCurrentMenuAdminPanel();
   });
 
   // Modal Close buttons (data-close)
@@ -3627,32 +3972,227 @@ function initCustomMenuAdminAndClient() {
   els.clientContactModal?.querySelector('.contact-modal-backdrop')?.addEventListener('click', hideContactModal);
 }
 
-function openAdminMenuModal(act) {
+function addAdminSubGroup(containerId, groupData = {}) {
+  const container = typeof containerId === 'string' ? $(containerId) : containerId;
+  if (!container) return;
+
+  const card = document.createElement('div');
+  card.className = 'sub-group-card';
+  const groupTitle = groupData.title || groupData.name || '';
+
+  card.innerHTML = `
+    <div class="sub-group-header">
+      <input type="text" placeholder="Sub-Domain / Sub-Group Title (e.g. Kitchen Videos)" class="sub-group-title-input form-input-text" value="${esc(groupTitle)}" />
+      <button type="button" class="btn btn-ghost sub-group-del-btn" title="Delete Sub-Group" style="color:var(--danger,#f43f5e); font-size:12px; padding:4px 8px;">✕ Delete Sub-Group</button>
+    </div>
+    <div class="sub-group-body">
+      <!-- Items list inside this group -->
+    </div>
+    <button type="button" class="btn btn-ghost sub-group-add-item-btn" style="margin-top:8px; font-size:12px;">＋ Add Item</button>
+  `;
+
+  const groupBody = card.querySelector('.sub-group-body');
+  const addItemBtn = card.querySelector('.sub-group-add-item-btn');
+  const delGroupBtn = card.querySelector('.sub-group-del-btn');
+
+  const items = Array.isArray(groupData.items) ? groupData.items : [];
+  if (items.length) {
+    items.forEach(item => addAdminSubItemRow(groupBody, item));
+  } else {
+    addAdminSubItemRow(groupBody, {});
+  }
+
+  addItemBtn?.addEventListener('click', () => {
+    addAdminSubItemRow(groupBody, {});
+  });
+
+  delGroupBtn?.addEventListener('click', () => {
+    card.remove();
+  });
+
+  container.appendChild(card);
+}
+
+function getAdminSubGroups(containerId) {
+  const container = typeof containerId === 'string' ? $(containerId) : containerId;
+  if (!container) return [];
+  const listId = typeof containerId === 'string' ? containerId : container.id;
+  const groups = [];
+
+  container.querySelectorAll('.sub-group-card').forEach((card, gIdx) => {
+    const title = (card.querySelector('.sub-group-title-input')?.value || '').trim() || `Sub-Group ${gIdx + 1}`;
+    const groupBody = card.querySelector('.sub-group-body');
+    const items = getAdminSubItemRows(groupBody);
+
+    groups.push({
+      id: `grp_${gIdx + 1}`,
+      title,
+      items
+    });
+  });
+
+  return groups;
+}
+
+function addAdminSubItemRow(containerId, itemData = {}) {
+  const list = typeof containerId === 'string' ? $(containerId) : containerId;
+  if (!list) return;
+
+  const row = document.createElement('div');
+  row.className = 'vt-item-row sub-item-row';
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.alignItems = 'center';
+  row.style.marginBottom = '8px';
+  row.style.width = '100%';
+
+  const existingFileName = itemData.fileName || itemData.videoName || itemData.pdfName || '';
+  const fileLabel = existingFileName ? `File: ${existingFileName}` : 'Upload File';
+  const urlValue = itemData.url || itemData.videoUrl || itemData.pdfUrl || '';
+
+  row.innerHTML = `
+    <input type="text" placeholder="Title (e.g. Living Room)" class="sub-name form-input-text" style="flex:1; min-width:110px;" value="${esc(itemData.name || itemData.title || '')}" />
+    <input type="text" placeholder="Link / URL (YouTube, 3DVista, PDF, MP4)" class="sub-url form-input-text" style="flex:1.5; min-width:130px;" value="${esc(urlValue)}" />
+    <label class="btn btn-ghost sub-file-label" style="font-size:11px; padding:6px 10px; cursor:pointer; white-space:nowrap; border:1px dashed rgba(255,255,255,0.25); display:inline-flex; align-items:center; gap:4px;" title="Upload file from device">
+      📁 <span class="sub-file-text">${esc(fileLabel)}</span>
+      <input type="file" class="sub-file-input" hidden />
+    </label>
+    <button type="button" class="btn btn-ghost sub-del-btn" title="Delete Item" style="color:var(--danger,#f43f5e); font-size:14px; padding:4px 8px;">✕</button>
+  `;
+
+  const fileInput = row.querySelector('.sub-file-input');
+  const fileText = row.querySelector('.sub-file-text');
+
+  if (itemData.fileBlob || itemData.videoBlob || itemData.pdfBlob) {
+    row._fileBlob = itemData.fileBlob || itemData.videoBlob || itemData.pdfBlob;
+    row._fileName = existingFileName || row._fileBlob.name;
+    row._videoBlob = row._fileBlob;
+    row._videoName = row._fileName;
+    row._pdfBlob = row._fileBlob;
+    row._pdfName = row._fileName;
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) {
+        row._fileBlob = file;
+        row._fileName = file.name;
+        row._videoBlob = file;
+        row._videoName = file.name;
+        row._pdfBlob = file;
+        row._pdfName = file.name;
+        if (fileText) fileText.textContent = `File: ${file.name}`;
+      }
+    });
+  }
+
+  row.querySelector('.sub-del-btn')?.addEventListener('click', () => row.remove());
+  list.appendChild(row);
+}
+
+function getAdminSubItemRows(containerId) {
+  const list = typeof containerId === 'string' ? $(containerId) : containerId;
+  if (!list) return [];
+  const items = [];
+  list.querySelectorAll('.sub-item-row, .vt-item-row').forEach((row, idx) => {
+    const name = (row.querySelector('.sub-name, .vt-name')?.value || '').trim();
+    const urlVal = (row.querySelector('.sub-url, .vt-url')?.value || '').trim();
+
+    const videoBlob = row._videoBlob || null;
+    const videoName = row._videoName || (videoBlob ? videoBlob.name : '');
+    const pdfBlob = row._pdfBlob || null;
+    const pdfName = row._pdfName || (pdfBlob ? pdfBlob.name : '');
+
+    if (name || urlVal || videoBlob || videoName || pdfBlob || pdfName) {
+      items.push({
+        id: `item_${idx + 1}`,
+        name: name || `Item ${idx + 1}`,
+        url: urlVal,
+        videoUrl: urlVal,
+        pdfUrl: urlVal,
+        videoBlob,
+        videoName,
+        pdfBlob,
+        pdfName
+      });
+    }
+  });
+  return items;
+}
+
+function openAdminMenuModal(act, sectionId = null) {
+  activeEditingSecId = sectionId;
+  const sections = getCustomSections();
+  const existingSec = sectionId ? sections.find(s => s.id === sectionId) : null;
+
+  if (act === 'current_menu') {
+    renderCurrentMenuAdminPanel();
+    openCustomModal(els.adminCurrentMenuModal);
+    return;
+  }
+
   if (act === 'location_intel') {
-    const input = $('adminLocIntelUrl');
-    if (input) input.value = state.menuConfig.location_intel?.videoUrl || '';
-    const status = $('adminLocIntelFileStatus');
-    if (status) status.textContent = state.menuConfig.location_intel?.videoName ? `Current file: ${state.menuConfig.location_intel.videoName}` : 'No file selected';
+    if ($('adminLocIntelSectionTitle')) $('adminLocIntelSectionTitle').value = existingSec ? (existingSec.title || '') : '';
+    const list = $('adminLocIntelList');
+    if (list) {
+      list.innerHTML = '';
+      const groups = existingSec ? existingSec.groups : [];
+      if (groups && groups.length) {
+        groups.forEach((grp) => addAdminSubGroup('adminLocIntelList', grp));
+      } else {
+        addAdminSubGroup('adminLocIntelList', {});
+      }
+    }
     openCustomModal(els.adminLocationIntelModal);
   } else if (act === 'walkthrough_video') {
-    const input = $('adminWalkthroughUrl');
-    if (input) input.value = state.menuConfig.walkthrough_video?.videoUrl || '';
-    const status = $('adminWalkthroughFileStatus');
-    if (status) status.textContent = state.menuConfig.walkthrough_video?.videoName ? `Current file: ${state.menuConfig.walkthrough_video.videoName}` : 'No file selected';
+    if ($('adminWalkthroughSectionTitle')) $('adminWalkthroughSectionTitle').value = existingSec ? (existingSec.title || '') : '';
+    const list = $('adminWalkthroughList');
+    if (list) {
+      list.innerHTML = '';
+      const groups = existingSec ? existingSec.groups : [];
+      if (groups && groups.length) {
+        groups.forEach((grp) => addAdminSubGroup('adminWalkthroughList', grp));
+      } else {
+        addAdminSubGroup('adminWalkthroughList', {});
+      }
+    }
     openCustomModal(els.adminWalkthroughModal);
   } else if (act === 'virtual_tour') {
-    populateAdminVtList();
+    if ($('adminVtSectionTitle')) $('adminVtSectionTitle').value = existingSec ? (existingSec.title || '') : '';
+    const list = $('adminVtList');
+    if (list) {
+      list.innerHTML = '';
+      const groups = existingSec ? existingSec.groups : [];
+      if (groups && groups.length) {
+        groups.forEach((grp) => addAdminSubGroup('adminVtList', grp));
+      } else {
+        addAdminSubGroup('adminVtList', {});
+      }
+    }
     openCustomModal(els.adminVirtualTourModal);
   } else if (act === 'gallery') {
+    if ($('adminGallerySectionTitle')) $('adminGallerySectionTitle').value = existingSec ? (existingSec.title || '') : '';
+    state.tempGalleryImages = existingSec && Array.isArray(existingSec.images) ? [...existingSec.images] : [];
     renderAdminGalleryPreviews();
     openCustomModal(els.adminGalleryModal);
   } else if (act === 'brochure') {
-    const status = $('adminBrochureFileStatus');
-    if (status) status.textContent = state.menuConfig.brochure?.pdfName ? `Current file: ${state.menuConfig.brochure.pdfName}` : 'No file selected';
+    if ($('adminBrochureSectionTitle')) $('adminBrochureSectionTitle').value = existingSec ? (existingSec.title || '') : '';
+    const list = $('adminBrochureList');
+    if (list) {
+      list.innerHTML = '';
+      const groups = existingSec ? existingSec.groups : [];
+      if (groups && groups.length) {
+        groups.forEach((grp) => addAdminSubGroup('adminBrochureList', grp));
+      } else {
+        addAdminSubGroup('adminBrochureList', {});
+      }
+    }
     openCustomModal(els.adminBrochureModal);
   } else if (act === 'contact_us') {
-    const c = state.menuConfig.contact_us || {};
-    if ($('adminContactTitle')) $('adminContactTitle').value = c.title || '';
+    const c = existingSec || {};
+    if ($('adminContactSectionTitle')) $('adminContactSectionTitle').value = c.title || '';
+    if ($('adminContactTitle')) $('adminContactTitle').value = c.titleVal || c.title || '';
     if ($('adminContactAbout')) $('adminContactAbout').value = c.about || '';
     if ($('adminContactPhone')) $('adminContactPhone').value = c.phone || '';
     if ($('adminContactEmail')) $('adminContactEmail').value = c.email || '';
@@ -3676,6 +4216,8 @@ function closeCustomModal(modalEl) {
   if (video) { video.pause(); video.src = ''; }
   const iframe = modalEl.querySelector('iframe');
   if (iframe) iframe.src = 'about:blank';
+  const embed = modalEl.querySelector('embed');
+  if (embed) embed.removeAttribute('src');
 }
 
 function populateAdminVtList() {
@@ -3684,30 +4226,20 @@ function populateAdminVtList() {
   list.innerHTML = '';
   const items = state.menuConfig.virtual_tour?.items || [];
   if (items.length === 0) {
-    addAdminVtRow('', '');
+    addAdminSubItemRow('adminVtList', {});
   } else {
-    items.forEach(item => addAdminVtRow(item.name, item.url));
+    items.forEach(item => addAdminSubItemRow('adminVtList', item));
   }
 }
 
 function addAdminVtRow(name, url) {
-  const list = $('adminVtList');
-  if (!list) return;
-  const row = document.createElement('div');
-  row.className = 'vt-item-row';
-  row.innerHTML = `
-    <input type="text" placeholder="Title (e.g. MANDIR)" class="vt-name form-input-text" value="${esc(name)}" />
-    <input type="text" placeholder="3DVista / Tour URL" class="vt-url form-input-text" value="${esc(url)}" />
-    <button type="button" class="btn btn-ghost vt-del-btn" title="Delete">✕</button>
-  `;
-  row.querySelector('.vt-del-btn')?.addEventListener('click', () => row.remove());
-  list.appendChild(row);
+  addAdminSubItemRow('adminVtList', { name, url });
 }
 
 function renderAdminGalleryPreviews() {
   const container = $('adminGalleryPreviews');
   if (!container) return;
-  const images = state.menuConfig.gallery?.images || [];
+  const images = state.tempGalleryImages || [];
   container.innerHTML = images.map((img, i) => {
     const src = img.blob ? URL.createObjectURL(img.blob) : assetUrl(img.url || img.name);
     return `
@@ -3721,7 +4253,7 @@ function renderAdminGalleryPreviews() {
   container.querySelectorAll('.gallery-preview-remove').forEach((btn) => {
     btn.addEventListener('click', () => {
       const idx = parseInt(btn.dataset.idx, 10);
-      state.menuConfig.gallery.images.splice(idx, 1);
+      if (state.tempGalleryImages) state.tempGalleryImages.splice(idx, 1);
       renderAdminGalleryPreviews();
     });
   });

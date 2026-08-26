@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-25T12:56:58.787Z",
+  "savedAt": "2026-08-26T07:59:10.264Z",
   "transform": {
     "tx": 1.3157,
     "ty": -0.2425,
@@ -22,61 +22,172 @@
     "file": "Demo.web.jpg"
   },
   "menuConfig": {
-    "location_intel": {
-      "enabled": true,
-      "videoUrl": "https://www.youtube.com/watch?v=5BOvC328DHY",
-      "videoName": ""
-    },
-    "walkthrough_video": {
-      "enabled": false,
-      "videoUrl": "https://www.youtube.com/watch?v=5BOvC328DHY",
-      "videoName": ""
-    },
-    "virtual_tour": {
-      "enabled": true,
-      "items": [
-        {
-          "id": "vt1",
-          "name": "guest house",
-          "url": "https://demo.build91.in/Eleganza/index.htm"
-        },
-        {
-          "id": "vt2",
-          "name": "CLUB HOUSE & POOL",
-          "url": "https://www.youtube.com/watch?v=5BOvC328DHY"
-        }
-      ]
-    },
-    "gallery": {
-      "enabled": true,
-      "images": [
-        {
-          "name": "WhatsApp Image 2026-08-11 at 6.41.36 PM.jpeg",
-          "url": "sample/WhatsApp Image 2026-08-11 at 6.41.36 PM.jpeg"
-        },
-        {
-          "name": "WhatsApp Image 2026-08-11 at 6.41.35 PM (2).jpeg",
-          "url": "sample/WhatsApp Image 2026-08-11 at 6.41.35 PM (2).jpeg"
-        },
-        {
-          "name": "WhatsApp Image 2026-08-11 at 6.41.34 PM.jpeg",
-          "url": "sample/WhatsApp Image 2026-08-11 at 6.41.34 PM.jpeg"
-        }
-      ]
-    },
-    "brochure": {
-      "enabled": true,
-      "pdfUrl": "sample/blogs.pdf",
-      "pdfName": "blogs.pdf"
-    },
-    "contact_us": {
-      "enabled": true,
-      "image": "sample/WhatsApp Image 2026-07-24 at 18.35.01.jpeg",
-      "imageName": "WhatsApp Image 2026-07-24 at 18.35.01.jpeg",
-      "title": "Anandam Eleganza - Premium Villa Plots",
-      "about": "Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh",
-      "phone": "+91 7389705477",
-      "email": "anandameleganza@gmail.com"
-    }
+    "customSections": [
+      {
+        "id": "sec_1787729788330_19",
+        "type": "walkthrough_video",
+        "title": "JUSTIN",
+        "enabled": true,
+        "groups": [
+          {
+            "id": "grp_1",
+            "title": "DFSD",
+            "items": [
+              {
+                "id": "item_1",
+                "name": "FSDASD",
+                "url": "Century Modern(1).mp4",
+                "videoUrl": "Century Modern(1).mp4",
+                "videoName": "Century Modern(1).mp4",
+                "pdfUrl": "Century Modern(1).mp4",
+                "pdfName": "Century Modern(1).mp4",
+                "fileName": "Century Modern(1).mp4"
+              },
+              {
+                "id": "item_2",
+                "name": "DASD",
+                "url": "Hero Video 3 (1).mp4",
+                "videoUrl": "Hero Video 3 (1).mp4",
+                "videoName": "Hero Video 3 (1).mp4",
+                "pdfUrl": "Hero Video 3 (1).mp4",
+                "pdfName": "Hero Video 3 (1).mp4",
+                "fileName": "Hero Video 3 (1).mp4"
+              }
+            ]
+          },
+          {
+            "id": "grp_2",
+            "title": "ASDQWED",
+            "items": [
+              {
+                "id": "item_1",
+                "name": "SDAS",
+                "url": "Button Link Bug 2.mp4",
+                "videoUrl": "Button Link Bug 2.mp4",
+                "videoName": "Button Link Bug 2.mp4",
+                "pdfUrl": "Button Link Bug 2.mp4",
+                "pdfName": "Button Link Bug 2.mp4",
+                "fileName": "Button Link Bug 2.mp4"
+              }
+            ]
+          }
+        ],
+        "images": [],
+        "image": "",
+        "imageName": "",
+        "about": "",
+        "phone": "",
+        "email": ""
+      },
+      {
+        "id": "sec_1787729974209_678",
+        "type": "virtual_tour",
+        "title": "VIRTUAL TOUR",
+        "enabled": true,
+        "groups": [
+          {
+            "id": "grp_1",
+            "title": "POOL",
+            "items": [
+              {
+                "id": "item_1",
+                "name": "ADEDE",
+                "url": "Century Modern(1).mp4",
+                "videoUrl": "Century Modern(1).mp4",
+                "videoName": "Century Modern(1).mp4",
+                "pdfUrl": "Century Modern(1).mp4",
+                "pdfName": "Century Modern(1).mp4",
+                "fileName": "Century Modern(1).mp4"
+              },
+              {
+                "id": "item_2",
+                "name": "ADSD",
+                "url": "Century Modern(1).mp4",
+                "videoUrl": "Century Modern(1).mp4",
+                "videoName": "Century Modern(1).mp4",
+                "pdfUrl": "Century Modern(1).mp4",
+                "pdfName": "Century Modern(1).mp4",
+                "fileName": "Century Modern(1).mp4"
+              }
+            ]
+          }
+        ],
+        "images": [],
+        "image": "",
+        "imageName": "",
+        "about": "",
+        "phone": "",
+        "email": ""
+      },
+      {
+        "id": "sec_1787730517432_65",
+        "type": "contact_us",
+        "title": "CONTACT US",
+        "enabled": true,
+        "groups": [],
+        "images": [],
+        "image": "sample/Dinning Landscape Images_14.jpg",
+        "imageName": "Dinning Landscape Images_14.jpg",
+        "about": "DFSD",
+        "phone": "23324235425",
+        "email": "build91dev4@gmail.com"
+      },
+      {
+        "id": "sec_1787730538040_499",
+        "type": "gallery",
+        "title": "ALASKA",
+        "enabled": true,
+        "groups": [],
+        "images": [
+          {
+            "name": "Bedroom Portrait Images_07.jpg",
+            "url": "sample/Bedroom Portrait Images_07.jpg"
+          },
+          {
+            "name": "Dinning Landscape Images_14.jpg",
+            "url": "sample/Dinning Landscape Images_14.jpg"
+          },
+          {
+            "name": "forest-line-trees-forest-with-grass-fallen-leaves-isolated-white-background-3d_375001-15402.jpg",
+            "url": "sample/forest-line-trees-forest-with-grass-fallen-leaves-isolated-white-background-3d_375001-15402.jpg"
+          }
+        ],
+        "image": "",
+        "imageName": "",
+        "about": "",
+        "phone": "",
+        "email": ""
+      },
+      {
+        "id": "sec_1787731147639_138",
+        "type": "brochure",
+        "title": "BROCHURE",
+        "enabled": true,
+        "groups": [
+          {
+            "id": "grp_1",
+            "title": "SDFGSD",
+            "items": [
+              {
+                "id": "item_1",
+                "name": "SDFDFS",
+                "url": "JD_Build91_SDE AI Intern.pdf",
+                "videoUrl": "JD_Build91_SDE AI Intern.pdf",
+                "videoName": "JD_Build91_SDE AI Intern.pdf",
+                "pdfUrl": "JD_Build91_SDE AI Intern.pdf",
+                "pdfName": "JD_Build91_SDE AI Intern.pdf",
+                "fileName": "JD_Build91_SDE AI Intern.pdf"
+              }
+            ]
+          }
+        ],
+        "images": [],
+        "image": "",
+        "imageName": "",
+        "about": "",
+        "phone": "",
+        "email": ""
+      }
+    ]
   }
 }
