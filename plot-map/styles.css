@@ -1566,25 +1566,44 @@ body.is-admin .cat-drawer { display: none !important; }
   flex-shrink: 0;
 }
 
+/* ─── Admin Menu Dropdown Glassmorphic Panel Styling ───────────────────── */
+.proj-current-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1000;
+  width: 360px !important;
+  max-height: 480px;
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(250, 204, 21, 0.18) !important;
+  overflow: hidden;
+  padding: 0 !important;
+}
+
 /* ─── Guided Menu Builder Wizard & Redesigned Tree View Styles ──────────── */
 .wizard-choice-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 12px;
-  height: 42px;
-  background: rgba(15, 23, 42, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 10px 14px;
+  height: 44px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   color: #f8fafc;
   text-align: left;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .wizard-choice-row:hover {
-  background: rgba(250, 204, 21, 0.1);
-  border-color: rgba(250, 204, 21, 0.4);
+  background: rgba(250, 204, 21, 0.12);
+  border-color: rgba(250, 204, 21, 0.45);
+  transform: translateX(3px);
 }
 .wizard-choice-row.is-selected {
   background: rgba(250, 204, 21, 0.18);
@@ -1682,6 +1701,22 @@ body.is-admin .cat-drawer { display: none !important; }
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* Custom Sleek Dark Scrollbar for Tree Container */
+#adminMenuTreeContainer::-webkit-scrollbar {
+  width: 6px;
+}
+#adminMenuTreeContainer::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 10px;
+}
+#adminMenuTreeContainer::-webkit-scrollbar-thumb {
+  background: rgba(250, 204, 21, 0.35);
+  border-radius: 10px;
+}
+#adminMenuTreeContainer::-webkit-scrollbar-thumb:hover {
+  background: rgba(250, 204, 21, 0.7);
+}
+
 /* ─── Single-Line Compact Tree View Rows ────────────────────────────────── */
 .tree-node-row {
   display: flex;
@@ -1692,24 +1727,25 @@ body.is-admin .cat-drawer { display: none !important; }
   min-height: 34px;
   padding: 0 8px;
   border-radius: 6px;
-  margin-bottom: 2px;
-  transition: background 0.15s ease;
+  margin-bottom: 3px;
+  transition: all 0.15s ease;
   position: relative;
 }
 .tree-node-row.is-folder {
-  background: rgba(250, 204, 21, 0.04);
-  border: 1px solid rgba(250, 204, 21, 0.16);
+  background: rgba(250, 204, 21, 0.06);
+  border: 1px solid rgba(250, 204, 21, 0.2);
 }
 .tree-node-row.is-leaf {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 .tree-node-row.is-contact {
   background: rgba(56, 189, 248, 0.08);
   border: 1px solid rgba(56, 189, 248, 0.3);
 }
 .tree-node-row:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(250, 204, 21, 0.35);
 }
 
 .tree-chevron {
@@ -1737,14 +1773,50 @@ body.is-admin .cat-drawer { display: none !important; }
   max-width: 100%;
 }
 
+/* ─── Vibrant Color-Coded Badge Tags ────────────────────────────────────── */
 .tree-inline-tag {
-  font-size: 10.5px;
-  color: #94a3b8;
-  font-weight: 400;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1.5px 6px;
+  border-radius: 4px;
   white-space: nowrap;
-  margin-left: 6px;
-  opacity: 0.85;
+  letter-spacing: 0.3px;
   flex-shrink: 0;
+}
+.tree-inline-tag.tag-folder {
+  background: rgba(250, 204, 21, 0.15);
+  color: var(--gold, #facc15);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+}
+.tree-inline-tag.tag-video {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+.tree-inline-tag.tag-pdf {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+.tree-inline-tag.tag-image, .tree-inline-tag.tag-gallery {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.tree-inline-tag.tag-tour {
+  background: rgba(6, 182, 212, 0.15);
+  color: #22d3ee;
+  border: 1px solid rgba(6, 182, 212, 0.3);
+}
+.tree-inline-tag.tag-contact {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.tree-inline-tag.tag-link {
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .tree-count-badge {
@@ -1758,65 +1830,71 @@ body.is-admin .cat-drawer { display: none !important; }
   flex-shrink: 0;
 }
 
-.tree-row-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.tree-overflow-trigger {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: #94a3b8;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
   flex-shrink: 0;
   margin-left: auto;
-}
-
-.tree-btn-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  height: 22px;
-  padding: 0 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #cbd5e1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  cursor: pointer;
   transition: all 0.15s ease;
-  user-select: none;
 }
-
-.tree-btn-action:hover:not([disabled]) {
-  background: rgba(255, 255, 255, 0.16);
+.tree-overflow-trigger:hover {
+  background: rgba(255, 255, 255, 0.14);
   color: #f8fafc;
   border-color: rgba(255, 255, 255, 0.25);
 }
 
-.tree-btn-action.tree-act-edit {
+/* Tree Overflow Menu Popover */
+.tree-overflow-menu {
+  position: absolute;
+  right: 8px;
+  top: calc(100% + 2px);
+  z-index: 99;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(250, 204, 21, 0.15);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 145px;
+}
+.tree-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: #e2e8f0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  white-space: nowrap;
+  transition: background 0.12s ease;
+}
+.tree-overflow-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.tree-overflow-item.is-add-inside {
   color: var(--gold, #facc15);
-  background: rgba(250, 204, 21, 0.08);
-  border-color: rgba(250, 204, 21, 0.25);
+  font-weight: 600;
 }
-.tree-btn-action.tree-act-edit:hover {
-  background: rgba(250, 204, 21, 0.22);
-  border-color: var(--gold, #facc15);
+.tree-overflow-item.is-danger {
+  color: var(--danger, #f43f5e);
 }
-
-.tree-btn-action.tree-btn-add-inside {
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.08);
-  border-color: rgba(56, 189, 248, 0.25);
-}
-.tree-btn-action.tree-btn-add-inside:hover {
-  background: rgba(56, 189, 248, 0.22);
-  border-color: #38bdf8;
-}
-
-.tree-btn-action.is-danger {
-  color: #f43f5e;
-  padding: 0 5px;
-}
-.tree-btn-action.is-danger:hover {
-  background: rgba(244, 63, 94, 0.2);
-  border-color: #f43f5e;
+.tree-overflow-item.is-danger:hover {
+  background: rgba(244, 63, 94, 0.15);
 }
 
 

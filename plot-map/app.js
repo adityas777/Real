@@ -3841,22 +3841,25 @@ function renderAdminMenuTree() {
 
   const tree = getMenuTree();
   let html = `
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.8);">
-      <span style="font-size:11px; font-weight:700; color:var(--gold,#facc15); text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:6px;">
-        📋 CLIENT MENU BUILDER
-      </span>
-      <button type="button" class="btn btn-primary" id="adminAddRootNodeBtn" style="font-size:11px; padding:4px 10px; font-weight:700;">＋ Add Item</button>
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,0.12); background:linear-gradient(180deg, rgba(30,41,59,0.9), rgba(15,23,42,0.95)); border-radius:12px 12px 0 0;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:13px; font-weight:800; color:var(--gold,#facc15); text-transform:uppercase; letter-spacing:0.6px; display:flex; align-items:center; gap:6px;">
+          📋 CLIENT SIDEBAR MENU
+        </span>
+        <span style="font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; background:rgba(250,204,21,0.18); color:var(--gold,#facc15); border:1px solid rgba(250,204,21,0.3);">${tree.length} Items</span>
+      </div>
+      <button type="button" class="btn btn-primary" id="adminAddRootNodeBtn" style="font-size:11.5px; padding:5px 12px; font-weight:700; border-radius:6px; box-shadow:0 2px 8px rgba(250,204,21,0.25);">＋ Add Item</button>
     </div>
-    <div style="padding:8px; display:flex; flex-direction:column; gap:4px; max-height:450px; overflow-y:auto;" id="adminMenuTreeContainer">
+    <div style="padding:10px; display:flex; flex-direction:column; gap:4px; max-height:450px; overflow-y:auto;" id="adminMenuTreeContainer">
   `;
 
   if (!tree.length) {
     html += `
-      <div style="padding:24px 12px; text-align:center; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.12); border-radius:8px; margin:4px 0;">
-        <div style="font-size:28px; margin-bottom:6px;">📂</div>
-        <p style="font-size:12px; font-weight:600; color:#f8fafc; margin:0 0 4px 0;">No menu items created yet</p>
-        <p style="font-size:11px; color:var(--text-mute,#94a3b8); margin:0 0 12px 0;">Click <strong>＋ Add Item</strong> above to build your client sidebar</p>
-        <button type="button" class="btn btn-primary" id="adminEmptyStateAddBtn" style="font-size:11px; padding:4px 12px;">＋ Create First Item</button>
+      <div style="padding:28px 16px; text-align:center; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.15); border-radius:10px; margin:4px 0;">
+        <div style="font-size:32px; margin-bottom:8px;">📂</div>
+        <p style="font-size:13px; font-weight:700; color:#f8fafc; margin:0 0 4px 0;">No menu items created yet</p>
+        <p style="font-size:11.5px; color:var(--text-mute,#94a3b8); margin:0 0 14px 0;">Click <strong>＋ Add Item</strong> to start building your client sidebar menu</p>
+        <button type="button" class="btn btn-primary" id="adminEmptyStateAddBtn" style="font-size:12px; padding:6px 14px; border-radius:6px;">＋ Create First Item</button>
       </div>
     `;
   } else {
@@ -3878,7 +3881,7 @@ function renderAdminMenuTree() {
       else icon = kindIcons[node.contentType] || '📄';
 
       const title = (node.title || 'Untitled').trim();
-      const indent = (depth - 1) * 24;
+      const indent = (depth - 1) * 20;
       const isFolder = node.kind === 'parent';
       const isContact = node.kind === 'contact';
       const canAddChild = isFolder && depth < 3;
@@ -3890,44 +3893,52 @@ function renderAdminMenuTree() {
       else if (isContact) rowClass += 'is-contact';
       else rowClass += 'is-leaf';
 
-      let subtitle = '';
-      if (isContact) {
-        subtitle = 'Singleton Contact Card';
-      } else if (node.kind === 'child') {
-        if (node.content?.url) subtitle = node.content.url;
-        else if (node.content?.fileName) subtitle = node.content.fileName;
-        else if (node.contentType) subtitle = node.contentType.toUpperCase();
+      let inlineTag = '';
+      let tagClass = 'tree-inline-tag ';
+      if (isFolder) {
+        inlineTag = `${childCount} item${childCount !== 1 ? 's' : ''}`;
+        tagClass += 'tag-folder';
+      } else if (isContact) {
+        inlineTag = 'Contact Card';
+        tagClass += 'tag-contact';
+      } else if (node.contentType) {
+        inlineTag = node.contentType.toUpperCase();
+        tagClass += `tag-${node.contentType}`;
       }
 
-      let inlineTag = '';
-      if (isFolder) inlineTag = `(${childCount})`;
-      else if (isContact) inlineTag = '· Singleton';
-      else if (node.contentType) inlineTag = `· ${node.contentType.toUpperCase()}`;
-
       let nodeHtml = `
-        <div class="${rowClass}" data-node-id="${esc(node.id)}" style="padding-left:${indent + 8}px;">
-          
-          <!-- Guide line indicator for nested levels -->
-          ${depth > 1 ? `<div style="position:absolute; left:${indent - 8}px; top:0; bottom:0; width:1px; background:rgba(255,255,255,0.12);"></div>` : ''}
-
+        <div class="${rowClass}" data-node-id="${esc(node.id)}" style="margin-left:${indent}px; ${depth > 1 ? 'border-left:2px solid rgba(250,204,21,0.35); padding-left:8px;' : 'padding-left:8px;'}">
           <div style="display:flex; align-items:center; gap:6px; min-width:0; flex:1;">
             ${isFolder ? `
               <span class="tree-chevron ${isCollapsed ? 'is-collapsed' : ''}" data-folder-id="${esc(node.id)}" title="${isCollapsed ? 'Expand folder' : 'Collapse folder'}">▼</span>
             ` : '<span style="width:12px; flex-shrink:0;"></span>'}
             <span style="font-size:14px; flex-shrink:0;">${icon}</span>
             <span class="tree-title-text" title="${esc(title)}">${esc(title)}</span>
-            <span class="tree-inline-tag">${esc(inlineTag)}</span>
+            <span class="${tagClass}">${esc(inlineTag)}</span>
           </div>
 
-          <!-- Right-Corner Direct Action Buttons -->
-          <div class="tree-row-actions">
-            ${canAddChild ? `
-              <button type="button" class="tree-btn-action tree-btn-add-inside" data-parent-id="${esc(node.id)}" title="Add item inside this folder">＋ Add</button>
-            ` : ''}
-            <button type="button" class="tree-btn-action tree-act-edit" data-node-id="${esc(node.id)}" title="Edit item">✏️ Edit</button>
-            <button type="button" class="tree-btn-action is-danger tree-act-del" data-node-id="${esc(node.id)}" title="Delete item">🗑️</button>
-            <button type="button" class="tree-btn-action tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.25; cursor:not-allowed;"' : ''} title="Move Up">↑</button>
-            <button type="button" class="tree-btn-action tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.25; cursor:not-allowed;"' : ''} title="Move Down">↓</button>
+          <!-- Clean Overflow Trigger (⋯) -->
+          <div style="position:relative; flex-shrink:0; margin-left:auto;">
+            <button type="button" class="tree-overflow-trigger" data-node-id="${esc(node.id)}" title="More Actions">⋯</button>
+            <div class="tree-overflow-menu" id="treeOverflow_${esc(node.id)}" hidden>
+              ${canAddChild ? `
+                <button type="button" class="tree-overflow-item is-add-inside tree-btn-add-inside" data-parent-id="${esc(node.id)}">
+                  <span>＋</span> <span>Add item inside</span>
+                </button>
+              ` : ''}
+              <button type="button" class="tree-overflow-item tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
+                <span>↑</span> <span>Move Up</span>
+              </button>
+              <button type="button" class="tree-overflow-item tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
+                <span>↓</span> <span>Move Down</span>
+              </button>
+              <button type="button" class="tree-overflow-item tree-act-edit" data-node-id="${esc(node.id)}">
+                <span>✏️</span> <span>Edit Item</span>
+              </button>
+              <button type="button" class="tree-overflow-item is-danger tree-act-del" data-node-id="${esc(node.id)}">
+                <span>🗑️</span> <span>Delete Item</span>
+              </button>
+            </div>
           </div>
         </div>
       `;
@@ -3973,7 +3984,7 @@ function renderAdminMenuTree() {
     });
   });
 
-  // Add Inside Folder
+  // Add Inside Folder (now inside ⋯ overflow menu)
   treeEl.querySelectorAll('.tree-btn-add-inside').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3981,6 +3992,19 @@ function renderAdminMenuTree() {
       $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
       const parentId = btn.dataset.parentId;
       openNodeBuilderModal(null, parentId);
+    });
+  });
+
+  // Overflow Menu (⋯) Toggles & Actions
+  treeEl.querySelectorAll('.tree-overflow-trigger').forEach((trig) => {
+    trig.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nodeId = trig.dataset.nodeId;
+      const menu = $(`treeOverflow_${nodeId}`);
+      if (!menu) return;
+      const isHidden = menu.hidden;
+      treeEl.querySelectorAll('.tree-overflow-menu').forEach((m) => m.hidden = true);
+      menu.hidden = !isHidden;
     });
   });
 
