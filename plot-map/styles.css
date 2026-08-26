@@ -1566,5 +1566,248 @@ body.is-admin .cat-drawer { display: none !important; }
   flex-shrink: 0;
 }
 
+/* ─── Guided Menu Builder Wizard & Redesigned Tree View Styles ──────────── */
+.wizard-choice-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.wizard-choice-card:hover {
+  background: rgba(250, 204, 21, 0.08);
+  border-color: rgba(250, 204, 21, 0.5);
+  transform: translateY(-1px);
+}
+.wizard-choice-card.is-selected {
+  background: rgba(250, 204, 21, 0.14);
+  border-color: var(--gold, #facc15);
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.2);
+}
+.wizard-choice-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+.wizard-card-icon {
+  font-size: 26px;
+  flex-shrink: 0;
+}
+.wizard-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.wizard-card-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+.wizard-card-desc {
+  font-size: 11.5px;
+  color: #94a3b8;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+/* Wizard Content Type Cards */
+.wizard-type-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 6px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.wizard-type-card:hover {
+  border-color: rgba(250, 204, 21, 0.4);
+  color: #f8fafc;
+}
+.wizard-type-card.is-active {
+  background: rgba(250, 204, 21, 0.15);
+  border-color: var(--gold, #facc15);
+  color: var(--gold, #facc15);
+  font-weight: 700;
+}
+.wizard-type-icon {
+  font-size: 20px;
+}
+.wizard-type-label {
+  font-size: 11px;
+}
+
+/* Source Segmented Toggle */
+.wizard-source-btn.is-active {
+  background: rgba(250, 204, 21, 0.2) !important;
+  color: var(--gold, #facc15) !important;
+  border-color: rgba(250, 204, 21, 0.4) !important;
+  font-weight: 700 !important;
+}
+
+/* Placement Selector Items */
+.wizard-placement-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.wizard-placement-item:hover:not(.is-disabled) {
+  background: rgba(250, 204, 21, 0.1);
+  border-color: rgba(250, 204, 21, 0.3);
+}
+.wizard-placement-item.is-selected {
+  background: rgba(250, 204, 21, 0.18);
+  border-color: var(--gold, #facc15);
+  font-weight: 700;
+}
+.wizard-placement-item.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ─── Redesigned Admin Tree View ────────────────────────────────────────── */
+.tree-node-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+  position: relative;
+}
+.tree-node-row.is-folder {
+  background: rgba(250, 204, 21, 0.04);
+  border: 1px solid rgba(250, 204, 21, 0.18);
+}
+.tree-node-row.is-leaf {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.tree-node-row.is-contact {
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+.tree-node-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tree-chevron {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: var(--gold, #facc15);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.18s ease;
+}
+.tree-chevron.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.tree-count-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: rgba(250, 204, 21, 0.15);
+  color: var(--gold, #facc15);
+  margin-left: 4px;
+}
+
+.tree-btn-add-inside {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold, #facc15);
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.tree-btn-add-inside:hover {
+  background: rgba(250, 204, 21, 0.25);
+}
+
+.tree-overflow-trigger {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  color: #94a3b8;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+.tree-overflow-trigger:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Tree Overflow Menu Popover */
+.tree-overflow-menu {
+  position: absolute;
+  right: 10px;
+  top: calc(100% + 4px);
+  z-index: 99;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+}
+.tree-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: #e2e8f0;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.tree-overflow-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.tree-overflow-item.is-danger {
+  color: var(--danger, #f43f5e);
+}
+.tree-overflow-item.is-danger:hover {
+  background: rgba(244, 63, 94, 0.15);
+}
+
 
 
