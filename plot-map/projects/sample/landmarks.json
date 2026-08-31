@@ -1,23 +1,8 @@
 {
   "version": 1,
   "note": "Build91 landmark hotspots",
-  "savedAt": "2026-08-26T09:07:25.442Z",
+  "savedAt": "2026-08-27T11:55:37.552Z",
   "landmarks": [
-    {
-      "id": "lm18",
-      "label": "",
-      "distance": "",
-      "driveTime": "",
-      "icon": "mall",
-      "hotspot": {
-        "lonDeg": -108.86,
-        "latDeg": -6.68
-      },
-      "banner": {
-        "lonDeg": -108.34,
-        "latDeg": 4.63
-      }
-    },
     {
       "id": "lm19",
       "label": "",
@@ -31,21 +16,6 @@
       "banner": {
         "lonDeg": 117.19,
         "latDeg": -0.66
-      }
-    },
-    {
-      "id": "lm20",
-      "label": "",
-      "distance": "",
-      "driveTime": "",
-      "icon": "place",
-      "hotspot": {
-        "lonDeg": 145.01,
-        "latDeg": -5.98
-      },
-      "banner": {
-        "lonDeg": 144.36,
-        "latDeg": 1.08
       }
     },
     {
@@ -94,21 +64,6 @@
       }
     },
     {
-      "id": "lm24",
-      "label": "Temple",
-      "distance": "",
-      "driveTime": "",
-      "icon": "temple",
-      "hotspot": {
-        "lonDeg": -86.81,
-        "latDeg": -8.47
-      },
-      "banner": {
-        "lonDeg": -86.39,
-        "latDeg": 4.16
-      }
-    },
-    {
       "id": "lm25",
       "label": "",
       "distance": "",
@@ -149,8 +104,8 @@
         "latDeg": -4.76
       },
       "banner": {
-        "lonDeg": -128.83,
-        "latDeg": 1.69
+        "lonDeg": -122.21,
+        "latDeg": 8.63
       }
     },
     {
@@ -181,6 +136,36 @@
       "banner": {
         "lonDeg": 152.37,
         "latDeg": 4.07
+      }
+    },
+    {
+      "id": "lm32",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "park",
+      "hotspot": {
+        "lonDeg": -164.07,
+        "latDeg": -11.36
+      },
+      "banner": {
+        "lonDeg": -163,
+        "latDeg": -1.41
+      }
+    },
+    {
+      "id": "lm33",
+      "label": "",
+      "distance": "",
+      "driveTime": "",
+      "icon": "temple",
+      "hotspot": {
+        "lonDeg": -170.95,
+        "latDeg": -7.73
+      },
+      "banner": {
+        "lonDeg": -168.9,
+        "latDeg": 6.59
       }
     }
   ]

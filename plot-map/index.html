@@ -39,7 +39,7 @@
         <div class="proj-custom-menu-wrapper" style="position: relative; display: inline-block;">
           <button class="btn btn-ghost proj-custom-menu-btn" id="projMenuBuilderBtn" type="button" aria-haspopup="menu"
             aria-expanded="false" title="Client Sidebar Menu Builder">📋 Menu Builder ▾</button>
-          <div class="proj-custom-dropdown proj-current-menu-dropdown" id="projMenuBuilderDropdown" role="menu" style="width: 320px; max-height: 480px; overflow-y: auto;" hidden>
+          <div class="proj-custom-dropdown proj-current-menu-dropdown" id="projMenuBuilderDropdown" role="menu" style="width: 380px; max-height: 520px; overflow-y: auto;" hidden>
             <!-- Dynamic tree view & Add root buttons injected by app.js -->
           </div>
         </div>
@@ -467,14 +467,6 @@
             <label class="form-label">Folder Name / Title:</label>
             <input type="text" id="wizardFolderTitleInput" placeholder="e.g. VIRTUAL TOURS or WALKTHROUGH VIDEOS" class="form-input-text" />
           </div>
-          
-          <!-- Immediate branch offer after creating folder -->
-          <div id="wizardFolderBranchPrompt" style="display:none; margin-top:16px; padding:14px; background:rgba(250,204,21,0.08); border:1px solid rgba(250,204,21,0.3); border-radius:8px;">
-            <p style="margin:0 0 10px 0; font-size:12.5px; font-weight:600; color:#facc15;">Folder created! Would you like to add an item inside this folder now?</p>
-            <div style="display:flex; gap:10px;">
-              <button type="button" class="btn btn-primary" id="wizardFolderAddInsideYes" style="font-size:12px; padding:6px 12px;">Yes, add item inside</button>
-              <button type="button" class="btn btn-ghost" id="wizardFolderAddInsideNo" style="font-size:12px; padding:6px 12px;">No, I'm done</button>
-            </div>
           </div>
         </div>
 
@@ -501,18 +493,6 @@
               <span class="wizard-type-icon">🖼️</span>
               <span class="wizard-type-label">Image</span>
             </button>
-            <button type="button" class="wizard-type-card" data-type="gallery">
-              <span class="wizard-type-icon">🖼️</span>
-              <span class="wizard-type-label">Gallery</span>
-            </button>
-            <button type="button" class="wizard-type-card" data-type="tour">
-              <span class="wizard-type-icon">🌐</span>
-              <span class="wizard-type-label">Virtual Tour</span>
-            </button>
-            <button type="button" class="wizard-type-card" data-type="link">
-              <span class="wizard-type-icon">🔗</span>
-              <span class="wizard-type-label">Web Link</span>
-            </button>
           </div>
 
           <!-- Upload vs URL Segmented Toggle -->
@@ -525,20 +505,13 @@
 
             <!-- Single Input Box based on active toggle -->
             <div id="wizardUrlInputGroup" class="form-group">
-              <input type="text" id="wizardUrlInput" placeholder="https://example.com/video.mp4 or YouTube / 3DVista link" class="form-input-text" />
+              <input type="text" id="wizardUrlInput" placeholder="https://example.com/video.mp4 or YouTube / Vimeo link" class="form-input-text" />
             </div>
 
             <div id="wizardFileInputGroup" class="form-group" style="display:none;">
-              <input type="file" id="wizardFileInput" class="form-input-file" />
-              <div class="file-status" id="wizardFileStatus" style="font-size:11px; color:#94a3b8; margin-top:4px;">No file chosen</div>
+              <input type="file" id="wizardFileInput" multiple class="form-input-file" accept="video/mp4,video/webm,video/ogg,video/quicktime,.mp4,.webm,.mov" />
+              <div class="file-status" id="wizardFileStatus" style="font-size:11px; color:#94a3b8; margin-top:4px;">No file chosen (you can select one or more files)</div>
             </div>
-          </div>
-
-          <!-- Gallery Multi-Upload Group -->
-          <div id="wizardGalleryGroup" style="display:none; margin-top:10px;">
-            <label class="form-label">Upload Gallery Images:</label>
-            <input type="file" id="wizardGalleryFilesInput" accept="image/*" multiple class="form-input-file" />
-            <div class="gallery-previews" id="wizardGalleryPreviews" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; max-height:160px; overflow-y:auto;"></div>
           </div>
         </div>
 
@@ -613,28 +586,40 @@
   </div>
 
   <!-- Client Gallery Modal (Lightbox Viewer matching Image 2) -->
-  <div class="modal custom-feature-modal" id="clientGalleryModal" aria-hidden="true">
-    <div class="modal-backdrop" data-close></div>
-    <div class="modal-dialog gallery-modal-dialog" role="dialog" aria-label="Photo Gallery">
-      <div class="modal-bar">
-        <h3 class="modal-title">🖼️ Photo Gallery</h3>
-        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+  <div class="modal custom-feature-modal gallery-lightbox-modal" id="clientGalleryModal" aria-hidden="true" hidden>
+    <div class="modal-backdrop gallery-lightbox-backdrop" data-close></div>
+    <div class="gallery-lightbox-container" role="dialog" aria-modal="true" aria-label="Photo Gallery">
+      <!-- Close Button (White square button matching Image 2) -->
+      <button class="gallery-lightbox-close" id="galleryCloseBtn" type="button" aria-label="Close" data-close>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+
+      <!-- Previous Image Arrow Button (Circular dark button with white border and arrow) -->
+      <button class="gallery-lightbox-nav gallery-lightbox-prev" id="galleryPrevBtn" type="button" aria-label="Previous Image">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- Full-Scale Stage for Image with small padding -->
+      <div class="gallery-lightbox-stage" id="galleryStage">
+        <img class="gallery-lightbox-img" id="galleryActiveImg" src="" alt="Gallery Image" />
       </div>
-      <div class="modal-body gallery-modal-body" style="padding:0; background:#000; display:flex; flex-direction:column; position:relative; overflow:hidden; height:100%;">
-        <div class="gallery-slide-wrapper" style="flex:1; position:relative; display:flex; align-items:center; justify-content:center; width:100%; height:100%; overflow:hidden;">
-          <button class="gallery-nav-btn gallery-nav-prev" id="galleryPrevBtn" type="button" aria-label="Previous Image">‹</button>
-          
-          <div class="gallery-slide-container" style="display:flex; align-items:center; justify-content:center; width:100%; height:100%; padding:20px 70px; overflow:hidden;">
-            <img id="galleryActiveImg" src="" alt="Gallery Image" style="max-width:100%; max-height:75vh; object-fit:contain; border-radius:6px; box-shadow:0 8px 32px rgba(0,0,0,0.6); transition: opacity 0.15s ease;" />
-          </div>
-          
-          <button class="gallery-nav-btn gallery-nav-next" id="galleryNextBtn" type="button" aria-label="Next Image">›</button>
-        </div>
-        
-        <div class="gallery-caption-bar" id="galleryCaptionBar" style="width:100%; padding:10px 16px; background:rgba(0,0,0,0.85); border-top:1px solid rgba(255,255,255,0.1); text-align:center; color:#e2e8f0; font-size:13px; font-weight:500;">
-          <span id="galleryImgName"></span>
-          <span id="galleryImgCounter" style="margin-left:12px; opacity:0.7; font-size:12px;"></span>
-        </div>
+
+      <!-- Next Image Arrow Button (Circular dark button with white border and arrow) -->
+      <button class="gallery-lightbox-nav gallery-lightbox-next" id="galleryNextBtn" type="button" aria-label="Next Image">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- Floating Bottom Caption & Counter -->
+      <div class="gallery-lightbox-caption" id="galleryCaptionBar">
+        <span class="gallery-caption-title" id="galleryImgName"></span>
+        <span class="gallery-caption-counter" id="galleryImgCounter"></span>
       </div>
     </div>
   </div>

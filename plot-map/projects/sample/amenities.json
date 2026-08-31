@@ -1,6 +1,64 @@
 {
   "version": 1,
   "note": "Build91 in-layout amenities",
-  "savedAt": "2026-08-26T09:07:25.442Z",
-  "amenities": []
+  "savedAt": "2026-08-27T11:55:37.552Z",
+  "amenities": [
+    {
+      "id": "am1",
+      "name": "Priyadarshi Satyakam aasram",
+      "icon": "clubhouse",
+      "facing": "dsfde",
+      "size": "afeae",
+      "dimensions": "afeae",
+      "price": "aefaef",
+      "block": "afese",
+      "tour_url": "https://www.youtube.com/watch?v=X1aFkAkFASk",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-priyadarshi-satyakam-aasram.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -50.78,
+        "latDeg": -21.57
+      }
+    },
+    {
+      "id": "am2",
+      "name": "Priyadarshi Satyakam 1",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-priyadarshi-satyakam-1.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -22.52,
+        "latDeg": -31.26
+      }
+    },
+    {
+      "id": "am3",
+      "name": "Priyadarshi Satyakam 3",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-priyadarshi-satyakam-3.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -13.96,
+        "latDeg": -17.22
+      }
+    }
+  ]
 }

@@ -1,6 +1,6 @@
 ---
 name: keep-docs-current
-description: Keep the Build91 plot-map project docs current after ANY change to the app. Invoke at the end of a turn in which you edited app.js, index.html, styles.css, or the sample/ contract for the plot-map project (…/ZeroxRealEstate/plot-map) — before summarizing to the user. Ensures CLAUDE.md, README.md, and inline comments always reflect the latest state so a fresh agent or a swapped Claude account can restart seamlessly. Also use when the user asks to "document", "update the docs", "summarize the project", or "write a handoff".
+description: Keep the Build91 plot-map project docs current after ANY change to the app. Invoke at the end of a turn in which you edited app.js, index.html, styles.css, or the sample/ contract for the plot-map project (…/ZeroxRealEstate/plot-map) — before summarizing to the user. Ensures CHANGELOG.md, CLAUDE.md, README.md, and inline comments always reflect the latest state so a fresh agent or a swapped Claude account can restart seamlessly. Also use when the user asks to "document", "update the docs", "summarize the project", or "write a handoff".
 ---
 
 # Keep the plot-map docs current
@@ -21,7 +21,11 @@ until the docs reflect it.
 
 Work through these; update only what your change actually touched.
 
-1. **`CLAUDE.md`** (agent handoff — the most important file):
+1. **`CHANGELOG.md`** — append a dated entry for every change (what changed, why,
+   files touched), newest entry on top. Do this for every change, not just the ones
+   that also touch CLAUDE.md/README.md below.
+
+2. **`CLAUDE.md`** (agent handoff — the most important file):
    - **Code map** — if you added/removed/renamed a function or section, update the
      bullet for that section so the map still matches `app.js`.
    - **Conventions & gotchas** — if you hit or fixed a non-obvious trap, record it.
@@ -31,14 +35,14 @@ Work through these; update only what your change actually touched.
    - **How to run / verify** — update if the launch config, URLs, or verification
      approach changed.
 
-2. **`README.md`** (user-facing): update the feature description, the admin workflow,
+3. **`README.md`** (user-facing): update the feature description, the admin workflow,
    and any JSON examples the user relies on. Keep it in the user's voice (what/why/how),
    not implementation detail.
 
-3. **Inline comments in the code**: keep a short "why" next to non-obvious logic you
+4. **Inline comments in the code**: keep a short "why" next to non-obvious logic you
    added or changed (handedness, projection, cache-busting, texture caps, etc.).
 
-4. **Optional — `~/.claude` memory** (`plot-map-prototype.md`): if you have memory
+5. **Optional — `~/.claude` memory** (`plot-map-prototype.md`): if you have memory
    access this session, mirror the key new facts there too. But treat it as a *cache*,
    not the source of truth — CLAUDE.md/README are canonical because they travel with
    the repo.

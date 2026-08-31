@@ -4,7 +4,8 @@
 > project, and it must survive agent restarts and Claude-account swaps. Keep it
 > current — see **[Documentation discipline](#documentation-discipline)** at the end.
 > User-facing feature docs live in [README.md](README.md); this file is agent-facing
-> (architecture, code map, conventions, gotchas, verification, status).
+> (architecture, code map, conventions, gotchas, verification, status). Every change
+> is logged in **[CHANGELOG.md](CHANGELOG.md)** as it happens.
 
 ## What this is
 
@@ -128,6 +129,22 @@ Top-down, by section header:
   `updateCamera`, `clampView`/`clampLat`, `setFov`.
 - **Interaction:** pointer/drag in `wireViewControls`, raycast (`ndcOf`, `rayHit`,
   `rayToGround`), `hover`/`pick`, `setEmphasis`.
+- **Landmark category drawer (client)** — `wireViewControls`'s `.cat-btn` handlers call
+  `applyCategoryFilter(cat)`, which dims non-matching landmarks (`isLandmarkMatchCategory`:
+  icon→category map, then a label keyword regex fallback, then a direct `lm.category`)
+  and drives the camera via `computeLandmarkPanRange(dirs)` + `animateCameraTo`. That
+  function makes a **fit-or-sweep** decision (see the comment above
+  `LANDMARK_EDGE_PAD`/`LANDMARK_FIT_FOV_CAP`/`LANDMARK_FIT_FOV_FLOOR`/`LANDMARK_SWEEP_FOV`/
+  `LANDMARK_SWAY_HALF`, just above it in the source): if the matched landmarks' bounding
+  arc plus padding fits within `FOV_MAX` (120°), the camera frames the whole group at a
+  fitted FOV and `state.landmarkPanRange` becomes a tiny window → idle auto-pan
+  (`renderLoop`) just gently sways instead of sweeping; otherwise it's a real sweep sized
+  to the landmarks' actual leftmost/rightmost extent (no artificial minimum), starting at
+  the rightmost landmark. `updateCamera` hard-clamps `state.view.lon` into
+  `landmarkPanRange` for non-admin — the single choke point that keeps the client from
+  ever drifting outside the selected category's arc (drag, idle sway/sweep, or the fly-in
+  alike). `meanDirection(dirs)` is the shared centroid-direction helper. Selecting "ALL" or
+  leaving Landmarks (`state.landmarkPanRange = null`) releases the clamp back to free-spin.
 - **Data join:** `colorPlots`, `applyData`, legend/`toggleFilter`, `applySelectStyle`
   (selection keeps status colour + gold outline), `applyLabelVisibility` (# toggle).
 - **Tooltip/popover:** `esc`, `showTooltip` (hover info card), `openPanel`/`placePanel`
@@ -435,9 +452,11 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
 **After every meaningful change, update the docs in the same turn** so the next agent
 (or a fresh account) inherits accurate context. Use the project skill
 **`keep-docs-current`** (`.claude/skills/keep-docs-current/`) as the checklist. In short:
-1. **This file** — refresh the code map, gotchas, and *Current status* if you added/
+1. **[CHANGELOG.md](CHANGELOG.md)** — append an entry for *every* change, as it happens
+   (what changed, why, files touched). Newest entry on top.
+2. **This file** — refresh the code map, gotchas, and *Current status* if you added/
    moved/renamed anything or changed how to run/verify.
-2. **[README.md](README.md)** — update the user-facing feature description.
-3. **Inline comments** — keep the "why" next to non-obvious code.
-4. Do it **before ending the turn**, not "later." Treat undocumented changes as
+3. **[README.md](README.md)** — update the user-facing feature description.
+4. **Inline comments** — keep the "why" next to non-obvious code.
+5. Do it **before ending the turn**, not "later." Treat undocumented changes as
    incomplete.

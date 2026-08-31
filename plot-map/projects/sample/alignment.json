@@ -1,19 +1,19 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-26T09:07:25.442Z",
+  "savedAt": "2026-08-27T11:55:37.552Z",
   "transform": {
-    "tx": 1.3157,
-    "ty": -0.2425,
-    "scale": 0.08,
-    "rotationDeg": 2.5
+    "tx": 2.0785,
+    "ty": 1.3717,
+    "scale": 0.09,
+    "rotationDeg": 92.9
   },
   "view": {
-    "lonDeg": 190.93,
-    "latDeg": 2.96,
+    "lonDeg": 184.77,
+    "latDeg": 2.99,
     "fov": 72
   },
-  "opacity": 0.5,
+  "opacity": 1,
   "groundImage": {
     "file": "Map_DesignCutOut10.web.png",
     "opacity": 1
@@ -22,211 +22,207 @@
     "file": "Demo.web.jpg"
   },
   "menuConfig": {
-    "customSections": [
+    "tree": [
       {
-        "id": "sec_1787729788330_19",
-        "type": "walkthrough_video",
-        "title": "VIDEO 1",
-        "enabled": true,
-        "groups": [
-          {
-            "id": "grp_1",
-            "title": "DFSD",
-            "items": [
-              {
-                "id": "item_1",
-                "name": "FSDASD",
-                "url": "Century Modern(1).mp4",
-                "videoUrl": "Century Modern(1).mp4",
-                "videoName": "Button Link Bug.mp4",
-                "pdfUrl": "Century Modern(1).mp4",
-                "pdfName": "Button Link Bug.mp4",
-                "fileName": "Button Link Bug.mp4"
-              },
-              {
-                "id": "item_2",
-                "name": "DASD",
-                "url": "Hero Video 3 (1).mp4",
-                "videoUrl": "Hero Video 3 (1).mp4",
-                "videoName": "Recording 2026-02-18 165830.mp4",
-                "pdfUrl": "Hero Video 3 (1).mp4",
-                "pdfName": "Recording 2026-02-18 165830.mp4",
-                "fileName": "Recording 2026-02-18 165830.mp4"
-              }
-            ]
-          },
-          {
-            "id": "grp_2",
-            "title": "ASDQWED",
-            "items": [
-              {
-                "id": "item_1",
-                "name": "SDAS",
-                "url": "Button Link Bug 2.mp4",
-                "videoUrl": "Button Link Bug 2.mp4",
-                "videoName": "",
-                "pdfUrl": "Button Link Bug 2.mp4",
-                "pdfName": "",
-                "fileName": ""
-              }
-            ]
-          }
-        ],
-        "images": [],
-        "image": "",
-        "imageName": "",
-        "about": "",
-        "phone": "",
-        "email": ""
-      },
-      {
-        "id": "sec_1787729974209_678",
-        "type": "virtual_tour",
-        "title": "VIRTUAL TOUR",
-        "enabled": true,
-        "groups": [
-          {
-            "id": "grp_1",
-            "title": "POOL",
-            "items": [
-              {
-                "id": "item_1",
-                "name": "ADEDE",
-                "url": "Century Modern(1).mp4",
-                "videoUrl": "Century Modern(1).mp4",
-                "videoName": "Recording 2026-02-18 165830.mp4",
-                "pdfUrl": "Century Modern(1).mp4",
-                "pdfName": "Recording 2026-02-18 165830.mp4",
-                "fileName": "Recording 2026-02-18 165830.mp4"
-              },
-              {
-                "id": "item_2",
-                "name": "ADSD",
-                "url": "Century Modern(1).mp4",
-                "videoUrl": "Century Modern(1).mp4",
-                "videoName": "Hero Video 3 (1).mp4",
-                "pdfUrl": "Century Modern(1).mp4",
-                "pdfName": "Hero Video 3 (1).mp4",
-                "fileName": "Hero Video 3 (1).mp4"
-              }
-            ]
-          }
-        ],
-        "images": [],
-        "image": "",
-        "imageName": "",
-        "about": "",
-        "phone": "",
-        "email": ""
-      },
-      {
-        "id": "sec_1787730517432_65",
-        "type": "contact_us",
+        "id": "node_1787744175195_376",
         "title": "CONTACT US",
-        "enabled": true,
-        "groups": [],
-        "images": [],
-        "image": "sample/Dinning Landscape Images_14.jpg",
-        "imageName": "Dinning Landscape Images_14.jpg",
-        "about": "DFSD",
-        "phone": "23324235425",
-        "email": "build91dev4@gmail.com"
+        "kind": "contact",
+        "contact": {
+          "title": "dfcad",
+          "about": "asdas",
+          "phone": "32543542",
+          "email": "efwer",
+          "image": "sample/Dinning Landscape Images_14.jpg",
+          "imageName": "Dinning Landscape Images_14.jpg"
+        }
       },
       {
-        "id": "sec_1787730538040_499",
-        "type": "gallery",
-        "title": "GALLERY",
-        "enabled": true,
-        "groups": [],
-        "images": [
+        "id": "node_1787818472445_190",
+        "title": "video",
+        "kind": "parent",
+        "children": [
           {
-            "name": "Bedroom Portrait Images_07.jpg",
-            "url": "sample/Bedroom Portrait Images_07.jpg"
+            "id": "node_1787818573180_356",
+            "title": "video 2",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Positioned and Resized.mp4"
+            }
           },
           {
-            "name": "Dinning Landscape Images_14.jpg",
-            "url": "sample/Dinning Landscape Images_14.jpg"
+            "id": "node_1787818573180_120",
+            "title": "video 1",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Hero Video 3 Comp.mp4"
+            }
           },
           {
-            "name": "forest-line-trees-forest-with-grass-fallen-leaves-isolated-white-background-3d_375001-15402.jpg",
-            "url": "sample/forest-line-trees-forest-with-grass-fallen-leaves-isolated-white-background-3d_375001-15402.jpg"
+            "id": "node_1787818573180_704",
+            "title": "video 3",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Recording 2026-02-18 165830.mp4"
+            }
+          },
+          {
+            "id": "node_1787818573180_893",
+            "title": "video 4",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Recording 2026-02-21 180515.mp4"
+            }
           }
-        ],
-        "image": "",
-        "imageName": "",
-        "about": "",
-        "phone": "",
-        "email": ""
+        ]
       },
       {
-        "id": "sec_1787731147639_138",
-        "type": "brochure",
-        "title": "BROCHURE",
-        "enabled": true,
-        "groups": [
+        "id": "node_1787818482692_969",
+        "title": "images",
+        "kind": "parent",
+        "children": [
           {
-            "id": "grp_1",
-            "title": "SDFGSD",
-            "items": [
-              {
-                "id": "item_1",
-                "name": "SDFDFS",
-                "url": "JD_Build91_SDE AI Intern.pdf",
-                "videoUrl": "JD_Build91_SDE AI Intern.pdf",
-                "videoName": "JD_Build91_SDE AI Intern.pdf",
-                "pdfUrl": "JD_Build91_SDE AI Intern.pdf",
-                "pdfName": "JD_Build91_SDE AI Intern.pdf",
-                "fileName": "JD_Build91_SDE AI Intern.pdf"
-              }
-            ]
-          }
-        ],
-        "images": [],
-        "image": "",
-        "imageName": "",
-        "about": "",
-        "phone": "",
-        "email": ""
-      },
-      {
-        "id": "sec_1787734504686_49",
-        "type": "walkthrough_video",
-        "title": "Showcase Video",
-        "enabled": true,
-        "groups": [
+            "id": "node_1787818525228_609",
+            "title": "IMAGE 2",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Dinning Landscape Images_14.jpg"
+            }
+          },
           {
-            "id": "grp_1",
-            "title": "Exterior",
-            "items": [
+            "id": "node_1787818525228_132",
+            "title": "IMAGE 1",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Bedroom Portrait Images_07.jpg"
+            }
+          },
+          {
+            "id": "node_1787818525228_198",
+            "title": "IMAGE 3",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Livingroom Portrait Images_09.jpg"
+            }
+          },
+          {
+            "id": "node_1787818525228_806",
+            "title": "IMAGE 4",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Outdoor Portrait Images_01.jpg"
+            }
+          },
+          {
+            "id": "node_1787818753660_634",
+            "title": "image1",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Dinning Landscape Images_14.jpg"
+            }
+          },
+          {
+            "id": "node_1787819913276_378",
+            "title": "IMAGE CHILD",
+            "kind": "parent",
+            "children": [
               {
-                "id": "item_1",
-                "name": "Test 1",
-                "url": "",
-                "videoUrl": "",
-                "videoName": "",
-                "pdfUrl": "",
-                "pdfName": "",
-                "fileName": ""
+                "id": "node_1787819937964_194",
+                "title": "imageS 1",
+                "kind": "child",
+                "contentType": "image",
+                "content": {
+                  "url": "",
+                  "fileName": "Screenshot_2025-12-02-15-55-11-06_40deb401b9ffe8e1df2f1cc5ba480b12.jpg"
+                }
               },
               {
-                "id": "item_2",
-                "name": "Test 2",
-                "url": "",
-                "videoUrl": "",
-                "videoName": "",
-                "pdfUrl": "",
-                "pdfName": "",
-                "fileName": ""
+                "id": "node_1787819937964_238",
+                "title": "imageS 2",
+                "kind": "child",
+                "contentType": "image",
+                "content": {
+                  "url": "",
+                  "fileName": "Screenshot_2025-12-02-16-53-01-83_40deb401b9ffe8e1df2f1cc5ba480b12.jpg"
+                }
+              },
+              {
+                "id": "node_1787819937964_473",
+                "title": "imageS 3",
+                "kind": "child",
+                "contentType": "image",
+                "content": {
+                  "url": "",
+                  "fileName": "WhatsApp Image 2026-04-30 at 14.44.52 (1).jpeg"
+                }
+              },
+              {
+                "id": "node_1787819937964_710",
+                "title": "imageS 4",
+                "kind": "child",
+                "contentType": "image",
+                "content": {
+                  "url": "",
+                  "fileName": "WhatsApp Image 2026-04-30 at 14.44.52.jpeg"
+                }
               }
             ]
           }
-        ],
-        "images": [],
-        "image": "",
-        "imageName": "",
-        "about": "",
-        "phone": "",
-        "email": ""
+        ]
+      },
+      {
+        "id": "node_1787818491932_738",
+        "title": "PDF",
+        "kind": "parent",
+        "children": [
+          {
+            "id": "node_1787818597772_942",
+            "title": "PDF 1",
+            "kind": "child",
+            "contentType": "pdf",
+            "content": {
+              "url": "",
+              "fileName": "Gmail - Request for Guidance_ Large-Scale Plot Mapping with Search & Navigation Features.pdf"
+            }
+          },
+          {
+            "id": "node_1787818597772_634",
+            "title": "PDF 2",
+            "kind": "child",
+            "contentType": "pdf",
+            "content": {
+              "url": "",
+              "fileName": "JD_Build91_SDE AI Intern.pdf"
+            }
+          },
+          {
+            "id": "node_1787818597772_984",
+            "title": "PDF 3",
+            "kind": "child",
+            "contentType": "pdf",
+            "content": {
+              "url": "",
+              "fileName": "Numbering mistakes on layout _ #86d20yad9.pdf"
+            }
+          }
+        ]
       }
     ]
   }

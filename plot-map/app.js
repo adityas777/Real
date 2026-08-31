@@ -147,6 +147,7 @@ const state = {
   savedView: null,                      // camera view stored in the alignment (WYSIWYG); null ⇒ auto-frame
   adminMode: 'look',                    // 'look' = drag rotates view; 'move' = drag repositions layout
   selectedCategory: 'ALL', autoPan: true, lastUserTouch: Date.now(), audioCtx: null, audioPlaying: false,
+  landmarkPanRange: null, autoPanDir: 1,  // when a category is selected, idle auto-pan sweeps between its leftmost/rightmost landmark instead of spinning 360°
   menuConfig: {
     tree: []
   },
@@ -767,9 +768,28 @@ function renderLoop() {
   if (!three) return;
   if (plotsDirty) { plotsDirty = false; rebuildPlots(); }
 
-  // Slow motion auto-pan (left to right) when enabled in client view (!state.admin) and user is idle
+  // Slow motion auto-pan when enabled in client view (!state.admin) and user is idle.
+  // With no category selected: free 360° spin (unchanged). With a category selected:
+  // ping-pong between that category's rightmost and leftmost landmark instead
+  // (increasing lon sweeps leftward — the pano is viewed from inside, so it's mirrored).
   if (state.autoPan && !state.admin && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
-    state.view.lon = (state.view.lon + 0.00035) % TAU;
+    const range = state.landmarkPanRange;
+    if (range) {
+      // Re-express the current lon as the equivalent value nearest the range so the
+      // comparison below is correct regardless of which ±360° "lap" it's stored at.
+      const lo = range.sweepMin, hi = range.sweepMax;
+      const mid = (lo + hi) / 2;
+      let lon = state.view.lon;
+      while (lon - mid > Math.PI) lon -= TAU;
+      while (mid - lon > Math.PI) lon += TAU;
+
+      lon += 0.00035 * (state.autoPanDir || 1);
+      if (lon >= hi) { lon = hi; state.autoPanDir = -1; }
+      else if (lon <= lo) { lon = lo; state.autoPanDir = 1; }
+      state.view.lon = lon;
+    } else {
+      state.view.lon = (state.view.lon + 0.00035) % TAU;
+    }
   }
 
   updateCamera();
@@ -781,6 +801,17 @@ function renderLoop() {
 }
 function updateCamera() {
   const cam = three.camera;
+  // Hard limit: while a landmark category is selected in the client, the view can
+  // never leave that category's own arc — enforced here (the single place the view
+  // is consumed) so no path out of it exists: auto-pan, the fly-in, or a drag.
+  const range = state.landmarkPanRange;
+  if (range && !state.admin) {
+    const mid = (range.sweepMin + range.sweepMax) / 2;
+    let lon = state.view.lon;
+    while (lon - mid > Math.PI) lon -= TAU;
+    while (mid - lon > Math.PI) lon += TAU;
+    state.view.lon = Math.min(range.sweepMax, Math.max(range.sweepMin, lon));
+  }
   if (cam.fov !== state.view.fov) { cam.fov = state.view.fov; cam.updateProjectionMatrix(); }
   // Drive the camera by yaw/pitch Euler angles (YXZ) rather than lookAt: lookAt
   // gimbal-locks at the poles (its up-vector goes parallel to the view dir), but
@@ -896,6 +927,7 @@ function wireViewControls() {
         state.autoPan = true;
         applyCategoryFilter('ALL');
       } else if (act === 'aerial') {
+        state.landmarkPanRange = null;   // leaving Landmarks — release the category arc
         computeHome();
         animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
         state.autoPan = true;
@@ -984,6 +1016,70 @@ function isLandmarkMatchCategory(lm, cat) {
   return false;
 }
 
+// Bounding arc (in state.view.lon's radian convention) of a set of directions,
+// found via the largest-empty-gap method so it's correct even when the landmarks
+// straddle the ±180° seam. Also returns the actual direction vector at each end
+// (not just its lon) so the camera can be framed on that exact landmark, lat
+// included, rather than an averaged blend. Returns null for an empty set.
+//
+// Fit-or-sweep decision: if the arc (plus edge padding) is narrow enough to sit
+// inside one comfortable frame, there's nothing to reveal by panning — the camera
+// frames the whole group and holds (fits:true, gentle idle sway only). Only when
+// the arc genuinely can't fit in a single frame does the camera sweep across it
+// (fits:false), and that sweep is sized to the real extent — no artificial minimum
+// stretching it wider than the landmarks actually are.
+const LANDMARK_EDGE_PAD = 8 * Math.PI / 180;    // padding each side, in both the fit check and the sweep bounds
+const LANDMARK_FIT_FOV_CAP = FOV_MAX;           // widest FOV willing to zoom out to in order to fit everyone in one frame — reuses the app's own accepted max (past it, the camera fisheyes hard)
+const LANDMARK_FIT_FOV_FLOOR = 55;              // deg — floor so a single/tight-cluster category doesn't zoom in uncomfortably close
+const LANDMARK_SWEEP_FOV = 72;                  // deg — fixed viewing FOV used while sweeping across a category that doesn't fit
+const LANDMARK_SWAY_HALF = 3.5 * Math.PI / 180; // idle amplitude when a category already fits (gentle sway instead of a hard sweep)
+
+function computeLandmarkPanRange(dirs) {
+  if (!dirs.length) return null;
+  const pts = dirs.map((d) => ({ lon: Math.atan2(-d.x, d.z), dir: d }));
+  let minLon, maxLon, minDir, maxDir;
+  if (pts.length === 1) {
+    minLon = maxLon = pts[0].lon;
+    minDir = maxDir = pts[0].dir;
+  } else {
+    pts.sort((a, b) => a.lon - b.lon);
+    const n = pts.length;
+    let maxGap = -1, gapIdx = 0;
+    for (let i = 0; i < n; i++) {
+      const cur = pts[i].lon;
+      const next = i === n - 1 ? pts[0].lon + TAU : pts[i + 1].lon;
+      const gap = next - cur;
+      if (gap > maxGap) { maxGap = gap; gapIdx = i; }
+    }
+    // The arc is everything OUTSIDE the largest gap — walk it starting right after
+    // the gap, unwrapping each step forward so min/max are directly comparable.
+    const startIdx = (gapIdx + 1) % n;
+    minLon = pts[startIdx].lon;
+    minDir = pts[startIdx].dir;
+    let prev = minLon; maxLon = minLon; maxDir = minDir;
+    for (let k = 1; k < n; k++) {
+      const p = pts[(startIdx + k) % n];
+      let v = p.lon;
+      while (v < prev) v += TAU;
+      maxLon = v;
+      maxDir = p.dir;
+      prev = v;
+    }
+  }
+
+  const desiredFov = (maxLon - minLon) * 180 / Math.PI + 2 * (LANDMARK_EDGE_PAD * 180 / Math.PI);
+  if (desiredFov <= LANDMARK_FIT_FOV_CAP) {
+    return { fits: true, fovDeg: Math.max(LANDMARK_FIT_FOV_FLOOR, Math.min(LANDMARK_FIT_FOV_CAP, desiredFov)), minLon, maxLon, minDir, maxDir };
+  }
+  return { fits: false, sweepMin: minLon - LANDMARK_EDGE_PAD, sweepMax: maxLon + LANDMARK_EDGE_PAD, minLon, maxLon, minDir, maxDir };
+}
+
+function meanDirection(dirs) {
+  const mean = new THREE.Vector3();
+  dirs.forEach((v) => mean.add(v));
+  return mean.divideScalar(dirs.length).normalize();
+}
+
 function applyCategoryFilter(cat) {
   state.selectedCategory = cat || 'ALL';
   if (els.catNav) {
@@ -1045,16 +1141,41 @@ function applyCategoryFilter(cat) {
       }
     });
 
-    if (validDirs.length > 0) {
-      const mean = new THREE.Vector3();
-      validDirs.forEach((v) => mean.add(v));
-      mean.divideScalar(validDirs.length).normalize();
+    // A specific category (not ALL) constrains the view to that category's own arc
+    // instead of a free 360° spin (see renderLoop/updateCamera). If everything matched
+    // already fits in one frame, the camera frames the group and holds (gentle sway
+    // only) — no sweep. Only a category that genuinely can't fit in one frame sweeps,
+    // sized to its real leftmost/rightmost extent.
+    const panInfo = state.selectedCategory !== 'ALL' ? computeLandmarkPanRange(validDirs) : null;
+
+    if (panInfo && panInfo.fits) {
+      const mean = meanDirection(validDirs);
+      const targetLon = Math.atan2(-mean.x, mean.z);
+      const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
+      state.landmarkPanRange = { sweepMin: targetLon - LANDMARK_SWAY_HALF, sweepMax: targetLon + LANDMARK_SWAY_HALF };
+      animateCameraTo(targetLon, targetLat, panInfo.fovDeg);
+      state.autoPanDir = 1;
+    } else if (panInfo) {
+      // Start on the RIGHTMOST landmark and sweep left. The pano sphere is viewed from
+      // the inside (mirrored texture), so on screen a SMALLER lon is further right —
+      // hence minLon is the visual right edge and increasing lon sweeps leftward.
+      state.landmarkPanRange = { sweepMin: panInfo.sweepMin, sweepMax: panInfo.sweepMax };
+      const targetLon = panInfo.minLon;
+      const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(panInfo.minDir.y, -1, 1)));
+      animateCameraTo(targetLon, targetLat, LANDMARK_SWEEP_FOV);
+      state.autoPanDir = 1; // rightmost → leftmost first
+    } else if (validDirs.length > 0) {
+      state.landmarkPanRange = null;
+      const mean = meanDirection(validDirs);
       const targetLon = Math.atan2(-mean.x, mean.z);
       const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
       animateCameraTo(targetLon, targetLat, 72);
     }
   } else if (state.selectedCategory !== 'ALL') {
+    state.landmarkPanRange = null;
     showNotice(`No <strong>${esc(state.selectedCategory)}</strong> landmarks saved in this project yet.`);
+  } else {
+    state.landmarkPanRange = null;
   }
 }
 
@@ -3279,14 +3400,11 @@ function scheduleHideCard() { clearTimeout(cardHideTimer); cardHideTimer = setTi
 let lbLastFocused = null;
 function openLightbox(src, caption) {
   lbLastFocused = document.activeElement;
-  els.lightboxImg.src = src; els.lightboxImg.alt = (caption || 'Amenity') + ' render';
-  if (els.lightboxCap) els.lightboxCap.textContent = caption || '';
-  els.lightbox.classList.add('open'); els.lightbox.setAttribute('aria-hidden', 'false');
-  document.addEventListener('keydown', onLightboxKey); setTimeout(() => els.lightboxClose?.focus(), 0);
+  openClientGalleryModal([{ url: src, name: caption || '' }], 0);
 }
 function closeLightbox() {
-  els.lightbox.classList.remove('open'); els.lightbox.setAttribute('aria-hidden', 'true'); els.lightboxImg.removeAttribute('src');
-  document.removeEventListener('keydown', onLightboxKey); lbLastFocused?.focus?.();
+  closeClientGalleryModal();
+  lbLastFocused?.focus?.();
 }
 function onLightboxKey(e) { if (e.key === 'Escape') closeLightbox(); }
 
@@ -3517,7 +3635,7 @@ function renderClientSidebar() {
           state.menuNavStack.push(node);
           renderClientSidebar();
         } else {
-          openNodeContent(node);
+          openNodeContent(node, nodeInfo);
         }
       });
     });
@@ -3542,6 +3660,7 @@ function wireClientSidebarButtons() {
         state.autoPan = true;
         applyCategoryFilter('ALL');
       } else if (act === 'aerial') {
+        state.landmarkPanRange = null;   // leaving Landmarks — release the category arc
         computeHome();
         animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
         state.autoPan = true;
@@ -3554,15 +3673,16 @@ function wireClientSidebarButtons() {
           state.menuNavStack = [node];
           renderClientSidebar();
         } else {
-          openNodeContent(node);
+          openNodeContent(node, nodeInfo);
         }
       }
     });
   });
 }
 
-function openNodeContent(node) {
+function openNodeContent(node, nodeInfo = null) {
   if (!node) return;
+  if (!nodeInfo) nodeInfo = findNodeInfo(node.id);
   if (node.kind === 'contact') {
     openClientContactModal(node.contact || {});
     return;
@@ -3576,11 +3696,11 @@ function openNodeContent(node) {
     } else if (cType === 'pdf') {
       openClientBrochureModal(content);
     } else if (cType === 'gallery') {
-      openClientGalleryModal(content);
+      openClientGalleryModal(content, 0);
     } else if (cType === 'tour') {
       openClientTourModal(node.title || 'Virtual Tour', content);
     } else if (cType === 'image') {
-      openClientImageModal(node.title || 'Image Viewer', content);
+      openClientFolderImageModal(node, nodeInfo);
     } else if (cType === 'link') {
       const url = content.url || '';
       if (url) {
@@ -3654,6 +3774,57 @@ function openClientTourModal(title, config) {
   }
 }
 
+function openClientFolderImageModal(node, nodeInfo = null) {
+  if (!nodeInfo && node) nodeInfo = findNodeInfo(node.id);
+
+  let imageList = [];
+  let activeIdx = 0;
+
+  if (nodeInfo && Array.isArray(nodeInfo.list)) {
+    const imgNodes = nodeInfo.list.filter(n => n && n.kind === 'child' && n.contentType === 'image');
+    if (imgNodes.length > 0) {
+      imageList = imgNodes.map((n) => {
+        const c = n.content || {};
+        let src = '';
+        if (c.fileBlob) src = URL.createObjectURL(c.fileBlob);
+        else if (c.fileName) src = assetUrl(c.fileName);
+        else if (c.url) src = c.url;
+        return {
+          id: n.id,
+          name: n.title || (c.fileName ? c.fileName.replace(/\.[^/.]+$/, '') : 'Image'),
+          url: src,
+          blob: c.fileBlob || null,
+          fileName: c.fileName || ''
+        };
+      });
+      activeIdx = imgNodes.findIndex(n => n.id === node.id);
+      if (activeIdx < 0) activeIdx = 0;
+    }
+  }
+
+  if (!imageList.length && node) {
+    const c = node.content || {};
+    let src = '';
+    if (c.fileBlob) src = URL.createObjectURL(c.fileBlob);
+    else if (c.fileName) src = assetUrl(c.fileName);
+    else if (c.url) src = c.url;
+    if (!src) {
+      showNotice(`No image uploaded or URL configured for "${node.title || 'Image'}".`);
+      return;
+    }
+    imageList = [{
+      id: node.id,
+      name: node.title || (c.fileName ? c.fileName.replace(/\.[^/.]+$/, '') : 'Image'),
+      url: src,
+      blob: c.fileBlob || null,
+      fileName: c.fileName || ''
+    }];
+    activeIdx = 0;
+  }
+
+  openClientGalleryModal({ images: imageList }, activeIdx);
+}
+
 function openClientImageModal(title, config) {
   let imgSrc = config.fileBlob ? URL.createObjectURL(config.fileBlob) : null;
   if (!imgSrc && config.fileName) {
@@ -3663,25 +3834,67 @@ function openClientImageModal(title, config) {
     imgSrc = config.url;
   }
   if (imgSrc) {
-    openLightbox(imgSrc, title);
+    openClientGalleryModal([{ url: imgSrc, name: title }], 0);
   } else {
     showNotice(`No image uploaded or URL configured for "${title}".`);
   }
 }
 
-function openClientGalleryModal(content) {
+function openClientGalleryModal(content, startIndex = 0) {
   if (!els.clientGalleryModal) return;
-  const images = content.images || [];
-  if (!images.length) {
+  let rawImages = [];
+  if (Array.isArray(content)) {
+    rawImages = content;
+  } else if (content && Array.isArray(content.images)) {
+    rawImages = content.images;
+  } else if (content && typeof content === 'object') {
+    rawImages = [content];
+  }
+
+  if (!rawImages.length) {
     showNotice('No gallery photos uploaded yet.');
     return;
   }
-  state.currentGalleryImages = images;
-  currentGalleryIdx = 0;
+
+  state.currentGalleryImages = rawImages.map((img, i) => {
+    if (typeof img === 'string') {
+      const isUrl = /^https?:\/\//i.test(img) || img.startsWith('blob:') || img.startsWith('data:');
+      return {
+        name: `Photo ${i + 1}`,
+        url: isUrl ? img : assetUrl(img)
+      };
+    }
+    let src = img.url || '';
+    if (img.blob) {
+      src = URL.createObjectURL(img.blob);
+    } else if (img.fileBlob) {
+      src = URL.createObjectURL(img.fileBlob);
+    } else if (img.fileName) {
+      src = assetUrl(img.fileName);
+    } else if (!src && img.name && !img.name.startsWith('http')) {
+      src = assetUrl(img.name);
+    }
+    const displayName = img.name || img.title || (img.fileName ? img.fileName.replace(/\.[^/.]+$/, '') : `Photo ${i + 1}`);
+    return {
+      ...img,
+      name: displayName,
+      url: src
+    };
+  }).filter(img => Boolean(img.url));
+
+  if (!state.currentGalleryImages.length) {
+    showNotice('No valid image URLs or files found.');
+    return;
+  }
+
+  currentGalleryIdx = (startIndex >= 0 && startIndex < state.currentGalleryImages.length) ? startIndex : 0;
   updateGallerySlide(currentGalleryIdx);
 
-  els.clientGalleryModal.classList.add('open');
+  els.clientGalleryModal.style.display = 'flex';
+  els.clientGalleryModal.hidden = false;
   els.clientGalleryModal.setAttribute('aria-hidden', 'false');
+  void els.clientGalleryModal.offsetWidth;
+  els.clientGalleryModal.classList.add('open');
 }
 
 let currentGalleryIdx = 0;
@@ -3691,24 +3904,58 @@ function updateGallerySlide(idx) {
 
   currentGalleryIdx = (idx + images.length) % images.length;
   const img = images[currentGalleryIdx];
-  const src = img.blob ? URL.createObjectURL(img.blob) : assetUrl(img.url || img.name);
+  const src = img.url || '';
 
   const activeImg = $('galleryActiveImg');
   const imgName = $('galleryImgName');
   const imgCounter = $('galleryImgCounter');
   const prevBtn = $('galleryPrevBtn');
   const nextBtn = $('galleryNextBtn');
+  const captionBar = $('galleryCaptionBar');
 
   if (activeImg) {
-    activeImg.style.opacity = '0.4';
-    activeImg.src = src;
-    setTimeout(() => { activeImg.style.opacity = '1'; }, 50);
+    activeImg.style.opacity = '0.3';
+    activeImg.style.transform = 'scale(0.985)';
+    const temp = new Image();
+    temp.onload = () => {
+      activeImg.src = src;
+      activeImg.style.opacity = '1';
+      activeImg.style.transform = 'scale(1)';
+    };
+    temp.onerror = () => {
+      activeImg.src = src;
+      activeImg.style.opacity = '1';
+      activeImg.style.transform = 'scale(1)';
+    };
+    temp.src = src;
   }
-  if (imgName) imgName.textContent = img.name || `Photo ${currentGalleryIdx + 1}`;
-  if (imgCounter) imgCounter.textContent = `(${currentGalleryIdx + 1} / ${images.length})`;
+
+  if (imgName) {
+    imgName.textContent = img.name || '';
+  }
+  if (imgCounter) {
+    imgCounter.textContent = images.length > 1 ? `(${currentGalleryIdx + 1} / ${images.length})` : '';
+  }
+  if (captionBar) {
+    captionBar.style.display = (!img.name && images.length <= 1) ? 'none' : 'flex';
+  }
 
   if (prevBtn) prevBtn.style.display = images.length > 1 ? 'flex' : 'none';
   if (nextBtn) nextBtn.style.display = images.length > 1 ? 'flex' : 'none';
+}
+
+function closeClientGalleryModal() {
+  if (!els.clientGalleryModal) return;
+  els.clientGalleryModal.classList.remove('open');
+  els.clientGalleryModal.setAttribute('aria-hidden', 'true');
+  setTimeout(() => {
+    if (!els.clientGalleryModal.classList.contains('open')) {
+      els.clientGalleryModal.style.display = 'none';
+      els.clientGalleryModal.hidden = true;
+      const activeImg = $('galleryActiveImg');
+      if (activeImg) activeImg.removeAttribute('src');
+    }
+  }, 220);
 }
 
 function openClientBrochureModal(b = {}) {
@@ -3896,8 +4143,7 @@ function renderAdminMenuTree() {
       let inlineTag = '';
       let tagClass = 'tree-inline-tag ';
       if (isFolder) {
-        inlineTag = `${childCount} item${childCount !== 1 ? 's' : ''}`;
-        tagClass += 'tag-folder';
+        inlineTag = '';
       } else if (isContact) {
         inlineTag = 'Contact Card';
         tagClass += 'tag-contact';
@@ -3907,36 +4153,58 @@ function renderAdminMenuTree() {
       }
 
       let nodeHtml = `
-        <div class="${rowClass}" data-node-id="${esc(node.id)}" style="margin-left:${indent}px; ${depth > 1 ? 'border-left:2px solid rgba(250,204,21,0.35); padding-left:8px;' : 'padding-left:8px;'}">
-          <div style="display:flex; align-items:center; gap:6px; min-width:0; flex:1;">
+        <div class="${rowClass}" data-node-id="${esc(node.id)}" data-is-folder="${isFolder ? '1' : '0'}" draggable="true" style="margin-left:${indent}px; ${depth > 1 ? 'border-left:2px solid rgba(250,204,21,0.35); padding-left:8px;' : 'padding-left:8px;'} display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:nowrap; box-sizing:border-box;">
+          <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1; overflow:hidden;">
+            <span class="tree-drag-handle">⠿</span>
             ${isFolder ? `
               <span class="tree-chevron ${isCollapsed ? 'is-collapsed' : ''}" data-folder-id="${esc(node.id)}" title="${isCollapsed ? 'Expand folder' : 'Collapse folder'}">▼</span>
-            ` : '<span style="width:12px; flex-shrink:0;"></span>'}
+            ` : '<span style="width:14px; display:inline-block; flex-shrink:0;"></span>'}
             <span style="font-size:14px; flex-shrink:0;">${icon}</span>
-            <span class="tree-title-text" title="${esc(title)}">${esc(title)}</span>
-            <span class="${tagClass}">${esc(inlineTag)}</span>
+            <span class="tree-title-text" data-node-id="${esc(node.id)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:text;" title="Double-click to rename">${esc(title)}</span>
+            ${inlineTag ? `<span class="${tagClass}">${esc(inlineTag)}</span>` : ''}
           </div>
 
-          <!-- Clean Overflow Trigger (⋯) -->
-          <div style="position:relative; flex-shrink:0; margin-left:auto;">
-            <button type="button" class="tree-overflow-trigger" data-node-id="${esc(node.id)}" title="More Actions">⋯</button>
-            <div class="tree-overflow-menu" id="treeOverflow_${esc(node.id)}" hidden>
+          <div class="tree-actions-wrapper" style="position:relative; flex-shrink:0; margin-left:auto; display:flex; align-items:center;">
+            <button type="button" class="tree-overflow-trigger" data-node-id="${esc(node.id)}" title="Actions">＋</button>
+            <div class="tree-overflow-menu" id="treeOverflow_${esc(node.id)}" style="position:absolute; right:0; top:calc(100% + 3px); z-index:99999; background:#090d16; border:1px solid rgba(250,204,21,0.28); border-radius:6px; box-shadow:0 8px 24px rgba(0,0,0,0.9); padding:3px; flex-direction:column; gap:2px; min-width:140px; width:max-content; display:none;">
               ${canAddChild ? `
-                <button type="button" class="tree-overflow-item is-add-inside tree-btn-add-inside" data-parent-id="${esc(node.id)}">
-                  <span>＋</span> <span>Add item inside</span>
+                <!-- Add Inside: Accordion Trigger -->
+                <button type="button" class="tree-overflow-item is-add-inside tree-add-accordion-trigger" data-node-id="${esc(node.id)}" title="Add item inside this folder" style="display:flex; align-items:center; justify-content:space-between; gap:6px; padding:4px 8px; font-size:11px; font-weight:600; color:#facc15; background:rgba(250,204,21,0.08); border:none; border-radius:4px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                  <span style="display:flex; align-items:center; gap:5px;"><span style="font-size:11px;">＋</span><span>Add Inside</span></span>
+                  <span class="tree-accordion-caret" id="caret_${esc(node.id)}" style="font-size:9px; transition:transform 0.15s ease;">▾</span>
                 </button>
+                
+                <!-- Inline Expandable Options (Expands below inside same box) -->
+                <div class="tree-add-inline-list" id="inlineAdd_${esc(node.id)}" style="display:none; flex-direction:column; gap:2px; margin:1px 0 1px 6px; padding-left:6px; border-left:1.5px solid rgba(250,204,21,0.3);">
+                  <!-- Folder button -->
+                  <button type="button" class="tree-add-type-btn tree-btn-choose-folder" data-parent-id="${esc(node.id)}" data-kind="parent" id="btnChooseFolder_${esc(node.id)}" style="display:flex; align-items:center; gap:6px; padding:3px 6px; font-size:10.5px; font-weight:500; color:#e2e8f0; background:rgba(255,255,255,0.04); border:none; border-radius:3px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                    <span style="font-size:11px;">📁</span>
+                    <span>Folder</span>
+                  </button>
+
+                  <!-- Inline Folder Name Input (Opens inside dropdown on clicking Folder) -->
+                  <div class="tree-folder-inline-create" id="folderInlineCreate_${esc(node.id)}" style="display:none; align-items:center; gap:3px; padding:2px 3px; background:rgba(250,204,21,0.06); border:1px solid rgba(250,204,21,0.3); border-radius:4px; margin:1px 0;">
+                    <span style="font-size:11px;">📁</span>
+                    <input type="text" class="tree-new-folder-input" id="folderInput_${esc(node.id)}" placeholder="Folder name..." style="font-size:10.5px; font-weight:600; color:#ffffff; background:#090d16; border:1px solid rgba(255,255,255,0.25); border-radius:3px; padding:2px 5px; height:20px; outline:none; flex:1; min-width:70px;" />
+                    <button type="button" class="tree-btn-folder-ok" data-parent-id="${esc(node.id)}" style="font-size:10px; font-weight:700; color:#0f172a; background:var(--gold,#facc15); border:none; border-radius:3px; padding:2px 6px; height:20px; cursor:pointer;" title="Create folder">OK</button>
+                    <button type="button" class="tree-btn-folder-cancel" data-parent-id="${esc(node.id)}" style="font-size:10px; color:#94a3b8; background:transparent; border:none; padding:2px 3px; cursor:pointer;" title="Cancel">✕</button>
+                  </div>
+
+                  <button type="button" class="tree-add-type-btn" data-parent-id="${esc(node.id)}" data-kind="child" style="display:flex; align-items:center; gap:6px; padding:3px 6px; font-size:10.5px; font-weight:500; color:#e2e8f0; background:rgba(255,255,255,0.04); border:none; border-radius:3px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                    <span style="font-size:11px;">📄</span>
+                    <span>Content Item</span>
+                  </button>
+                  <button type="button" class="tree-add-type-btn" data-parent-id="${esc(node.id)}" data-kind="contact" style="display:flex; align-items:center; gap:6px; padding:3px 6px; font-size:10.5px; font-weight:500; color:#e2e8f0; background:rgba(255,255,255,0.04); border:none; border-radius:3px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                    <span style="font-size:11px;">📞</span>
+                    <span>Contact Card</span>
+                  </button>
+                </div>
               ` : ''}
-              <button type="button" class="tree-overflow-item tree-act-up" data-node-id="${esc(node.id)}" ${index === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
-                <span>↑</span> <span>Move Up</span>
+              <button type="button" class="tree-overflow-item tree-act-edit" data-node-id="${esc(node.id)}" title="Rename item" style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:11px; font-weight:500; color:#e2e8f0; background:transparent; border:none; border-radius:4px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                <span>✏️</span> <span>Rename</span>
               </button>
-              <button type="button" class="tree-overflow-item tree-act-down" data-node-id="${esc(node.id)}" ${index === totalSiblings - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ''}>
-                <span>↓</span> <span>Move Down</span>
-              </button>
-              <button type="button" class="tree-overflow-item tree-act-edit" data-node-id="${esc(node.id)}">
-                <span>✏️</span> <span>Edit Item</span>
-              </button>
-              <button type="button" class="tree-overflow-item is-danger tree-act-del" data-node-id="${esc(node.id)}">
-                <span>🗑️</span> <span>Delete Item</span>
+              <button type="button" class="tree-overflow-item is-danger tree-act-del" data-node-id="${esc(node.id)}" title="Delete Item" style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:11px; font-weight:500; color:#fb7185; background:transparent; border:none; border-radius:4px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                <span>🗑️</span> <span>Delete</span>
               </button>
             </div>
           </div>
@@ -3959,6 +4227,59 @@ function renderAdminMenuTree() {
 
   html += `</div>`;
   treeEl.innerHTML = html;
+
+  // Inline Rename Helper function
+  const startInlineRename = (nodeId) => {
+    treeEl.querySelectorAll('.tree-overflow-menu').forEach(m => {
+      m.classList.remove('is-open');
+      m.style.display = 'none';
+    });
+    treeEl.querySelectorAll('.tree-add-inline-list').forEach(m => m.style.display = 'none');
+
+    const span = treeEl.querySelector(`.tree-title-text[data-node-id="${nodeId}"]`);
+    if (!span || span.tagName === 'INPUT') return;
+
+    const currentTitle = span.textContent.trim();
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'tree-title-input';
+    input.value = currentTitle;
+    input.dataset.nodeId = nodeId;
+
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let finished = false;
+    const finishRename = (save) => {
+      if (finished) return;
+      finished = true;
+      const newTitle = input.value.trim();
+      if (save && newTitle && newTitle !== currentTitle) {
+        updateNode(nodeId, { title: newTitle });
+        onAlignmentChanged();
+        renderClientSidebar();
+      }
+      renderAdminMenuTree();
+    };
+
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        finishRename(true);
+      } else if (e.key === 'Escape') {
+        finishRename(false);
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      finishRename(true);
+    });
+
+    input.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  };
 
   // Header & Empty State Add buttons
   const triggerAddRoot = (e) => {
@@ -3984,64 +4305,283 @@ function renderAdminMenuTree() {
     });
   });
 
-  // Add Inside Folder (now inside ⋯ overflow menu)
-  treeEl.querySelectorAll('.tree-btn-add-inside').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
+  // Double-click on item name to rename inline
+  treeEl.querySelectorAll('.tree-title-text').forEach((span) => {
+    span.addEventListener('dblclick', (e) => {
       e.stopPropagation();
-      treeEl.hidden = true;
-      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
-      const parentId = btn.dataset.parentId;
-      openNodeBuilderModal(null, parentId);
+      const nodeId = span.dataset.nodeId;
+      if (nodeId) startInlineRename(nodeId);
     });
   });
 
-  // Overflow Menu (⋯) Toggles & Actions
+  // Add Inside — Accordion toggle (expands options downwards in the same box)
+  treeEl.querySelectorAll('.tree-add-accordion-trigger').forEach((trigger) => {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nodeId = trigger.dataset.nodeId;
+      const inlineList = $(`inlineAdd_${nodeId}`);
+      const caret = $(`caret_${nodeId}`);
+      if (!inlineList) return;
+      const isVisible = inlineList.style.display === 'flex';
+      inlineList.style.display = isVisible ? 'none' : 'flex';
+      if (caret) caret.style.transform = isVisible ? 'rotate(0deg)' : 'rotate(180deg)';
+    });
+  });
+
+  // Inline Folder Create Handler (Prompt for name directly inside dropdown)
+  const handleInlineFolderCreate = (parentId) => {
+    const input = $(`folderInput_${parentId}`);
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) {
+      input.focus();
+      return;
+    }
+    // Add folder node directly
+    addNode(parentId, { kind: 'parent', title: name, children: [] });
+    state.collapsedFolders.delete(parentId); // Expand folder to see new child
+    onAlignmentChanged();
+    renderClientSidebar();
+    renderAdminMenuTree();
+  };
+
+  // Add Inside — Folder button clicked: Reveal inline name input inside dropdown
+  treeEl.querySelectorAll('.tree-btn-choose-folder').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const parentId = btn.dataset.parentId;
+      btn.style.display = 'none';
+      const form = $(`folderInlineCreate_${parentId}`);
+      if (form) {
+        form.style.display = 'flex';
+        const input = $(`folderInput_${parentId}`);
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+      }
+    });
+  });
+
+  // Inline Folder Create — OK button
+  treeEl.querySelectorAll('.tree-btn-folder-ok').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const parentId = btn.dataset.parentId;
+      handleInlineFolderCreate(parentId);
+    });
+  });
+
+  // Inline Folder Create — Cancel button
+  treeEl.querySelectorAll('.tree-btn-folder-cancel').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const parentId = btn.dataset.parentId;
+      const form = $(`folderInlineCreate_${parentId}`);
+      const chooseBtn = $(`btnChooseFolder_${parentId}`);
+      if (form) form.style.display = 'none';
+      if (chooseBtn) chooseBtn.style.display = 'flex';
+    });
+  });
+
+  // Inline Folder Create — Keydown (Enter / Escape)
+  treeEl.querySelectorAll('.tree-new-folder-input').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      const parentId = input.id.replace('folderInput_', '');
+      if (e.key === 'Enter') {
+        handleInlineFolderCreate(parentId);
+      } else if (e.key === 'Escape') {
+        const form = $(`folderInlineCreate_${parentId}`);
+        const chooseBtn = $(`btnChooseFolder_${parentId}`);
+        if (form) form.style.display = 'none';
+        if (chooseBtn) chooseBtn.style.display = 'flex';
+      }
+    });
+    input.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  // Add Inside — Content Item & Contact Card choice buttons
+  treeEl.querySelectorAll('.tree-add-type-btn:not(.tree-btn-choose-folder)').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const parentId = btn.dataset.parentId;
+      const kind = btn.dataset.kind;
+      // Close everything
+      treeEl.querySelectorAll('.tree-overflow-menu').forEach(m => {
+        m.classList.remove('is-open');
+        m.style.display = 'none';
+      });
+      treeEl.querySelectorAll('.tree-add-inline-list').forEach(m => m.style.display = 'none');
+      $('projMenuBuilderDropdown').hidden = true;
+      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
+      // Open modal pre-set to chosen kind, skipping step 1
+      openNodeBuilderModal(null, parentId, kind);
+    });
+  });
+
+  // Overflow Menu (+) Toggles & Actions
   treeEl.querySelectorAll('.tree-overflow-trigger').forEach((trig) => {
     trig.addEventListener('click', (e) => {
       e.stopPropagation();
       const nodeId = trig.dataset.nodeId;
       const menu = $(`treeOverflow_${nodeId}`);
       if (!menu) return;
-      const isHidden = menu.hidden;
-      treeEl.querySelectorAll('.tree-overflow-menu').forEach((m) => m.hidden = true);
-      menu.hidden = !isHidden;
-    });
-  });
+      const isCurrentlyOpen = menu.classList.contains('is-open') || menu.style.display === 'flex';
 
-  // Reorder Up
-  treeEl.querySelectorAll('.tree-act-up:not([disabled])').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.nodeId;
-      if (moveNode(id, 'up')) {
-        onAlignmentChanged();
-        renderClientSidebar();
-        renderAdminMenuTree();
+      // Close any other open overflow menus
+      treeEl.querySelectorAll('.tree-overflow-menu').forEach(m => {
+        m.classList.remove('is-open');
+        m.style.display = 'none';
+      });
+      treeEl.querySelectorAll('.tree-add-inline-list').forEach(m => m.style.display = 'none');
+
+      if (!isCurrentlyOpen) {
+        menu.classList.add('is-open');
+        menu.style.display = 'flex';
       }
     });
   });
 
-  // Reorder Down
-  treeEl.querySelectorAll('.tree-act-down:not([disabled])').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = btn.dataset.nodeId;
-      if (moveNode(id, 'down')) {
-        onAlignmentChanged();
-        renderClientSidebar();
-        renderAdminMenuTree();
-      }
-    });
-  });
+  // Close all menus when clicking outside
+  const closeAllMenus = (e) => {
+    if (!e.target.closest('.tree-actions-wrapper')) {
+      treeEl.querySelectorAll('.tree-overflow-menu').forEach((m) => {
+        m.classList.remove('is-open');
+        m.style.display = 'none';
+      });
+      treeEl.querySelectorAll('.tree-add-inline-list').forEach((m) => m.style.display = 'none');
+    }
+  };
+  document.removeEventListener('click', closeAllMenus);
+  document.addEventListener('click', closeAllMenus);
 
-  // Edit Node
+  // Rename Node (Inline rename)
   treeEl.querySelectorAll('.tree-act-edit').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      treeEl.hidden = true;
-      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
       const id = btn.dataset.nodeId;
-      openNodeBuilderModal(id);
+      startInlineRename(id);
+    });
+  });
+
+  // ─── Drag and Drop Node Reordering & Relocation ─────────────────
+  let draggedNodeId = null;
+
+  const isDescendantOf = (checkId, ancestorId) => {
+    const ancestorInfo = findNodeInfo(ancestorId);
+    if (!ancestorInfo || ancestorInfo.node.kind !== 'parent') return false;
+    let found = false;
+    const scan = (children) => {
+      if (!Array.isArray(children)) return;
+      for (const child of children) {
+        if (child.id === checkId) {
+          found = true;
+          return;
+        }
+        if (child.kind === 'parent' && child.children) {
+          scan(child.children);
+        }
+      }
+    };
+    scan(ancestorInfo.node.children);
+    return found;
+  };
+
+  const clearDragIndicators = () => {
+    treeEl.querySelectorAll('.tree-node-row').forEach((row) => {
+      row.classList.remove('is-dragging', 'drag-drop-inside', 'drag-drop-above', 'drag-drop-below');
+    });
+  };
+
+  treeEl.querySelectorAll('.tree-node-row').forEach((row) => {
+    row.addEventListener('dragstart', (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.closest('.tree-actions-wrapper')) {
+        e.preventDefault();
+        return;
+      }
+      draggedNodeId = row.dataset.nodeId;
+      e.dataTransfer.setData('text/plain', draggedNodeId);
+      e.dataTransfer.effectAllowed = 'move';
+      setTimeout(() => row.classList.add('is-dragging'), 0);
+    });
+
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!draggedNodeId || draggedNodeId === row.dataset.nodeId) return;
+
+      if (isDescendantOf(row.dataset.nodeId, draggedNodeId)) return;
+
+      e.dataTransfer.dropEffect = 'move';
+      const rect = row.getBoundingClientRect();
+      const relY = e.clientY - rect.top;
+      const height = rect.height;
+      const isFolder = row.dataset.isFolder === '1';
+
+      row.classList.remove('drag-drop-inside', 'drag-drop-above', 'drag-drop-below');
+
+      if (isFolder && relY > height * 0.25 && relY < height * 0.75) {
+        row.classList.add('drag-drop-inside');
+      } else if (relY < height * 0.5) {
+        row.classList.add('drag-drop-above');
+      } else {
+        row.classList.add('drag-drop-below');
+      }
+    });
+
+    row.addEventListener('dragleave', (e) => {
+      if (!row.contains(e.relatedTarget)) {
+        row.classList.remove('drag-drop-inside', 'drag-drop-above', 'drag-drop-below');
+      }
+    });
+
+    row.addEventListener('dragend', () => {
+      draggedNodeId = null;
+      clearDragIndicators();
+    });
+
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const sourceId = draggedNodeId || e.dataTransfer.getData('text/plain');
+      const targetId = row.dataset.nodeId;
+      const dropType = row.classList.contains('drag-drop-inside') ? 'inside' :
+                       (row.classList.contains('drag-drop-above') ? 'above' : 'below');
+
+      clearDragIndicators();
+      draggedNodeId = null;
+
+      if (!sourceId || !targetId || sourceId === targetId) return;
+      if (isDescendantOf(targetId, sourceId)) {
+        alert('Cannot move a folder inside itself or its own sub-items.');
+        return;
+      }
+
+      const sourceInfo = findNodeInfo(sourceId);
+      const targetInfo = findNodeInfo(targetId);
+      if (!sourceInfo || !targetInfo) return;
+
+      // Remove from current parent list
+      sourceInfo.list.splice(sourceInfo.index, 1);
+
+      if (dropType === 'inside' && targetInfo.node.kind === 'parent') {
+        targetInfo.node.children = targetInfo.node.children || [];
+        targetInfo.node.children.push(sourceInfo.node);
+        state.collapsedFolders.delete(targetId);
+      } else {
+        const newTargetIndex = targetInfo.list.findIndex(n => n.id === targetId);
+        if (newTargetIndex !== -1) {
+          const insertIdx = dropType === 'above' ? newTargetIndex : newTargetIndex + 1;
+          targetInfo.list.splice(insertIdx, 0, sourceInfo.node);
+        } else {
+          targetInfo.list.push(sourceInfo.node);
+        }
+      }
+
+      onAlignmentChanged();
+      renderClientSidebar();
+      renderAdminMenuTree();
     });
   });
 
@@ -4081,19 +4621,23 @@ function countTotalDescendants(node) {
 
 // ─── Guided Wizard Implementation ──────────────────────────────────────────
 
-function openNodeBuilderModal(nodeId = null, defaultParentId = 'root') {
+function openNodeBuilderModal(nodeId = null, defaultParentId = 'root', presetKind = null) {
   activeEditingNodeId = nodeId;
   const info = nodeId ? findNodeInfo(nodeId) : null;
   const node = info ? info.node : null;
   const currentParentId = info ? (info.parent ? info.parent.id : 'root') : defaultParentId;
 
+  // If a presetKind is given (from the sub-menu), skip step 1 and go straight to step 2
+  const resolvedKind = node ? node.kind : (presetKind || 'parent');
+  const startStep = nodeId ? 2 : (presetKind ? 2 : 1);
+
   // Initialize Wizard State
   wizardState = {
-    step: nodeId ? 2 : 1, // Edit mode stays on step 2 (single-screen form)
+    step: startStep,
     mode: nodeId ? 'edit' : 'create',
     editingNodeId: nodeId,
     presetParentId: defaultParentId,
-    kind: node ? node.kind : 'parent',
+    kind: resolvedKind,
     contentType: node?.contentType || 'video',
     sourceType: (node?.content?.fileName || node?.content?.fileBlob) ? 'upload' : 'url',
     selectedPlacement: currentParentId,
@@ -4101,9 +4645,13 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root') {
     url: node?.content?.url || '',
     fileBlob: node?.content?.fileBlob || null,
     fileName: node?.content?.fileName || '',
+    selectedFiles: [],
     contact: Object.assign({ title: '', about: '', phone: '', email: '', image: '', imageName: '', imageBlob: null }, node?.contact || {}),
     galleryImages: (node?.content?.images && Array.isArray(node.content.images)) ? [...node.content.images] : []
   };
+
+  const initialFileInput = $('wizardFileInput');
+  if (initialFileInput) initialFileInput.value = '';
 
   pendingNodeFileBlob = wizardState.fileBlob;
   pendingNodeFileName = wizardState.fileName;
@@ -4140,8 +4688,6 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root') {
   if ($('wizardContactPhone')) $('wizardContactPhone').value = wizardState.contact.phone || '';
   if ($('wizardContactEmail')) $('wizardContactEmail').value = wizardState.contact.email || '';
   if ($('wizardContactImageStatus')) $('wizardContactImageStatus').textContent = wizardState.contact.imageName ? `Selected: ${wizardState.contact.imageName}` : (wizardState.contact.image ? `Current: ${wizardState.contact.image}` : 'No image selected');
-
-  $('wizardFolderBranchPrompt').style.display = 'none';
 
   updateWizardStepUI();
   openCustomModal(els.adminNodeBuilderModal);
@@ -4252,6 +4798,20 @@ function updateWizardStepUI() {
 
     const urlGroup = $('wizardUrlInputGroup');
     const fileGroup = $('wizardFileInputGroup');
+    const fileInput = $('wizardFileInput');
+    const urlInput = $('wizardUrlInput');
+
+    if (wizardState.contentType === 'video') {
+      if (fileInput) fileInput.accept = 'video/mp4,video/webm,video/ogg,video/quicktime,.mp4,.webm,.mov';
+      if (urlInput) urlInput.placeholder = 'https://example.com/video.mp4 or YouTube / Vimeo link';
+    } else if (wizardState.contentType === 'pdf') {
+      if (fileInput) fileInput.accept = 'application/pdf,.pdf';
+      if (urlInput) urlInput.placeholder = 'https://example.com/document.pdf or Google Drive link';
+    } else if (wizardState.contentType === 'image') {
+      if (fileInput) fileInput.accept = 'image/png,image/jpeg,image/jpg,image/webp,image/gif,.png,.jpg,.jpeg,.webp';
+      if (urlInput) urlInput.placeholder = 'https://example.com/image.jpg';
+    }
+
     if (urlGroup) urlGroup.style.display = wizardState.sourceType === 'url' ? 'block' : 'none';
     if (fileGroup) fileGroup.style.display = wizardState.sourceType === 'upload' ? 'block' : 'none';
   }
@@ -4451,7 +5011,19 @@ function initCustomMenuAdminAndClient() {
   document.querySelectorAll('.wizard-type-card').forEach((card) => {
     card.addEventListener('click', (e) => {
       e.stopPropagation();
-      wizardState.contentType = card.dataset.type;
+      const newType = card.dataset.type;
+      if (newType !== wizardState.contentType) {
+        wizardState.contentType = newType;
+        const fileInput = $('wizardFileInput');
+        if (fileInput) fileInput.value = '';
+        wizardState.selectedFiles = [];
+        wizardState.fileBlob = null;
+        wizardState.fileName = '';
+        pendingNodeFileBlob = null;
+        pendingNodeFileName = '';
+        const status = $('wizardFileStatus');
+        if (status) status.textContent = 'No file chosen (you can select one or more files)';
+      }
       updateWizardStepUI();
     });
   });
@@ -4467,14 +5039,56 @@ function initCustomMenuAdminAndClient() {
 
   // ─── File Upload Handlers ────────────────────────────────────────
   $('wizardFileInput')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      pendingNodeFileBlob = file;
-      pendingNodeFileName = file.name;
-      wizardState.fileBlob = file;
-      wizardState.fileName = file.name;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const validExtensions = {
+      video: ['.mp4', '.webm', '.mov', '.ogg', '.m4v', '.mkv'],
+      pdf: ['.pdf'],
+      image: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.bmp']
+    };
+
+    const cType = wizardState.contentType || 'video';
+    const allowed = validExtensions[cType] || [];
+
+    const invalid = files.filter((f) => {
+      const ext = '.' + f.name.split('.').pop().toLowerCase();
+      return !allowed.includes(ext);
+    });
+
+    if (invalid.length > 0) {
+      alert(`Invalid file format for ${cType.toUpperCase()}.\n\nPlease select only ${allowed.join(', ')} files.\n\nRejected: ${invalid.map(f => f.name).join(', ')}`);
+      e.target.value = '';
+      wizardState.selectedFiles = [];
+      pendingNodeFileBlob = null;
+      pendingNodeFileName = '';
+      wizardState.fileBlob = null;
+      wizardState.fileName = '';
       const status = $('wizardFileStatus');
-      if (status) status.textContent = `Selected: ${file.name}`;
+      if (status) status.textContent = 'No file chosen (you can select one or more files)';
+      return;
+    }
+
+    wizardState.selectedFiles = files;
+    if (files.length === 1) {
+      pendingNodeFileBlob = files[0];
+      pendingNodeFileName = files[0].name;
+      wizardState.fileBlob = files[0];
+      wizardState.fileName = files[0].name;
+      const status = $('wizardFileStatus');
+      if (status) status.textContent = `Selected: ${files[0].name} (${(files[0].size / (1024 * 1024)).toFixed(2)} MB)`;
+
+      const titleInput = $('wizardContentTitleInput');
+      if (titleInput && !titleInput.value.trim()) {
+        titleInput.value = files[0].name.replace(/\.[^/.]+$/, '');
+      }
+    } else {
+      pendingNodeFileBlob = files[0];
+      pendingNodeFileName = files[0].name;
+      wizardState.fileBlob = files[0];
+      wizardState.fileName = files[0].name;
+      const status = $('wizardFileStatus');
+      if (status) status.textContent = `Selected ${files.length} ${cType} files: ${files.map(f => f.name).join(', ')}`;
     }
   });
 
@@ -4561,6 +5175,39 @@ function initCustomMenuAdminAndClient() {
         };
       }
 
+      // Handle multi-file upload batch creation
+      if (!activeEditingNodeId && wizardState.sourceType === 'upload' && Array.isArray(wizardState.selectedFiles) && wizardState.selectedFiles.length > 1) {
+        const baseTitle = ($('wizardContentTitleInput')?.value || '').trim();
+        let lastCreated = null;
+        for (let i = 0; i < wizardState.selectedFiles.length; i++) {
+          const file = wizardState.selectedFiles[i];
+          const cleanName = file.name.replace(/\.[^/.]+$/, '');
+          let itemTitle = cleanName;
+          if (baseTitle && baseTitle !== cleanName) {
+            itemTitle = `${baseTitle} ${i + 1}`;
+          }
+          const itemNodeData = {
+            title: itemTitle,
+            kind: 'child',
+            contentType: wizardState.contentType,
+            content: {
+              url: '',
+              fileName: file.name,
+              fileBlob: file
+            }
+          };
+          lastCreated = addNode(parentId, itemNodeData);
+        }
+        if (parentId !== 'root') {
+          state.collapsedFolders.delete(parentId);
+        }
+        onAlignmentChanged();
+        renderClientSidebar();
+        renderAdminMenuTree();
+        await syncCustomMenuFilesToDisk();
+        return lastCreated;
+      }
+
       let createdOrUpdatedNode = null;
       if (activeEditingNodeId) {
         createdOrUpdatedNode = updateNode(activeEditingNodeId, nodeData, parentId);
@@ -4578,29 +5225,11 @@ function initCustomMenuAdminAndClient() {
     }
   };
 
-  // ─── Folder Quick-Add Branch Prompt Options ─────────────────────
-  $('wizardFolderAddInsideYes')?.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const createdFolder = await executeWizardSave();
-    if (createdFolder && createdFolder.id) {
-      // Immediately open wizard for a new item scoped inside this new folder
-      openNodeBuilderModal(null, createdFolder.id);
-    } else {
-      closeCustomModal(els.adminNodeBuilderModal);
-    }
-  });
-
-  $('wizardFolderAddInsideNo')?.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await executeWizardSave();
-    closeCustomModal(els.adminNodeBuilderModal);
-  });
-
   // ─── Wizard Next / Save Button ──────────────────────────────────
   $('wizardNextBtn')?.addEventListener('click', async (e) => {
     e.stopPropagation();
 
-    // Step 2a: Folder validation & quick-add offer
+    // Step 2a: Folder validation & save / step transition
     if (wizardState.step === 2 && wizardState.kind === 'parent') {
       const fTitle = ($('wizardFolderTitleInput')?.value || '').trim();
       if (!fTitle) {
@@ -4609,13 +5238,14 @@ function initCustomMenuAdminAndClient() {
       }
       wizardState.title = fTitle;
 
-      if (wizardState.mode === 'create') {
-        // Show immediate offer prompt
-        $('wizardFolderBranchPrompt').style.display = 'block';
-        return;
-      } else {
+      const isPlacementPreset = wizardState.presetParentId && wizardState.presetParentId !== 'root' && wizardState.mode === 'create';
+      if (isPlacementPreset || wizardState.mode === 'edit') {
         await executeWizardSave();
         closeCustomModal(els.adminNodeBuilderModal);
+        return;
+      } else {
+        wizardState.step = 3; // Placement picker
+        updateWizardStepUI();
         return;
       }
     }
@@ -4650,8 +5280,13 @@ function initCustomMenuAdminAndClient() {
       return;
     }
 
-    // Step 3: Placement Picker Transition
+    // Step 3: Placement Picker Transition / Folder Save
     if (wizardState.step === 3) {
+      if (wizardState.kind === 'parent') {
+        await executeWizardSave();
+        closeCustomModal(els.adminNodeBuilderModal);
+        return;
+      }
       wizardState.step = 4; // Confirm
       updateWizardStepUI();
       return;
@@ -4673,7 +5308,7 @@ function initCustomMenuAdminAndClient() {
     }
   });
 
-  // Gallery Lightbox Navigation
+  // Gallery Lightbox Navigation & Closing
   $('galleryPrevBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     updateGallerySlide(currentGalleryIdx - 1);
@@ -4682,6 +5317,37 @@ function initCustomMenuAdminAndClient() {
     e.stopPropagation();
     updateGallerySlide(currentGalleryIdx + 1);
   });
+  $('galleryCloseBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeClientGalleryModal();
+  });
+  els.clientGalleryModal?.querySelector('.gallery-lightbox-backdrop')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeClientGalleryModal();
+  });
+
+  // Touch Swipe Support for Gallery
+  let touchStartX = 0, touchStartY = 0;
+  const stage = $('galleryStage') || els.clientGalleryModal;
+  if (stage) {
+    stage.addEventListener('touchstart', (e) => {
+      if (e.touches && e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+      }
+    }, { passive: true });
+    stage.addEventListener('touchend', (e) => {
+      if (e.changedTouches && e.changedTouches.length === 1) {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+          if (dx < 0) updateGallerySlide(currentGalleryIdx + 1);
+          else updateGallerySlide(currentGalleryIdx - 1);
+        }
+      }
+    }, { passive: true });
+  }
+
   document.addEventListener('keydown', (e) => {
     if (els.clientGalleryModal && els.clientGalleryModal.classList.contains('open')) {
       if (e.key === 'ArrowLeft' || e.key === 'Left') {
@@ -4690,6 +5356,9 @@ function initCustomMenuAdminAndClient() {
       } else if (e.key === 'ArrowRight' || e.key === 'Right') {
         e.preventDefault();
         updateGallerySlide(currentGalleryIdx + 1);
+      } else if (e.key === 'Escape' || e.key === 'Esc') {
+        e.preventDefault();
+        closeClientGalleryModal();
       }
     }
   });
