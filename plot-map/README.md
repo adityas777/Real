@@ -177,14 +177,29 @@ uses. Open `index.html?admin=1`:
   (see below), **Rename…**, and **Delete…**
   (type the id to confirm; the folder is moved to a recoverable `projects/.trash/`).
 - **Export standalone site (⋯ menu):** downloads a **self-contained folder** (`<id>-plotmap.zip`
-  → an `<id>/` folder) that runs the **view-only** client on any static host — no `server.py`,
-  no admin, no API. Unzip and upload the folder anywhere (Netlify, S3, a plain web server) and
-  open `index.html`. It bakes a `data/` copy of the project (plots, alignment, landmarks,
-  amenities + images), so it works offline; if the project uses a **live Google Sheet**, that
-  keeps working in the bundle too (public URL), with the baked `plots.csv` as fallback. An
-  **`<iframe>` embed snippet** is copied to your clipboard — paste it into any site to embed the
-  map (replace `YOUR-HOST` with where you uploaded it). *(Needs `server.py` running to build the
-  zip; a plain static server can't.)*
+  → an `<id>/` folder) that runs the **view-only** client with **no server at all** — unzip it
+  and just **double-click `index.html`**, or upload the folder to any static host (Netlify, S3,
+  a plain web server) and open it there instead. It bakes a `data/` copy of the project (plots,
+  alignment, landmarks, amenities + images), so it's a true offline snapshot — if the project
+  uses a **live Google Sheet**, the exported copy always shows the plot data as it was *at
+  export time* (it doesn't attempt to reach the sheet, even when hosted somewhere with
+  internet — re-export after the sheet changes to refresh it). If any menu item (a video, PDF,
+  virtual tour, or photo) is a **pasted link rather than an uploaded file**, you'll see a
+  heads-up listing which ones before the download starts — those still need an internet
+  connection to open, even offline export can't change that, since the content itself lives
+  elsewhere. An **`<iframe>` embed snippet** is copied to your clipboard — paste it into any
+  site to embed the map (replace `YOUR-HOST` with where you uploaded it). *(Needs `server.py`
+  running to build the zip; a plain static server can't.)*
+- **Offline on phones, without downloading anything:** when the client (view-only) page is
+  reached over a real `https://` address, it also quietly installs itself for offline use
+  the first time a visitor opens it — no zip, no app store. After that one visit, the same
+  link keeps working with no signal at all, and a small "Add to Home Screen" prompt lets a
+  buyer turn it into a home-screen icon that opens like an app. This needs a genuine secure
+  origin (`https://`, or `localhost` for local testing) — a plain local-network address
+  won't enable it, since phone/desktop browsers require a secure origin for this. Admin
+  pages never get this treatment. *(Current status: the offline layer itself is built and
+  verified locally; where a project actually gets hosted for buyers to use this is still
+  being decided — see the project's internal offline-rollout notes.)*
 - **Save As… / Save…:** write straight to the server (`projects/<id>/`) via `server.py`
   — no dialog, no download. (If the server isn't running they fall back to a download.)
 - **Load… / Reset:** re-import a saved file to keep fine-tuning, or revert to the
@@ -310,6 +325,23 @@ separate.
   they stay on their part of the scene as you look around. **Drag the pin** onto the
   spot it marks; **drag the banner** to position it — the connector line stretches to
   keep them joined. Placement is pixel-exact (drag lands under the cursor).
+- **✓ ✕ — which landmarks show up-front?** Every row has a **pair** of buttons, sitting
+  *next to* (not instead of) the × delete button. The highlighted half is the landmark's
+  current state, and clicking a half sets that state — clicking the one that's already
+  active does nothing, so you can't flip a landmark by accident:
+  - **✓ (green)** — show it by default: it appears straight away in the client's
+    "all landmarks" view.
+  - **✕** — hide it from that default view, so the horizon stays readable.
+    **It is not deleted and not lost:** the moment a visitor picks its **category**, it
+    appears in full alongside every other landmark in that category.
+  - **× (the separate button)** still deletes the landmark permanently.
+  - **✓ Show all / ✕ Hide all** above the list do the whole lot at once, and the counter
+    beside them reads *"✓ N of M shown by default"*.
+  Hidden rows show dashed and dimmed in the list, and while you're on the Landmarks tab
+  you always see *every* landmark in the scene (the held-back ones outlined with a dashed
+  border) so you can still drag and edit them. New landmarks start shown, and so does
+  every landmark in a project saved before this option existed — which means the quickest
+  way to curate a long list is **✕ Hide all**, then ✓ the handful you want up-front.
 - Add **any number** of landmarks; edit or delete them anytime.
 - **Save landmarks… / Load…** write/read a `landmarks.json`; **Export site files…**
   also writes it, and it's kept in the auto-saved working session.
@@ -319,8 +351,10 @@ separate.
   swap the background pano, re-place them.
 
 `landmarks.json` shape: `{ "version":1, "landmarks":[ { "label","distance","driveTime",
-"icon", "render":{"file":"sample/…"}, "hotspot":{"lonDeg","latDeg"},
-"banner":{"lonDeg","latDeg"} } ] }` (`render` omitted when no image is attached).
+"icon", "featured":true, "render":{"file":"sample/…"}, "hotspot":{"lonDeg","latDeg"},
+"banner":{"lonDeg","latDeg"} } ] }` (`render` omitted when no image is attached;
+`featured:false` = the ✕ above, i.e. hidden from the default view but still shown under
+its category — a file with no `featured` key is treated as ticked).
 
 ---
 
@@ -533,12 +567,32 @@ above. Empty `tour_url` ⇒ the "Walk through" button is disabled for that plot.
   "open in new tab" fallback.
 - **Landmarks** — horizon banners (icon + label + distance + drive time) on a
   connector line to a placed pin; **📍 toggle** on the client. Optional **render image**
-  per landmark, shown as a card on hover (desktop) / tap (mobile) → lightbox.
+  per landmark, shown as a card on hover (desktop) / tap (mobile) → lightbox. Each one can
+  be **ticked/unticked** in admin to control whether it rides in the default view —
+  unticked ones still appear under their category.
 - **Amenities** — in-layout icon-pins (clubhouse, temple, pool…) with a name, the
   usual details, and a full-size **render image** shown in a lightbox on click; no
   status/colour; **🏛️ toggle** on the client (on by default).
 - **Site branding** — configurable project name, tagline and logo in the client
   title bar (admin Align tab), stored in `alignment.json`.
+- **Background music** — add a track under ⚙️ **Settings → 🎵 Audio…** and it loops quietly
+  for visitors, who can silence it with the 🔊 button (their choice is remembered next
+  visit). **A video works too** — drop in a clip whose music you want and only its sound is
+  used, the picture is never shown. (It's stored at full video size though, so an audio file
+  is lighter for visitors on mobile data; and if the clip has no sound track you'll be told.) Browsers refuse to start sound before someone interacts with the page, so it
+  begins on the visitor's first tap rather than the instant the page loads — that's the
+  browser's rule, not a setting. It doesn't play in admin; press 🔊 to preview. The file
+  is shipped as uploaded, so keep it small (a few MB) for visitors on mobile data. The same logo also heads the
+  client's left menu drawer, at every screen size.
+- **The menu skips steps that aren't choices** — a section holding a single video, PDF or
+  tour plays/opens on the first tap instead of showing a one-row submenu, and a gallery
+  folder full of photos opens straight at the first photo (swipe or use ‹ › for the rest).
+  Sections that hold several different things still show their list, and only those rows
+  carry a › arrow. Build the menu however you like — the admin side always shows the real
+  nested structure; this only affects what a visitor has to tap through.
+- **Translucent menu drawer** — the client's left menu is a tinted glass pane rather than a
+  solid panel: the panorama stays visible through it, so the view isn't walled off by the
+  navigation. Labels carry their own shadow so they stay readable over bright sky.
 - **Live Google Sheet plot data** — optionally drive plot status/details from a
   public Google Sheet (per project, set in the admin Plot data control), read live in
   the client with the committed `plots.csv` as automatic fallback.

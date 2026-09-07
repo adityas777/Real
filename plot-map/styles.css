@@ -210,6 +210,84 @@ body {
 .chip[data-status="sold"]      .dot { background: var(--sold); }
 .chip[data-status="unknown"]   .dot { background: var(--unknown); }
 
+/* Landscape-only stand-in for the header's "Available" legend chip — same toggleFilter
+   behavior and status-color dot, styled to match the other floating zoom-controls buttons
+   (dark translucent backdrop, since it floats directly over the pano with no header bar
+   behind it there) instead of the header's plain panel background. Hidden by default —
+   the media query further down is the only place this becomes visible. */
+/* All three status filters (Available/Reserved/Sold), stacked above the zoom controls.
+   Hidden by default — the landscape media query is the only place they appear, since that's
+   where the header legend they stand in for is hidden. */
+.zoom-status-group { display: none; flex-direction: column; gap: 6px; align-items: flex-end; }
+.zoom-status-btn {
+  display: inline-flex;
+  align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700;
+  padding: 8px 13px 8px 11px;
+  min-height: 34px;                      /* comfortable tap target — these are real toggles, not labels */
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(21,23,30,.88);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.4);
+  white-space: nowrap;
+  flex: none;
+  transition: border-color .16s var(--ease), opacity .16s var(--ease), transform .08s var(--ease);
+}
+.zoom-status-btn:active { transform: scale(.96); }
+.zoom-status-btn .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 0 3px rgba(255,255,255,.06); }
+.zoom-status-btn[data-status="available"] .dot { background: var(--available); }
+.zoom-status-btn[data-status="reserved"] .dot { background: var(--reserved); }
+.zoom-status-btn[data-status="sold"] .dot { background: var(--sold); }
+.zoom-status-btn .count { color: var(--text-mute); font-variant-numeric: tabular-nums; }
+/* "On" is the louder state: a lit border reads as active without needing a label. */
+.zoom-status-btn[aria-pressed="true"] { border-color: var(--gold-soft, rgba(212,175,55,.5)); }
+.zoom-status-btn[aria-pressed="false"] { opacity: .45; filter: grayscale(.6); }
+.zoom-status-btn[aria-pressed="false"] .count { text-decoration: line-through; }
+
+/* ─── Rotate-to-landscape hint (portrait phone, client only) ─────────────────── */
+/* A BLOCKING gate, not an overlay hint: on a portrait phone the content isn't shown at all
+   until the device is turned. Hence `fixed` + opaque + a z-index above every panel and
+   modal — a translucent version would still leave a squeezed, unusable layout visible
+   underneath, which is exactly what this exists to prevent. */
+.rotate-hint {
+  position: fixed; inset: 0; z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  animation: rh-fade .28s var(--ease);
+}
+.rotate-hint[hidden] { display: none; }
+.rotate-hint.is-leaving { animation: rh-fade .28s var(--ease) reverse forwards; }
+.rotate-hint-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 26px 30px;
+  text-align: center;
+}
+.rotate-hint-card strong { font-size: 15.5px; letter-spacing: .3px; margin-top: 14px; }
+.rotate-hint-card span { font-size: 12.5px; color: var(--text-mute); }
+.rotate-hint-phone {
+  width: 62px; height: 100px;
+  transform-origin: 50% 50%;
+  animation: rh-turn 2.6s var(--ease) infinite;
+}
+.rotate-hint-phone .rh-body { fill: rgba(21,23,30,.95); stroke: var(--gold); stroke-width: 3; }
+.rotate-hint-phone .rh-screen { fill: rgba(212,175,55,.14); }
+.rotate-hint-phone .rh-dot { fill: var(--gold); }
+.rotate-hint-arrow { width: 30px; height: 30px; color: var(--gold-soft, #e7cd7a); margin-top: 12px; opacity: .9; }
+@keyframes rh-fade { from { opacity: 0; } to { opacity: 1; } }
+/* Hold at each end so the gesture reads clearly, rather than spinning continuously. */
+@keyframes rh-turn {
+  0%, 22%   { transform: rotate(0deg); }
+  45%, 78%  { transform: rotate(-90deg); }
+  100%      { transform: rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
+  .rotate-hint { animation: none; }
+}
+
 .sync { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 .sync-meta { font-size: 11.5px; color: var(--text-mute); white-space: nowrap; }
 
@@ -330,11 +408,32 @@ body {
 .ax-lm-list { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
 .ax-lm-li { border: 1px solid var(--line-soft); border-radius: 9px; background: var(--bg); padding: 8px; cursor: pointer; }
 .ax-lm-li.is-sel { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold-soft); }
-.ax-lm-li-head { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 7px; }
+.ax-lm-li-head { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 7px; }
 .ax-lm-ico-sel { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 7px; padding: 4px 4px; font-size: 14px; cursor: pointer; }
 .ax-lm-title { font-weight: 600; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-lm-del { width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 14px; line-height: 1; }
 .ax-lm-del:hover { color: #e3b341; border-color: #5a4a2a; }
+/* Show-by-default control — a ✓|✕ PAIR, sitting before the delete × and never reading as one.
+   Two buttons rather than one state-showing toggle so each click is idempotent: ✓ always means
+   show, ✕ always means hide. (A single toggle inverted people's intent — everything starts
+   ticked, so clicking the ones you wanted turned them off. 2026-09-04.) The active half is
+   filled; the inactive half stays faint so the current state is readable at a glance. */
+.ax-lm-vis-grp { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.ax-lm-vis { width: 24px; height: 24px; border: 0; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 13px; line-height: 1; font-weight: 700; opacity: .45; }
+.ax-lm-vis + .ax-lm-vis { border-left: 1px solid var(--line); }
+.ax-lm-vis:hover { opacity: 1; filter: brightness(1.3); }
+.ax-lm-vis.is-active { opacity: 1; cursor: default; }
+.ax-lm-vis-yes.is-active { color: #3fb950; background: rgba(63, 185, 80, .18); box-shadow: inset 0 0 0 1px #2c5f38; }
+.ax-lm-vis-no.is-active { color: var(--text); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
+.ax-lm-bulk { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.ax-lm-bulk .btn { padding: 4px 8px; font-size: 11.5px; }
+.ax-lm-count { flex: 1; font-size: 11px; color: var(--text-mute); }
+.ax-lm-li.is-hidden-default { opacity: .74; border-style: dashed; }
+.ax-lm-li.is-hidden-default .ax-lm-title { color: var(--text-mute); font-style: italic; }
+.ax-lm-legend { display: grid; gap: 4px; margin: 0 0 10px; padding: 8px 9px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bg); }
+.ax-lm-legend span.ax-lm-key { display: inline-block; min-width: 16px; margin-right: 4px; padding: 0 3px; border: 1px solid var(--line); border-radius: 4px; text-align: center; font-weight: 700; color: var(--text-mute); }
+.ax-lm-legend .ax-lm-key-on { color: #3fb950; border-color: #2c5f38; background: rgba(63, 185, 80, .13); }
+.ax-lm-legend .ax-lm-key-del { color: #e3b341; border-color: #5a4a2a; }
 .ax-lm-edit { display: grid; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .ax-lm-field { display: grid; gap: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-mute); }
 .ax-lm-field input, .ax-lm-field select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
@@ -452,6 +551,10 @@ body {
 /* admin editing affordances */
 .landmarks.is-editing .lm-pin, .landmarks.is-editing .lm-banner { pointer-events: auto; cursor: grab; }
 .landmarks.is-editing .lm-pin:active, .landmarks.is-editing .lm-banner:active { cursor: grabbing; }
+/* Admin-only: a landmark the admin unticked (featured=false) still shows while the
+   Landmarks tab is open so it can be dragged, but is drawn dashed + faded so it is
+   obvious the client will not show it in the default all-landmarks view. */
+.landmarks.is-editing .lm-banner.is-unfeatured { opacity: .58; outline: 1px dashed var(--text-mute, #8b949e); outline-offset: 2px; }
 .lm-banner.is-sel { border-color: var(--gold); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 2px var(--gold); }
 .lm-pin.is-sel { box-shadow: 0 0 0 4px rgba(212,175,55,.5), 0 2px 7px rgba(0,0,0,.55); }
 /* a landmark with a render image is interactive in the client: hover (desktop) / tap
@@ -466,6 +569,29 @@ body {
 
 /* ─── Amenity overlay (in-layout icon pins) ─────────────────────────────────── */
 .amenities { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 7; }
+/* Mobile overflow hint — see renderLandmarks' CAP logic (app.js). Only ever gets un-hidden
+   there, so no media query needed here; it simply never appears on desktop. */
+.lm-overflow-hint {
+  position: absolute;
+  left: 50%; bottom: 76px;
+  transform: translateX(-50%);
+  z-index: 16;
+  background: rgba(21, 23, 30, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--gold-soft, rgba(212, 175, 55, 0.5));
+  color: var(--gold, #d4af37);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.lm-overflow-hint[hidden] { display: none; }
+.lm-overflow-hint:hover { background: rgba(21, 23, 30, 0.98); }
 .amenities[hidden] { display: none; }
 /* 0-size anchor sits exactly on the hotspot; its children (pin + label) position off it */
 .am-marker { position: absolute; width: 0; height: 0; pointer-events: none; }
@@ -552,6 +678,56 @@ body {
   box-shadow: var(--shadow);
 }
 .notice strong { color: var(--reserved); }
+
+/* ─── Offline-save banner (client-only: ONE combined "Add to Home Screen" + offline
+   content-download prompt, app.js) — a single tap fires the native install dialog and
+   starts the content download together; previously two separate banners shown back to
+   back, merged into this one per the user's explicit request. Sized to comfortably hold
+   the progress bar once downloading starts. ───────────────────────────────────────── */
+.offline-save-banner {
+  position: absolute;
+  left: 50%; bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 26;
+  width: min(94vw, 460px);
+  background: rgba(21,23,30,.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--gold-soft, rgba(212,175,55,.5));
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.5);
+  animation: pop .22s var(--ease);
+}
+/* explicit [hidden] override, stated defensively — this element has no unconditional
+   `display` of its own today so isn't actually affected, but a class/element selector
+   setting `display` unconditionally silently beats `[hidden]` if declared later in the
+   cascade (equal specificity) — bit this project three times already (see CLAUDE.md's
+   Conventions & gotchas), so this is here so a future edit can't reintroduce it by accident. */
+.offline-save-banner[hidden] { display: none; }
+@media (max-width: 480px) {
+  .offline-save-banner { left: 10px; right: 10px; bottom: 10px; transform: none; width: auto; }
+}
+.offline-save-prompt { display: flex; align-items: center; gap: 10px; }
+.offline-save-icon { font-size: 18px; flex: none; color: var(--gold); }
+.offline-save-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.offline-save-text strong { font-size: 13px; }
+.offline-save-text span { font-size: 11.5px; color: var(--text-mute); }
+.offline-save-skip { padding: 7px 12px; font-size: 12.5px; flex: none; background: transparent; }
+.offline-save-go { padding: 7px 14px; font-size: 12.5px; flex: none; }
+.offline-save-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.offline-save-progress-head strong { font-size: 13px; }
+.offline-save-progress-head span { font-size: 11px; color: var(--text-mute); white-space: nowrap; }
+.offline-save-bar {
+  margin-top: 8px; height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden;
+}
+.offline-save-bar-fill {
+  height: 100%; width: 0%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-soft), var(--gold));
+  transition: width .25s var(--ease);
+}
+.offline-save-pct {
+  display: block; margin-top: 5px; font-size: 11px; color: var(--text-mute); font-variant-numeric: tabular-nums;
+}
 
 /* ─── Info popover (plot hotspot card) ──────────────────────────────────────── */
 .panel {
@@ -668,17 +844,155 @@ body {
   color: var(--text-dim); font-size: 14px; letter-spacing: .3px;
 }
 
+/* Brochure PDF rendered by pdf.js (Android only — that browser has no inline PDF viewer
+   and downloads the file instead; see openClientBrochureModal). Pages are stacked
+   canvases in a scroller, sized to the container's width. */
+.brochure-canvas {
+  width: 100%; height: 75vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: #525659; padding: 10px;
+  text-align: center; color: #cfd3da; font-size: 13px;
+}
+.brochure-canvas .brochure-page {
+  display: block; width: 100%; height: auto; margin: 0 auto 10px;
+  background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.45);
+}
+
 /* ─── Responsive: phone ───────────────────────────────────────────────────── */
-@media (max-width: 720px) {
+/* Portrait phone only — narrow width AND tall/portrait aspect. A landscape phone can be
+   just as narrow in plain width terms but has the room this block exists to work around
+   not having (see the reference comparison that prompted splitting this out); gating on
+   orientation keeps it from squeezing a landscape phone the same way. Never matches a real
+   desktop window (which is never simultaneously ≤720px wide AND portrait-oriented). */
+@media (max-width: 720px) and (orientation: portrait) {
   :root { --topbar-h: auto; }
   .topbar { flex-wrap: wrap; padding: 10px 12px; gap: 10px; }
   .legend { order: 3; flex-basis: 100%; justify-content: flex-start; gap: 6px; }
-  .sync { margin-left: auto; }
+  .sync { margin-left: auto; min-width: 0; }
+  .sync-meta { overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
   .brand-text span { display: none; }
+
+  /* Landmark/amenity labels default to a comfortably-spaced desktop size; on a narrow
+     portrait phone, several projected close together (an inherent effect of less pixel
+     width to spread the same panorama FOV across) — shrinking the label footprint
+     noticeably cuts down how often that happens, on top of the horizontal edge-clamp and
+     the density cap in renderLandmarks/renderAmenities (app.js). */
+  .lm-ico { padding: 4px 7px; font-size: 13px; }
+  .lm-label { font-size: 11.5px; }
+  .lm-sub-bar { font-size: 9px; padding: 2px 7px; }
+  .am-chip { padding: 4px 9px 4px 6px; gap: 5px; }
+  .am-ico { font-size: 15px; }
+  .am-label { font-size: 11px; }
 
   /* info popover stays a compact popup on mobile too (JS clamps it on screen) */
   .modal-dialog { inset: 0; border-radius: 0; }
   .modal-actions #modalOpenNew { display: none; }
+
+  /* Logo above the menu, then rows tightened so the whole menu fits without scrolling —
+     the drawer is the visitor's only navigation on a phone, so an item hidden below the
+     fold is effectively missing. Padding comes in from the desktop 24px/18px too.
+     NOTE the `.cat-drawer` prefixes: the drawer's base rules are declared LATER in this
+     file, and a media query adds no specificity of its own — without the extra class these
+     lose the cascade to those later rules and silently do nothing (caught by screenshot). */
+  .cat-drawer .cat-drawer-brand {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 2px 4px 12px; margin-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    text-align: center;
+  }
+  .cat-drawer .cat-drawer-inner { padding: 16px 14px 14px; }
+  .cat-drawer .cat-nav { gap: 2px; margin-top: 4px; }
+  .cat-drawer .cat-btn { padding: 10px 12px; font-size: 12.5px; letter-spacing: .6px; }
+  /* Desktop grew the lockup to 168x148 and centres the menu in the leftover space; on a
+     phone both would push items below the fold, and the drawer is the ONLY navigation
+     here, so an item under the fold is effectively missing. Hold the compact sizing. */
+  .cat-drawer .cat-drawer-logo img { max-width: 130px; max-height: 86px; }
+  .cat-drawer .cat-drawer-brand { margin-bottom: 10px; }
+  .cat-drawer .cat-nav { justify-content: flex-start; }
+}
+
+/* Landscape phone — wide but SHORT. Different constraint than portrait (vertical space is
+   now the scarce one, not horizontal), so this is deliberately a separate block rather than
+   folded into the orientation:portrait one above, tuned from the same reference comparison.
+   max-height keeps this from ever matching a real desktop window, which is essentially
+   never this short even when resized narrow. */
+@media (orientation: landscape) and (max-height: 500px) {
+  /* Client only — the topbar (brand + Available/Reserved/Sold legend + sync + Refresh)
+     eats a disproportionate share of a short landscape screen for what it shows; hidden
+     entirely there in favor of #zoomAvailableBtn covering the one piece of it (seeing
+     what's available) a visitor actually needs mid-browse. Admin keeps its topbar
+     regardless of orientation — Refresh/project switcher stay reachable while editing. */
+  /* `display:none` here would remove .topbar from body's grid item list — since it's
+     body's first grid child (grid-template-rows: auto 1fr), that shifts the SECOND child
+     into the now-unclaimed first ("auto") track via grid auto-placement, collapsing the
+     pano's height to near-zero (confirmed directly: the WebGL canvas rendered at
+     height="0", a fully black screenshot). Collapsing it in place — height:0 plus zeroing
+     the padding/min-height that would otherwise keep it visible — avoids that: .topbar
+     stays a real (now zero-sized) grid item, so the second child correctly keeps the
+     "1fr" track and fills the freed space instead. */
+  body:not(.is-admin) .topbar { height: 0; min-height: 0; padding: 0; margin: 0; border: none; overflow: hidden; visibility: hidden; }
+  body:not(.is-admin) .zoom-status-group { display: flex; }
+
+  /* .zoom-controls is a column flex with no explicit cross-axis alignment, so it defaults
+     to flex-start (left) — invisible everywhere else because every other child is the same
+     38px .btn-icon square, but the Available pill above is wider than that (icon + label +
+     count), so it and the icon row below it were landing on different left edges while the
+     container (sized to the widest child, the pill) kept its right edge pinned via
+     `right: 16px`. That's the ragged/misaligned column the client reported in landscape.
+     flex-end makes every child share the same right edge instead. */
+  /* The controls stack is bottom-anchored and outgrew the phone: measured at 651×280 it
+     stood 370px against ~260px of room, overflowing UPWARDS and pushing all three status
+     pills clean off the top of the screen — invisible, untappable, nothing to scroll. That
+     is the reported "sold / available / reserved" bug.
+     The fix is structural rather than another round of shrinking: the pills LEAVE this
+     column and dock to the top-right edge, so the two groups are anchored to opposite
+     edges that always exist and neither can push the other off. The column below then only
+     has to fit six icons (6×28 + 5×4 = 188px, inside the ~200px a 552×225 phone leaves).
+     `max-height` + `wrap-reverse` stay as a SAFETY NET so a viewport shorter than anything
+     tested wraps sideways instead of going off-screen; at the sizes above it never trips.
+     (`wrap-reverse`, not `wrap`: this stack is right-anchored, so extra columns have to go
+     LEFT or they leave the screen.) */
+  body:not(.is-admin) .zoom-controls {
+    align-items: flex-end; right: 12px; bottom: 12px; gap: 4px;
+    max-height: calc(100% - 24px);
+    flex-wrap: wrap-reverse;
+    align-content: flex-end;
+  }
+  body:not(.is-admin) .zoom-controls .btn-icon { width: 28px; height: 28px; font-size: 14px; }
+  body:not(.is-admin) .zoom-status-group {
+    position: fixed; top: 8px; right: 12px; z-index: 16;
+    flex-direction: row; flex-wrap: wrap; justify-content: flex-end;
+    gap: 5px; max-width: calc(100vw - 24px);
+  }
+  body:not(.is-admin) .zoom-status-btn { padding: 5px 10px 5px 8px; min-height: 28px; font-size: 11px; gap: 5px; }
+  body:not(.is-admin) .zoom-status-btn .dot { width: 8px; height: 8px; box-shadow: 0 0 0 2px rgba(255,255,255,.06); }
+
+  /* Landscape hides the top bar entirely, so the drawer is the ONLY branding — but with
+     vertical space at a premium, it's a compact single row (logo beside the name) rather
+     than the stacked block portrait uses, leaving room for the menu itself. */
+  /* Grid rather than a row: the markup is flat (logo, name, tagline as siblings), so a
+     plain row would sit the name and tagline beside each other. This keeps the logo on the
+     left spanning both text lines, which stack as they do in portrait. */
+  .cat-drawer .cat-drawer-brand {
+    display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 9px;
+    padding: 0 2px 8px; margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    text-align: left;
+  }
+  .cat-drawer .cat-drawer-logo { grid-row: 1 / span 2; }
+  .cat-drawer .cat-drawer-logo img { max-width: 40px; max-height: 30px; margin: 0; }
+  .cat-drawer .cat-drawer-name { font-size: 9.5px; letter-spacing: 1.6px; }
+  .cat-drawer .cat-drawer-tagline { font-size: 13px; letter-spacing: .6px; }
+  /* The desktop width bump (250 -> 282, for the roomier padding) is unwanted here: a
+     landscape phone is the one place horizontal space is scarcest, and 282 of 844 is a
+     third of the screen. `body:not(.is-admin)` for specificity, NOT a bare `.cat-drawer`
+     — the base rule is declared later in this file and a media query adds no specificity
+     of its own, so a bare selector would silently lose the cascade (same trap as the
+     brand rules above). */
+  body:not(.is-admin) .cat-drawer { width: min(250px, 78vw); }
+  .cat-drawer .cat-drawer-inner { padding: 12px 12px 10px; }
+  .cat-drawer .cat-nav { gap: 1px; margin-top: 2px; justify-content: flex-start; }
+  .cat-drawer .cat-btn { padding: 7px 10px; font-size: 12px; letter-spacing: .5px; }
+  .cat-drawer .cat-drawer-brand { margin-bottom: 8px; }
 }
 
 /* ─── Admin import button ──────────────────────────────────────────────────── */
@@ -705,6 +1019,10 @@ body {
 .ax-brand-logo .btn { padding: 5px 9px; font-size: 12px; }
 .ax-brand-logo-name { flex: 1; font-size: 11px; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-brand-logo-name.is-set { color: var(--gold-soft); }
+/* Background-audio row in Project Settings — reuses .ax-brand-logo's layout; only the
+   explanatory line and the (never-visible) player element need rules of their own. */
+.ax-audio-hint { margin: 6px 2px 0; font-size: 10.5px; line-height: 1.5; color: var(--text-mute); }
+#siteAudio { display: none; }
 
 /* ─── Plot data source (Google Sheet) ──────────────────────────────────────── */
 .ax-data { margin: 0 0 12px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--bg); display: grid; gap: 8px; }
@@ -839,30 +1157,113 @@ body.is-admin .cat-drawer { display: none !important; }
 .cat-drawer {
   position: absolute;
   top: 0; left: 0; bottom: 0;
-  width: 250px;
-  max-width: 82vw;
+  width: min(282px, 82vw);        /* wider so "LOCATION INTELLIGENCE" sits on one line with the roomier padding below */
   z-index: 50;
   pointer-events: none;
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
+/* Collapse to a slim RAIL, not all the way off-screen (2026-09-04, user reference mock).
+   `-100%` put the drawer's right edge exactly on the screen's left edge; the toggle sits at
+   `right:-20px` and is 38px wide, so it spanned drawer-x [W-18, W+20] and landed at screen
+   x [-18, +20] — 18 of its 38px cut off, i.e. a half-circle bleeding off the edge with no
+   panel behind it. Leaving COLLAPSED_RAIL of the panel on screen puts the whole toggle in
+   view, sitting on a sliver of the panel it reopens, which is what the mock shows and what
+   makes the affordance read as a control rather than as clipped chrome.
+   Keep the rail >= the toggle's 20px overhang or the clipping comes straight back.
+   (Do NOT "fix" this by counter-transforming .cat-drawer-toggle instead — it's a child of
+   .cat-drawer and rides the collapse transform; an earlier attempt at that left the button
+   floating mid-screen with nothing to anchor it to, reading as a stray/buggy control. It
+   was removed then, and moving the drawer rather than the button is why nothing needs to
+   counter-move now.) */
+.cat-drawer { --collapsed-rail: 38px; }
 .cat-drawer.is-collapsed {
-  transform: translateX(-100%);
+  transform: translateX(calc(-100% + var(--collapsed-rail)));
 }
+/* The rail shows the panel's right 38px — which is the tail END of the menu rows, so the
+   collapsed rail came out streaked with cropped text and the row `›` arrows. The rail is
+   meant to be a plain sliver of tinted glass, so fade the panel's CONTENTS out while it's
+   collapsed and keep only its background. Targets `.cat-drawer-inner`'s direct children;
+   the toggle is a sibling of `.cat-drawer-inner` (child of `.cat-drawer`), so it is
+   deliberately untouched and stays visible. `visibility` rides along on a delayed step so
+   the hidden menu can't be tabbed into while it's off — invisible-but-focusable is a real
+   keyboard trap, not a cosmetic detail. */
+.cat-drawer-inner > * { transition: opacity .22s ease, visibility 0s; }
+.cat-drawer.is-collapsed .cat-drawer-inner > * {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .22s ease, visibility 0s linear .22s;
+}
+/* The rail is scenery, not a target: let drags that start on it pan the panorama
+   underneath instead of dying on an inert panel edge. The toggle keeps its own
+   `pointer-events: auto`, so the one thing worth clicking there still works. Needs
+   `!important` at higher specificity to beat .cat-drawer-inner's own `auto !important`. */
+.cat-drawer.is-collapsed .cat-drawer-inner { pointer-events: none !important; }
 .cat-drawer-inner {
   pointer-events: auto !important;
   width: 100%; height: 100%;
-  background: rgba(30, 34, 43, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  /* Translucent, NOT frosted. The panorama is the product, so the panel is a tinted
+     pane you read the scene through rather than a solid slab covering a third of it.
+     Two things make that work together:
+       • alpha ~0.66-0.80, not 0.88 — enough tint to hold text, thin enough to see the
+         river/treeline behind it;
+       • blur 3px, not 16px — a heavy backdrop blur is what made this read as opaque
+         frosted glass even at 0.88. Low blur keeps the scene recognisable through the
+         panel while still taking the edge off high-frequency detail under small text.
+     The gradient is denser at the very top and bottom (behind the logo and the footer
+     icons) and thinnest across the middle, where the menu sits over what is usually the
+     darker ground half of the pano — so legibility is bought where it's needed and
+     transparency spent where it shows. Menu/brand text additionally carries its own
+     text-shadow (below) so a bright sky behind the panel can't wash it out. */
+  background: linear-gradient(180deg,
+    rgba(16, 20, 29, 0.74) 0%,
+    rgba(16, 20, 29, 0.60) 34%,
+    rgba(16, 20, 29, 0.58) 62%,
+    rgba(16, 20, 29, 0.70) 100%);
+  backdrop-filter: blur(2px) saturate(1.08);
+  -webkit-backdrop-filter: blur(2px) saturate(1.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.10);
   display: flex;
   flex-direction: column;
-  padding: 24px 18px 20px;
-  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+  padding: 34px 26px 24px;
+  box-shadow: 10px 0 34px rgba(0, 0, 0, 0.45);
 }
 .cat-drawer-head {
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Project branding at the top of the drawer. Shown on EVERY size since 2026-09-04, at the
+   user's request with a reference mock: the drawer reads as the site's front door, and the
+   logo lockup anchoring it is the whole point of that composition. (It was desktop-hidden
+   before, on the reasoning that the top bar already carries the brand — that trade was
+   deliberately reversed, so re-hiding it here is a design decision, not a cleanup.) The two
+   mobile media queries near the top of this file still override the sizing: portrait
+   stacks it compactly and landscape turns it into a single row, both so the menu keeps
+   fitting without scrolling. */
+.cat-drawer-brand {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  text-align: center;
+  padding: 2px 0 0;
+  margin-bottom: 26px;
+}
+/* A logo image nearly always carries the company wordmark, so printing the name/tagline
+   under it as well just repeats the same words — applyBrand() adds `has-logo` when an
+   image actually loaded, and the text falls back in when it didn't. */
+.cat-drawer-brand.has-logo .cat-drawer-name,
+.cat-drawer-brand.has-logo .cat-drawer-tagline { display: none; }
+.cat-drawer-logo img {
+  display: block; max-width: 168px; max-height: 148px; object-fit: contain; margin: 0 auto;
+  /* the lockup is usually a light mark on transparent — give it the same lift the text
+     gets so it doesn't flatten into a bright patch of sky behind the panel */
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45));
+}
+.cat-drawer-name {
+  font-size: 11px; font-weight: 600; letter-spacing: 2.4px; color: var(--text-mute);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.cat-drawer-tagline {
+  font-size: 17px; letter-spacing: 1.2px; color: #fff; line-height: 1.2;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 .cat-back-btn {
   background: transparent;
@@ -891,10 +1292,25 @@ body.is-admin .cat-drawer { display: none !important; }
 .cat-nav {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 3px;
+  margin-top: 4px;
   flex: 1;
+  /* `overflow-y: auto` alone does NOTHING here without this: a flex item's default
+     `min-height: auto` refuses to shrink below its content, so the nav just grew past the
+     drawer and the last menu rows fell off the bottom of a short landscape screen
+     (measured: a .cat-btn 16px below the viewport at 651×280, unreachable). With
+     min-height:0 the item can shrink and the scroll engages. */
+  min-height: 0;
   overflow-y: auto;
+  /* Sit the menu in the middle of the space between the logo and the footer rather than
+     packed under the logo — the airy block the reference mock centres in the panel.
+     `safe center` deliberately, not plain `center`: a centred flex column whose content
+     outgrows its box overflows equally in BOTH directions, and the overflow above the
+     start edge is unreachable by scrolling, so a long menu on a short window would lose
+     its first items with no way to get at them. `safe` falls back to flex-start exactly
+     in that case. A browser that doesn't know the keyword drops the declaration and gets
+     flex-start too — top-aligned, never clipped, which is the right way to fail. */
+  justify-content: safe center;
 }
 .cat-btn-sub {
   display: flex;
@@ -909,15 +1325,18 @@ body.is-admin .cat-drawer { display: none !important; }
 .cat-btn {
   background: transparent;
   border: none;
-  color: #d1d5db;
+  color: #e5e7eb;
   text-align: left;
-  padding: 12px 14px;
-  font-size: 13px;
+  padding: 11px 12px;
+  font-size: 13.5px;
   font-weight: 600;
-  letter-spacing: 0.8px;
+  letter-spacing: 1px;
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
+  /* the panel is see-through now, so the label carries its own contrast rather than
+     relying on the backdrop being dark */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
 }
 .cat-btn:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -932,15 +1351,16 @@ body.is-admin .cat-drawer { display: none !important; }
 .cat-drawer-foot {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  justify-content: center;      /* centred under the menu, as in the reference */
+  gap: 12px;
+  padding-top: 18px;
+  /* no divider rule: on a translucent panel a hairline reads as a scratch on the glass */
 }
 .cat-foot-btn {
   width: 38px; height: 38px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.34);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   color: var(--text);
   font-size: 15px;
   display: flex; align-items: center; justify-content: center;
@@ -982,10 +1402,11 @@ body.is-admin .cat-drawer { display: none !important; }
   border-color: #ffffff;
   transform: translateY(-50%) scale(1.08);
 }
-.cat-drawer.is-collapsed .cat-toggle-ico {
-  display: inline-block;
-  transform: rotate(180deg);
-}
+/* Deliberately NO rotate() for the collapsed state: the glyph itself is already swapped
+   (‹ ⇄ ›) in app.js's toggle handler and its portrait auto-collapse. Rotating on top of
+   that flipped it straight back, so a collapsed drawer showed a left-pointing arrow — i.e.
+   "close" — when the drawer was already closed and the arrow needs to invite opening it
+   rightwards. Fix one or the other, never both. */
 
 /* Category matching landmark banner animations & styles */
 .lm-banner.is-dimmed {
@@ -1066,6 +1487,12 @@ body.is-admin .cat-drawer { display: none !important; }
   display: flex !important;
   flex-direction: column !important;
 }
+@media (max-width: 480px) {
+  /* Every feature-modal-dialog (video/PDF/tour/gallery/contact-flag popups, the menu
+     wizard) already fits the viewport via max-width:92vw above; the type-picker grid
+     inside the wizard is the one place that still cramps at 3 columns on a small phone. */
+  .wizard-types-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
 .node-kind-tab {
   transition: all 0.15s ease;
 }
@@ -1085,6 +1512,7 @@ body.is-admin .cat-drawer { display: none !important; }
   display: flex;
   flex-direction: column;
   gap: 16px;
+  background: transparent; /* .modal-body defaults to solid black (for video/image modals) — this wizard sits on the dialog's own dark panel color instead */
 }
 .custom-modal-desc {
   margin: 0;
@@ -1429,21 +1857,28 @@ body.is-admin .cat-drawer { display: none !important; }
 .contact-modal[hidden] {
   display: none !important;
 }
+.contact-modal-backdrop {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 1 !important;
+}
 .contact-modal-dialog {
   display: flex !important;
   flex-direction: row !important;
-  width: 900px !important;
-  max-width: 92vw !important;
-  height: 500px !important;
-  max-height: 88vh !important;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100vh !important;
+  max-height: 100dvh !important;
   background: #ffffff !important;
-  border-radius: 6px !important;
+  border-radius: 0 !important;
   overflow: hidden !important;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8) !important;
+  box-shadow: none !important;
   position: relative !important;
   z-index: 10 !important;
   animation: pop .22s var(--ease) !important;
-  margin: auto !important;
+  margin: 0 !important;
 }
 .contact-modal-left {
   flex: 1.2 !important;
@@ -1451,7 +1886,7 @@ body.is-admin .cat-drawer { display: none !important; }
   height: 100% !important;
   position: relative !important;
   overflow: hidden !important;
-  background: #0f172a !important;
+  background: #1c1917 !important;
 }
 .contact-modal-left img {
   width: 100% !important;
@@ -1463,32 +1898,48 @@ body.is-admin .cat-drawer { display: none !important; }
   content: "" !important;
   position: absolute !important;
   inset: 0 !important;
-  background: linear-gradient(to top, rgba(15,23,42,0.8) 0%, rgba(15,23,42,0.1) 40%, transparent 100%) !important;
+  background: linear-gradient(to top, rgba(28,25,23,0.82) 0%, rgba(28,25,23,0.08) 45%, transparent 100%) !important;
   pointer-events: none !important;
 }
 .contact-modal-right {
+  --contact-accent: #a8752c;
+  --contact-accent-soft: rgba(168, 117, 44, 0.12);
+  --contact-ink: #1c1917;
+  --contact-sub: #6b6560;
   flex: 0.8 !important;
   width: 45% !important;
   height: 100% !important;
-  padding: 44px 36px !important;
+  padding: 48px !important;
   display: flex !important;
   flex-direction: column !important;
   justify-content: center !important;
-  background: #ffffff !important;
-  color: #0f172a !important;
+  align-items: center !important;
+  background: #faf7f2 !important;
+  color: var(--contact-ink) !important;
   position: relative !important;
   box-sizing: border-box !important;
+  overflow-y: auto !important;
+}
+/* `safe` is load-bearing, not decoration: with plain `center`, content taller than this
+   column overflows BOTH ends and the part above the start edge cannot be scrolled to —
+   measured at 828×295, the contact details hung ~90px off the top with no way to reach
+   them. `safe` falls back to flex-start exactly when the content doesn't fit, and a browser
+   that doesn't know the keyword drops the declaration and gets flex-start too. */
+.contact-modal-right { justify-content: safe center !important; }
+.contact-info-wrap {
+  width: 100% !important;
+  max-width: 460px !important;
 }
 .contact-modal-close {
   position: absolute !important;
-  top: 16px !important;
-  right: 16px !important;
-  width: 32px !important;
-  height: 32px !important;
-  background: #00bcff !important; /* Bright Cyan X button as in Image 2 */
-  color: #ffffff !important;
+  top: 24px !important;
+  right: 24px !important;
+  width: 40px !important;
+  height: 40px !important;
+  background: rgba(28, 25, 23, 0.06) !important;
+  color: var(--contact-ink, #1c1917) !important;
   border: none !important;
-  border-radius: 3px !important;
+  border-radius: 50% !important;
   font-size: 18px !important;
   font-weight: 700 !important;
   display: flex !important;
@@ -1499,49 +1950,124 @@ body.is-admin .cat-drawer { display: none !important; }
   z-index: 20 !important;
 }
 .contact-modal-close:hover {
-  transform: scale(1.1) !important;
-  background: #00a5e0 !important;
+  transform: scale(1.08) !important;
+  background: rgba(28, 25, 23, 0.12) !important;
+}
+.contact-eyebrow {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  color: var(--contact-accent) !important;
+  margin: 0 0 18px 0 !important;
+  font-family: inherit !important;
+}
+.contact-eyebrow::before {
+  content: "" !important;
+  display: block !important;
+  width: 28px !important;
+  height: 1.5px !important;
+  background: var(--contact-accent) !important;
 }
 .contact-title {
-  font-size: 22px !important;
-  font-weight: 800 !important;
-  color: #0f172a !important;
-  margin: 0 0 28px 0 !important;
-  line-height: 1.35 !important;
-  font-family: inherit !important;
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", ui-serif, serif !important;
+  font-size: 34px !important;
+  font-weight: 600 !important;
+  color: var(--contact-ink) !important;
+  margin: 0 0 36px 0 !important;
+  line-height: 1.28 !important;
+  letter-spacing: 0.002em !important;
 }
 .contact-info-block {
   display: flex !important;
   flex-direction: column !important;
-  gap: 18px !important;
-  font-size: 14.5px !important;
-  color: #334155 !important;
+  gap: 4px !important;
+  font-size: 15px !important;
+  color: var(--contact-sub) !important;
   line-height: 1.6 !important;
   font-family: inherit !important;
 }
-.contact-info-block p {
+.contact-info-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
   margin: 0 !important;
+  padding: 15px 2px !important;
+  border-bottom: 1px solid rgba(28, 25, 23, 0.09) !important;
+}
+.contact-info-row:last-child {
+  border-bottom: none !important;
+}
+.contact-info-icon {
+  flex: none !important;
+  width: 38px !important;
+  height: 38px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+  background: var(--contact-accent-soft) !important;
+  color: var(--contact-accent) !important;
+}
+.contact-info-icon svg {
+  width: 16px !important;
+  height: 16px !important;
+  display: block !important;
 }
 .contact-info-block a {
-  color: #0284c7 !important;
+  color: var(--contact-ink) !important;
   text-decoration: none !important;
   font-weight: 600 !important;
+  transition: color 0.15s ease !important;
 }
 .contact-info-block a:hover {
+  color: var(--contact-accent) !important;
   text-decoration: underline !important;
 }
 
 @media (max-width: 768px) {
   .contact-modal-dialog {
-    flex-direction: column;
-    height: auto;
-    max-height: 92vh;
-    overflow-y: auto;
+    flex-direction: column !important;
   }
   .contact-modal-left {
-    height: 240px;
-    flex: none;
+    height: 38vh !important;
+    width: 100% !important;
+    flex: none !important;
   }
+  .contact-modal-right {
+    height: auto !important;
+    flex: 1 !important;
+    padding: 32px 24px !important;
+  }
+  .contact-title {
+    font-size: 24px !important;
+  }
+}
+
+/* Landscape phone — the contact card carries the most vertical content of any screen and
+   meets the shortest viewport. Declared AFTER the max-width:768px block above on purpose:
+   these selectors have the same specificity, so order is what decides, and a landscape
+   phone (651–916px wide) matches BOTH. Vertical space is the scarce one here, so it keeps
+   the side-by-side layout rather than the stacked one and just tightens everything. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .contact-modal-dialog { flex-direction: row !important; }
+  .contact-modal-left { width: 38% !important; height: 100% !important; flex: none !important; }
+  .contact-modal-right {
+    width: 62% !important; height: 100% !important; flex: 1 !important;
+    padding: 16px 20px !important;
+    justify-content: safe center !important;
+    overflow-y: auto !important;
+  }
+  .contact-modal-close { top: 10px !important; right: 10px !important; }
+  .contact-eyebrow { margin: 0 0 8px 0 !important; }
+  .contact-title { font-size: 20px !important; margin: 0 0 12px 0 !important; }
+  .contact-info-block { font-size: 12.5px !important; line-height: 1.45 !important; }
+  .contact-info-row { padding: 7px 2px !important; gap: 10px !important; }
+  .contact-info-icon { width: 28px !important; height: 28px !important; }
+  .contact-info-icon svg { width: 13px !important; height: 13px !important; }
 }
 
 /* ─── Sub-Group Cards & Multi-Level Admin UI ────────────────────────────── */

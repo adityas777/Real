@@ -1,3 +1,6 @@
 *.png
 *.jpg
 *.jpeg
+# Build artefacts and downloaded tools — not source
+__pycache__/
+plot-map/cloudflared.exe

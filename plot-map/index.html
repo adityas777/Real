@@ -12,6 +12,18 @@
   <noscript>
     <link rel="stylesheet" href="styles.css" />
   </noscript>
+
+  <!-- PWA identity for the client (view-only) experience — see sw.js for the offline
+       cache layer this supports and registerOfflineSupport() in app.js, which is the only
+       thing that actually activates it (never registered on ?admin=1 pages). The tags
+       below are static markup and harmless to have present everywhere. -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0c0d11" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Build91" />
 </head>
 
 <body>
@@ -77,6 +89,22 @@
               <button class="btn btn-ghost ax-brand-logo-clear" id="axBrandLogoClear" type="button" title="Remove the logo"
                 hidden>Clear</button>
             </div>
+            <div class="ax-brand-logo ax-brand-audio">
+              <button class="btn btn-ghost" id="axAudioPick" type="button"
+                title="Upload background music — an audio file, or a video whose sound track you want">🎵 Audio…</button>
+              <input type="file" id="axAudioFile"
+                accept="audio/*,video/*,.mp3,.m4a,.aac,.ogg,.oga,.wav,.weba,.mp4,.m4v,.mov,.mkv,.webm"
+                hidden />
+              <span class="ax-brand-logo-name" id="axAudioName">no audio</span>
+              <button class="btn btn-ghost ax-brand-logo-clear" id="axAudioClear" type="button"
+                title="Remove the background audio" hidden>Clear</button>
+            </div>
+            <p class="ax-audio-hint">Plays quietly on loop for visitors, who can silence it with the
+              <strong>🔊</strong> button. A <strong>video works too</strong> — only its sound is used and the
+              picture is never shown, so a clip you like the music from is fine (it is stored at full size
+              though, so an audio file is lighter for visitors). Browsers refuse to start sound before a
+              visitor interacts with the page, so it begins on their first tap. It does not auto-play here
+              in admin — press <strong>🔊</strong> to preview.</p>
           </div>
         </div>
         <!-- inline naming / confirm row (reused by new / duplicate / rename / delete) -->
@@ -110,6 +138,9 @@
       <div class="landmarks" id="landmarks" aria-hidden="true"></div>
       <!-- in-layout amenity icon-pins (clickable → info card + render lightbox), projected each frame -->
       <div class="amenities" id="amenities" aria-hidden="true"></div>
+      <!-- mobile-only: shown when renderLandmarks caps how many banners render at once
+           (too many overlap on a narrow screen) — taps into the Landmarks category picker -->
+      <button class="lm-overflow-hint" id="lmOverflowHint" type="button" hidden></button>
     </div>
 
     <!-- ─── Client Navigation Drawer (Left Panel Overlay) ────────────────────────── -->
@@ -118,6 +149,15 @@
         <span class="cat-toggle-ico" id="catToggleIco">‹</span>
       </button>
       <div class="cat-drawer-inner">
+        <!-- Phone only: the project's logo/name above the menu. The top bar that normally
+             carries the branding is squeezed on portrait and hidden entirely on landscape,
+             so on a phone the drawer is the only place the visitor sees whose site this is.
+             Populated by applyBrand() in app.js; CSS hides it on desktop. -->
+        <div class="cat-drawer-brand" id="catDrawerBrand" aria-hidden="true">
+          <span class="cat-drawer-logo" id="catDrawerLogo"></span>
+          <strong class="cat-drawer-name" id="catDrawerName"></strong>
+          <span class="cat-drawer-tagline" id="catDrawerTagline"></span>
+        </div>
         <!-- Level 1: Main Menu -->
         <div class="cat-menu-level" id="catLevel1">
           <nav class="cat-nav" id="catNavL1" aria-label="Main Menu">
@@ -169,6 +209,20 @@
 
     <!-- look-around / zoom controls -->
     <div class="zoom-controls" role="group" aria-label="View controls">
+      <!-- landscape-only: the topbar's Available/Reserved/Sold legend is hidden in
+           landscape (see styles.css) to free up vertical space on a short screen; this
+           button takes over just the "Available" filter toggle, in the same spot -->
+      <div class="zoom-status-group" id="zoomStatusGroup">
+        <button class="btn zoom-status-btn" id="zoomAvailableBtn" type="button" data-status="available" aria-pressed="true" aria-label="Toggle available plots">
+          <span class="dot"></span>Available <span class="count">0</span>
+        </button>
+        <button class="btn zoom-status-btn" id="zoomReservedBtn" type="button" data-status="reserved" aria-pressed="true" aria-label="Toggle reserved plots">
+          <span class="dot"></span>Reserved <span class="count">0</span>
+        </button>
+        <button class="btn zoom-status-btn" id="zoomSoldBtn" type="button" data-status="sold" aria-pressed="true" aria-label="Toggle sold plots">
+          <span class="dot"></span>Sold <span class="count">0</span>
+        </button>
+      </div>
       <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false" aria-label="Show plot numbers"
         title="Show plot numbers">#</button>
       <button class="btn btn-icon" id="landmarkToggle" type="button" aria-pressed="false" aria-label="Show landmarks"
@@ -188,7 +242,58 @@
     <div class="tooltip" id="tooltip" role="status" aria-hidden="true"></div>
 
     <!-- non-blocking notice (e.g. data-load fallback) -->
+    <!-- Background music (admin-uploaded, client-only). Kept in the DOM rather than created
+         on demand so a single element owns playback state across the whole session. -->
+    <audio id="siteAudio" loop preload="none"></audio>
+
     <div class="notice" id="notice" role="alert" hidden></div>
+
+    <!-- Portrait-phone only: an animated nudge to rotate, shown once per visit and
+         dismissed on tap or as soon as the device is turned (showRotateHint in app.js).
+         Replaces a plain text toast — the motion communicates the ask faster than the
+         sentence does. -->
+    <div class="rotate-hint" id="rotateHint" hidden>
+      <div class="rotate-hint-card">
+        <svg class="rotate-hint-phone" viewBox="0 0 64 104" aria-hidden="true">
+          <rect class="rh-body" x="4" y="4" width="56" height="96" rx="9" />
+          <rect class="rh-screen" x="10" y="14" width="44" height="76" rx="4" />
+          <circle class="rh-dot" cx="32" cy="96" r="2.4" />
+        </svg>
+        <svg class="rotate-hint-arrow" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M8 26a15 15 0 1 1 6 10" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" />
+          <path d="M13 26 L8 26 L8 21" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <strong>Rotate your phone</strong>
+        <span>The map opens up in landscape</span>
+      </div>
+    </div>
+
+    <!-- client-only: ONE combined "Add to Home Screen" (+offline content download) prompt —
+         a single tap fires the native install dialog AND starts the content download in
+         parallel (maybeOfferOfflineSave/runOfflineDownload in app.js). Previously two
+         separate prompts shown back to back; merged per the user's explicit request since
+         a manual download step ahead of the (separate) native install step felt redundant. -->
+    <div class="offline-save-banner" id="offlineSaveBanner" role="status" hidden>
+      <div class="offline-save-prompt" id="offlineSavePrompt">
+        <span class="offline-save-icon">⬇</span>
+        <div class="offline-save-text">
+          <strong id="offlineSaveTitle">Add to Home Screen</strong>
+          <span id="offlineSaveSize">Checking size…</span>
+        </div>
+        <button class="btn btn-ghost offline-save-skip" id="offlineSaveSkip" type="button">Not now</button>
+        <button class="btn btn-primary offline-save-go" id="offlineSaveGo" type="button">Add</button>
+      </div>
+      <div class="offline-save-progress" id="offlineSaveProgress" hidden>
+        <div class="offline-save-progress-head">
+          <strong>Saving for offline…</strong>
+          <span id="offlineSaveEta"></span>
+        </div>
+        <div class="offline-save-bar"><div class="offline-save-bar-fill" id="offlineSaveBarFill"></div></div>
+        <span class="offline-save-pct" id="offlineSavePct">0%</span>
+      </div>
+    </div>
   </main>
 
   <!-- ─── Admin alignment toolbar (revealed only in ?admin=1) ───────────────── -->
@@ -262,6 +367,24 @@
         connected by a line to a pin you place in the scene. Drag the <strong>pin</strong> onto a spot and drag the
         <strong>banner</strong> to position it.
       </p>
+      <div class="ax-lm-intro ax-lm-legend">
+        <div>Every row has a <strong>✓ ✕</strong> pair (which landmarks show up-front) and, separately, a
+          <strong>×</strong> (delete). The highlighted half of the pair is the landmark's current state:</div>
+        <div><span class="ax-lm-key ax-lm-key-on">✓</span><strong>Show by default</strong> — it appears straight away in
+          the visitor's all-landmarks view.</div>
+        <div><span class="ax-lm-key">✕</span><strong>Hide from the default view</strong> — keeps the view uncluttered.
+          It still appears in full whenever the visitor picks its <strong>category</strong>. Nothing is deleted.</div>
+        <div><span class="ax-lm-key ax-lm-key-del">×</span><strong>Delete</strong> — removes the landmark from the
+          project for good.</div>
+        <div>Quickest way to curate a long list: <strong>✕ Hide all</strong>, then ✓ the handful you want up-front.</div>
+        <div>While this tab is open you always see every landmark in the scene; the hidden ones are outlined with a dashed
+          border so you can still drag them.</div>
+      </div>
+      <div class="ax-lm-bulk">
+        <span class="ax-lm-count" id="axLmCount"></span>
+        <button class="btn btn-ghost" id="axLmShowAll" type="button" title="Show every landmark in the default view">✓ Show all</button>
+        <button class="btn btn-ghost" id="axLmHideAll" type="button" title="Hide every landmark from the default view (they still appear under their category). Does not delete anything.">✕ Hide all</button>
+      </div>
       <button class="btn btn-import" id="axLmAdd" type="button">＋ Add landmark</button>
       <p class="ax-lm-empty" id="axLmEmpty">No landmarks yet.</p>
       <ul class="ax-lm-list" id="axLmList" aria-label="Landmarks"></ul>
@@ -568,6 +691,25 @@
     </div>
   </div>
 
+  <!-- ─── Export Pre-flight: Online-Only Content Warning ────────────────────────── -->
+  <div class="modal custom-feature-modal" id="exportFlaggedModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog feature-modal-dialog" role="dialog" aria-label="Items that need internet" style="max-width: 560px; width: 92vw;">
+      <div class="modal-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <h3 class="modal-title" style="margin:0; font-size:15px; font-weight:700;">⚠️ Some items link online instead of a file</h3>
+          <span style="font-size:11px; font-weight:500; color:#9aa5b1;">These won't load once the export is opened offline</span>
+        </div>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body custom-modal-body" id="exportFlaggedList" style="padding:18px; max-height:50vh; overflow-y:auto;"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; padding:14px 18px; border-top:1px solid rgba(255,255,255,0.1);">
+        <button class="btn btn-ghost" type="button" id="exportFlaggedCancel" style="font-size:12px;">Cancel Export</button>
+        <button class="btn btn-primary" type="button" id="exportFlaggedProceed" style="font-size:12px;">Export Anyway</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ─── Client Display Modals ──────────────────────────────────────────────── -->
 
   <!-- Client Video Modal (Location Intel & Walkthrough) -->
@@ -637,34 +779,41 @@
       </div>
       <div class="modal-body brochure-modal-body" style="padding:0; background:#525659;">
         <iframe id="clientBrochureFrame" style="width:100%; height:75vh; border:none; display:block; background:#525659;" allow="autoplay"></iframe>
+        <!-- Android Chrome (older builds especially) has no inline PDF viewer at all and
+             downloads PDFs instead of showing them — confirmed on a real device, online and
+             off. There, app.js renders the pages here with pdf.js instead of using the
+             iframe above. See openClientBrochureModal/renderPdfInto. -->
+        <div id="clientBrochureCanvas" class="brochure-canvas" style="display:none;"></div>
       </div>
     </div>
   </div>
 
   <!-- Client Contact Us Modal (Exact Replica of User Reference Image 2) -->
-  <div class="contact-modal" id="clientContactModal" aria-hidden="true" hidden style="position:fixed; inset:0; z-index:9999; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.78); backdrop-filter:blur(8px);">
-    <div class="contact-modal-backdrop" data-close style="position:absolute; inset:0; z-index:1;"></div>
-    <div class="contact-modal-dialog" role="dialog" aria-label="Contact Information" style="position:relative; z-index:10; display:flex; flex-direction:row; width:880px; max-width:92vw; height:480px; max-height:85vh; background:#ffffff; border-radius:8px; overflow:hidden; box-shadow:0 24px 60px rgba(0,0,0,0.7); margin:auto;">
-      
+  <div class="contact-modal" id="clientContactModal" aria-hidden="true" hidden>
+    <div class="contact-modal-backdrop" data-close></div>
+    <div class="contact-modal-dialog" role="dialog" aria-label="Contact Information">
+
       <!-- Left Side Image -->
-      <div class="contact-modal-left" style="flex:1.1; width:52%; height:100%; position:relative; overflow:hidden; background:#0f172a;">
-        <img id="clientContactImg" src="projects/sample/Demo.web.jpg" alt="Project Site Map" style="width:100%; height:100%; object-fit:cover; display:block;" />
-        <div style="position:absolute; inset:0; background:linear-gradient(to top, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0.15) 40%, transparent 100%); pointer-events:none;"></div>
+      <div class="contact-modal-left">
+        <img id="clientContactImg" src="projects/sample/Demo.web.jpg" alt="Project Site Map" />
       </div>
-      
-      <!-- Right Side White Card Info -->
-      <div class="contact-modal-right" style="flex:0.9; width:48%; height:100%; padding:40px 36px; display:flex; flex-direction:column; justify-content:center; background:#ffffff; color:#0f172a; position:relative; box-sizing:border-box;">
-        <button class="contact-modal-close" id="clientContactClose" type="button" aria-label="Close" style="position:absolute; top:16px; right:16px; width:32px; height:32px; background:#00bcff; color:#ffffff; border:none; border-radius:4px; font-size:18px; font-weight:700; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:20;">✕</button>
-        
-        <h2 class="contact-title" id="clientContactTitle" style="font-size:22px; font-weight:800; color:#0f172a; margin:0 0 24px 0; line-height:1.35; font-family:system-ui, -apple-system, sans-serif;">Anandam Eleganza - Premium Villa Plots</h2>
-        
-        <div class="contact-info-block" style="display:flex; flex-direction:column; gap:16px; font-size:14.5px; color:#334155; line-height:1.6; font-family:system-ui, -apple-system, sans-serif;">
-          <p id="clientContactAbout" style="margin:0; color:#334155;">Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh</p>
-          <p id="clientContactPhoneContainer" style="margin:0; color:#334155;">Phone: <a id="clientContactPhone" href="tel:+917389705477" style="color:#0284c7; text-decoration:none; font-weight:600;">+91 7389705477</a></p>
-          <p id="clientContactEmailContainer" style="margin:0; color:#334155;">Email: <a id="clientContactEmail" href="mailto:anandameleganza@gmail.com" style="color:#0284c7; text-decoration:none; font-weight:600;">anandameleganza@gmail.com</a></p>
+
+      <!-- Right Side Info -->
+      <div class="contact-modal-right">
+        <button class="contact-modal-close" id="clientContactClose" type="button" aria-label="Close">✕</button>
+
+        <div class="contact-info-wrap">
+          <span class="contact-eyebrow">Get in touch</span>
+          <h2 class="contact-title" id="clientContactTitle">Anandam Eleganza - Premium Villa Plots</h2>
+
+          <div class="contact-info-block">
+            <p class="contact-info-row" id="clientContactAboutRow"><span class="contact-info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-7.58-7-12a7 7 0 0 1 14 0c0 4.42-7 12-7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></span><span id="clientContactAbout">Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh</span></p>
+            <p class="contact-info-row" id="clientContactPhoneContainer"><span class="contact-info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/></svg></span><a id="clientContactPhone" href="tel:+917389705477">+91 7389705477</a></p>
+            <p class="contact-info-row" id="clientContactEmailContainer"><span class="contact-info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><a id="clientContactEmail" href="mailto:anandameleganza@gmail.com">anandameleganza@gmail.com</a></p>
+          </div>
         </div>
       </div>
-      
+
     </div>
   </div>
 

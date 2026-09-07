@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 landmark hotspots",
-  "savedAt": "2026-08-27T11:55:37.552Z",
+  "savedAt": "2026-09-03T10:41:45.995Z",
   "landmarks": [
     {
       "id": "lm19",
@@ -100,12 +100,12 @@
       "driveTime": "",
       "icon": "market",
       "hotspot": {
-        "lonDeg": -129.15,
-        "latDeg": -4.76
+        "lonDeg": -148.52,
+        "latDeg": -5.81
       },
       "banner": {
-        "lonDeg": -122.21,
-        "latDeg": 8.63
+        "lonDeg": -149.9,
+        "latDeg": 5.31
       }
     },
     {
@@ -166,6 +166,24 @@
       "banner": {
         "lonDeg": -168.9,
         "latDeg": 6.59
+      }
+    },
+    {
+      "id": "lm34",
+      "label": "kabab",
+      "distance": "",
+      "driveTime": "",
+      "icon": "restaurant",
+      "render": {
+        "file": "sample/landmark-lm34.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 174.98,
+        "latDeg": -5.13
+      },
+      "banner": {
+        "lonDeg": 173.84,
+        "latDeg": 8.15
       }
     }
   ]

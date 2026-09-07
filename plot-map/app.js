@@ -51,12 +51,18 @@ const els = {
   legend: $('legend'), syncMeta: $('syncMeta'), refreshBtn: $('refreshBtn'),
   tooltip: $('tooltip'), notice: $('notice'),
   zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'), amenityToggle: $('amenityToggle'),
+  zoomStatusGroup: $('zoomStatusGroup'), zoomAvailableBtn: $('zoomAvailableBtn'),
+  zoomReservedBtn: $('zoomReservedBtn'), zoomSoldBtn: $('zoomSoldBtn'), rotateHint: $('rotateHint'),
   landmarks: $('landmarks'), amenities: $('amenities'),
-  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catLevelSubMenu: $('catLevelSubMenu'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'), fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
+  axAudioPick: $('axAudioPick'), axAudioFile: $('axAudioFile'), axAudioName: $('axAudioName'), axAudioClear: $('axAudioClear'), siteAudio: $('siteAudio'),
+  catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catLevelSubMenu: $('catLevelSubMenu'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'),
+  catDrawerBrand: $('catDrawerBrand'), catDrawerLogo: $('catDrawerLogo'), catDrawerName: $('catDrawerName'), catDrawerTagline: $('catDrawerTagline'),
+  fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
+  lmOverflowHint: $('lmOverflowHint'),
   // admin tabs + landmarks
   axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'),
   axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'),
-  axLmAdd: $('axLmAdd'), axLmList: $('axLmList'), axLmEmpty: $('axLmEmpty'), axLmLoad: $('axLmLoad'), axLmFile: $('axLmFile'), axLmSave: $('axLmSave'),
+  axLmAdd: $('axLmAdd'), axLmList: $('axLmList'), axLmEmpty: $('axLmEmpty'), axLmCount: $('axLmCount'), axLmShowAll: $('axLmShowAll'), axLmHideAll: $('axLmHideAll'), axLmLoad: $('axLmLoad'), axLmFile: $('axLmFile'), axLmSave: $('axLmSave'),
   axAmAdd: $('axAmAdd'), axAmList: $('axAmList'), axAmEmpty: $('axAmEmpty'), axAmLoad: $('axAmLoad'), axAmFile: $('axAmFile'), axAmSave: $('axAmSave'),
   // amenity info card + full-render lightbox
   amCard: $('amCard'), amCardClose: $('amCardClose'), amCardIco: $('amCardIco'), amCardBlock: $('amCardBlock'), amCardTitle: $('amCardTitle'),
@@ -89,6 +95,11 @@ const els = {
   adminNodeBuilderModal: $('adminNodeBuilderModal'),
   clientVideoModal: $('clientVideoModal'), clientGalleryModal: $('clientGalleryModal'),
   clientBrochureModal: $('clientBrochureModal'), clientContactModal: $('clientContactModal'),
+  exportFlaggedModal: $('exportFlaggedModal'), exportFlaggedList: $('exportFlaggedList'),
+  exportFlaggedCancel: $('exportFlaggedCancel'), exportFlaggedProceed: $('exportFlaggedProceed'),
+  offlineSaveBanner: $('offlineSaveBanner'), offlineSavePrompt: $('offlineSavePrompt'), offlineSaveTitle: $('offlineSaveTitle'), offlineSaveSize: $('offlineSaveSize'),
+  offlineSaveSkip: $('offlineSaveSkip'), offlineSaveGo: $('offlineSaveGo'), offlineSaveProgress: $('offlineSaveProgress'),
+  offlineSaveEta: $('offlineSaveEta'), offlineSaveBarFill: $('offlineSaveBarFill'), offlineSavePct: $('offlineSavePct'),
 };
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -108,6 +119,18 @@ const _params = new URLSearchParams(location.search);
 // client, reads all data from dataBase (e.g. "./data") instead of projects/<id>/, and never
 // touches the /api server — so the folder runs on any static host / inside an <iframe>.
 const BUNDLE = (typeof window !== 'undefined' && window.B91_BUNDLE && typeof window.B91_BUNDLE === 'object') ? window.B91_BUNDLE : null;
+// A bundle also bakes this project's core data files inline (see server.py's
+// build_embedded_files_json) so loadProjectFile below never needs fetch() — fetch() and ES
+// module imports are both blocked when the exported folder is opened via file:// with no
+// server, which is the whole point of a "standalone" bundle; classic <script src> and
+// <img src> are not blocked, which is why only the data-loading path needs this indirection.
+const BUNDLE_FILES = (BUNDLE && window.B91_BUNDLE_FILES && typeof window.B91_BUNDLE_FILES === 'object') ? window.B91_BUNDLE_FILES : null;
+// The pano + site-plan images specifically get base64-embedded too (server.py's
+// build_embedded_images_json), keyed by basename → data: URI. Unlike every other asset
+// (a plain <img>, which file:// loads fine), these two are uploaded to a WebGL texture,
+// and a texture sourced from a file:// path — even one sitting right next to index.html —
+// is rejected by the browser as tainted/cross-origin (verified directly); a data: URI isn't.
+const BUNDLE_IMAGES = (BUNDLE && window.B91_BUNDLE_IMAGES && typeof window.B91_BUNDLE_IMAGES === 'object') ? window.B91_BUNDLE_IMAGES : null;
 // The project comes from ?project=<id> (or the baked bundle id). In ADMIN only, a remembered
 // last-project is a convenience fallback; the client never loads a project from localStorage.
 const BOOT_PROJECT = BUNDLE
@@ -116,6 +139,19 @@ const BOOT_PROJECT = BUNDLE
     || (_params.has('admin') ? (() => { try { return sanitizeProjectId(localStorage.getItem('b91-project-id')); } catch { return ''; } })() : '')
     || 'sample');
 const baseName = (p) => String(p || '').split(/[\\/]/).pop();
+
+// The narrow-portrait-only condition the drawer default-collapse, topbar/legend squeeze,
+// and rotate hint share. A landscape phone has the width these specifically exist to work
+// around not having, confirmed by screenshot (the drawer/topbar look right open/uncompressed
+// in landscape) — so those stay gated to portrait only. Never true on a real desktop window.
+const isMobilePortrait = () => window.innerWidth <= 720 && window.matchMedia('(orientation: portrait)').matches;
+// The landmark density cap is a different case: even a fairly wide landscape phone (~844px)
+// still isn't wide enough to show a dozen labels without heavy overlap — confirmed by
+// screenshot, this one genuinely needs a phone-landscape allowance too, just a separate,
+// wider threshold than the portrait one above (900 comfortably covers real phones in
+// landscape — the largest phones top out around 926-932px — while real desktop windows are
+// essentially never both landscape-oriented AND under 900px).
+const isMobileLandscape = () => window.innerWidth <= 900 && window.matchMedia('(orientation: landscape)').matches;
 
 const state = {
   admin: BUNDLE ? false : _params.has('admin'),   // a bundle is always the view-only client (admin code stays inert)
@@ -132,6 +168,7 @@ const state = {
   planBlob: null, planName: null,       // raw imported plan PNG (kept so the working session survives a reload pre-export)
   panoImage: null,                      // { file } — admin-chosen 360° background pano (exported + referenced in alignment.json)
   brand: { name: '', tagline: '', logo: null, logoBlob: null, logoName: null, _url: null, _ver: '' }, // client title-bar branding (in alignment.json)
+  audio: { file: null, blob: null, name: null, _url: null, _ver: '' },  // admin-uploaded background music (in alignment.json), played on loop for the client
   panoBlob: null, panoName: null,       // resized texture-safe pano JPEG kept for export / session restore
   plots: new Map(), selectedId: null, hoverId: null,
   activeFilters: new Set(STATUS_ORDER),
@@ -160,9 +197,27 @@ const labelCache = new Map();           // id → reusable label Sprite (avoid t
 // image paths (e.g. "sample/foo.jpg") are resolved by BASENAME against the project base,
 // so old paths keep working and a project directory is self-contained & relocatable.
 const dataUrl = (name) => `${state.assetBase}/${name}?t=${Date.now()}`;
+
+// Load one of this project's core data files (plots.svg/csv, alignment/landmarks/amenities
+// .json) — in a standalone bundle, reads the copy server.py embedded inline (BUNDLE_FILES)
+// instead of fetch()-ing it, since fetch() is blocked when the exported folder is opened via
+// file:// with no server. Returns a fetch-Response-shaped object either way (.ok/.text()/
+// .json()) so callers don't need to branch — null on any failure, same as a failed fetch.
+async function loadProjectFile(name) {
+  if (BUNDLE_FILES && Object.prototype.hasOwnProperty.call(BUNDLE_FILES, name)) {
+    const text = BUNDLE_FILES[name];
+    return { ok: true, text: async () => text, json: async () => JSON.parse(text) };
+  }
+  try { return await fetch(dataUrl(name), { cache: 'no-store' }); } catch { return null; }
+}
+
 function assetUrl(storedPath, ver) {
   if (!storedPath) return '';
   if (/^(https?:|\/\/|data:|blob:)/i.test(storedPath)) return storedPath;
+  if (BUNDLE_IMAGES) {
+    const embedded = BUNDLE_IMAGES[baseName(storedPath)];
+    if (embedded) return embedded;         // pano/plan in bundle mode — see BUNDLE_IMAGES above
+  }
   const u = `${state.assetBase}/${baseName(storedPath)}`;
   return ver ? `${u}?v=${encodeURIComponent(ver)}` : u;
 }
@@ -243,7 +298,7 @@ async function fetchSheetRows(cfg = state.sheet) {
   return null;
 }
 async function loadCommittedCSV() {                     // the committed projects/<id>/plots.csv (fallback / default)
-  let res = null; try { res = await fetch(dataUrl('plots.csv'), { cache: 'no-store' }); } catch {}
+  const res = await loadProjectFile('plots.csv');
   if (!res || !res.ok) { state.rows = new Map(); return false; } // new/empty project — no CSV yet
   state.rows = indexRows(parseCSV(await res.text()).map(normalizeRow));
   return true;
@@ -251,7 +306,9 @@ async function loadCommittedCSV() {                     // the committed project
 // Populate state.rows from the LIVE sheet if one is configured & reachable, else the
 // committed CSV. Returns a short label describing the source (shown by setSync).
 async function loadData() {
-  if (state.sheet.enabled && state.sheet.url) {
+  // A standalone bundle has no network to reach a live sheet with, and no server to fall
+  // back through either — go straight to the embedded plots.csv instead of a doomed fetch.
+  if (!BUNDLE && state.sheet.enabled && state.sheet.url) {
     const snap = await fetchSheetRows();
     if (snap) { state.rows = snap; state.dataSource = 'live'; return 'live sheet'; }
     await loadCommittedCSV(); state.dataSource = 'cached'; return 'cached · sheet unreachable';
@@ -261,8 +318,7 @@ async function loadData() {
 
 // ─── Geometry (polygons in image-pixel space) + anchor ────────────────────────
 async function loadGeometry() {
-  const url = dataUrl('plots.svg');
-  let res = null; try { res = await fetch(url, { cache: 'no-store' }); } catch {}
+  const res = await loadProjectFile('plots.svg');
   if (!res || !res.ok) {                       // no plots.svg yet ⇒ a NEW/empty project — start blank so admin can build it
     state.geom = []; state.imgW = 12000; state.imgH = 6000; recomputeAnchorAndK();
     return;
@@ -393,6 +449,18 @@ function brandData() {
   if (!name && !tagline && !b.logo) return null;
   return { ...(name ? { name } : {}), ...(tagline ? { tagline } : {}), ...(b.logo ? { logo: { file: b.logo } } : {}) };
 }
+// Background audio, stored and resolved exactly like the brand logo: a fresh in-memory
+// blob wins before export, otherwise the committed path, cache-busted with the alignment's
+// savedAt so re-uploading over the same filename can't serve a stale track.
+function audioData() {
+  return state.audio.file ? { file: state.audio.file } : null;
+}
+function siteAudioSrc() {
+  const a = state.audio;
+  if (a.blob) { if (!a._url) a._url = URL.createObjectURL(a.blob); return a._url; }
+  return assetUrl(a.file, a._ver);
+}
+function hasSiteAudio() { return !!(state.audio.blob || state.audio.file); }
 function brandLogoSrc() {
   const b = state.brand;
   if (b.logoBlob) { if (!b._url) b._url = URL.createObjectURL(b.logoBlob); return b._url; }
@@ -415,6 +483,26 @@ function applyBrand() {
     if (src) { els.brandMark.classList.add('has-logo'); els.brandMark.innerHTML = `<img class="brand-logo" alt="${esc(name)} logo" />`; const img = els.brandMark.firstChild; img.onerror = fallbackMark; img.src = src; }
     else fallbackMark();
   }
+  // Mirror the branding into the drawer's phone-only header (see index.html) — same
+  // resolved logo/name/tagline, so it can't drift from the top bar's version.
+  if (els.catDrawerName) els.catDrawerName.textContent = name;
+  if (els.catDrawerTagline) els.catDrawerTagline.textContent = tagline;
+  if (els.catDrawerLogo) {
+    const dropText = () => els.catDrawerBrand && els.catDrawerBrand.classList.remove('has-logo');
+    if (src) {
+      els.catDrawerLogo.innerHTML = `<img alt="${esc(name)} logo" />`;
+      const i = els.catDrawerLogo.firstChild;
+      // A logo almost always contains the company wordmark already, so repeating the name
+      // and tagline underneath just prints it twice — `has-logo` hides them (CSS). Falls
+      // back to showing the text if the image can't load.
+      i.onerror = () => { els.catDrawerLogo.textContent = raw ? brandInitials(raw) : BRAND_DEFAULT_MARK; dropText(); };
+      i.src = src;
+      if (els.catDrawerBrand) els.catDrawerBrand.classList.add('has-logo');
+    } else {
+      els.catDrawerLogo.textContent = raw ? brandInitials(raw) : BRAND_DEFAULT_MARK;
+      dropText();
+    }
+  }
   document.title = `${name} · ${tagline}`;
   if (state.admin) updateBrandAdminUI();
 }
@@ -433,6 +521,86 @@ async function setBrandLogo(file) {
   state.brand.logoBlob = out.blob; state.brand.logo = 'sample/logo.web.png'; state.brand.logoName = 'logo.web.png';
   applyBrand(); onAlignmentChanged();
   setAxStatus(`Logo set (${out.W}×${out.H}). Click <strong>Save</strong> in the top bar to commit it.`);
+}
+// Stored AS UPLOADED — no re-encode. There's no browser-side equivalent of
+// resizeImageToBlob for audio (decoding + re-encoding in-page needs a codec we don't ship),
+// so the admin's file is what ships. Hence the size warning rather than a silent shrink: a
+// 20MB track is a real cost on a phone, and only the admin can fix it.
+//
+// A VIDEO is accepted here too, and only its sound is used. No extraction step is needed:
+// an <audio> element handed an .mp4/.webm/.mov demuxes it and plays the sound track, with
+// the picture simply never rendered because an audio element has no video surface. That
+// keeps one code path for both kinds. (The alternative — decodeAudioData into a buffer —
+// would pull the whole file into memory as raw PCM, hundreds of MB for a short clip, to
+// achieve the same audible result.) The cost is honest and stated in the admin hint: the
+// file still ships at its full video size, so an audio file is lighter for visitors.
+const SITE_AUDIO_BIG_MB = 8;
+function isVideoSource(file) {
+  return /^video\//i.test(file?.type || '') || /\.(mp4|m4v|mov|mkv|webm)$/i.test(file?.name || '');
+}
+function setSiteAudioFile(file) {
+  if (!file) return;
+  const named = /\.(mp3|m4a|aac|ogg|oga|wav|weba|webm|mp4|m4v|mov|mkv)$/i.test(file.name || '');
+  if (!/^(audio|video)\//i.test(file.type || '') && !named) {
+    setAxStatus('That does not look like an audio or video file — use an MP3, M4A, OGG or WAV, or an MP4/WebM/MOV whose sound you want.');
+    return;
+  }
+  if (state.audio._url) { try { URL.revokeObjectURL(state.audio._url); } catch {} state.audio._url = null; }
+  const ext = ((file.name || '').match(/\.[a-z0-9]+$/i) || ['.mp3'])[0].toLowerCase();
+  state.audio.blob = file;
+  state.audio.name = `audio${ext}`;
+  state.audio.file = `sample/audio${ext}`;
+  applySiteAudio(); onAlignmentChanged();
+  const mb = file.size / (1024 * 1024);
+  const vid = isVideoSource(file);
+  setAxStatus(`Background ${vid ? 'audio taken from that video' : 'audio set'} (${mb.toFixed(1)} MB).${vid
+    ? ' Only its <strong>sound</strong> is used — the picture is never shown.'
+    : ''}${mb > SITE_AUDIO_BIG_MB
+    ? ' <strong>That is large</strong> — visitors on mobile data download it before it plays; a shorter clip, or an audio-only file, is kinder.'
+    : ''} Press <strong>\u{1F50A}</strong> to preview. Click <strong>Save</strong> in the top bar to commit it.`);
+  if (vid) warnIfSilentVideo(file);
+}
+// A video picked for its music might carry no sound track at all — in which case nothing
+// ever plays and there is no clue why. There is no portable "hasAudio" API, so this only
+// speaks up when a browser answers DEFINITIVELY (Firefox's mozHasAudio, or the spec's
+// audioTracks where implemented); elsewhere it stays quiet rather than crying wolf on a
+// perfectly good file. The admin's \u{1F50A} preview is the real check either way.
+function warnIfSilentVideo(file) {
+  let probe;
+  try { probe = document.createElement('video'); } catch { return; }
+  const url = URL.createObjectURL(file);
+  const finish = (hasSound) => {
+    try { URL.revokeObjectURL(url); } catch {}
+    probe.removeAttribute('src');
+    if (hasSound === false) setAxStatus('That video has <strong>no sound track</strong>, so nothing will play for visitors. Pick a clip that has audio.');
+  };
+  probe.preload = 'auto';
+  probe.muted = true;                     // muted playback is exempt from the autoplay policy, so the fallback below needs no gesture
+  probe.addEventListener('loadedmetadata', () => {
+    if (typeof probe.mozHasAudio === 'boolean') { finish(probe.mozHasAudio); return; }              // Firefox
+    if (probe.audioTracks && typeof probe.audioTracks.length === 'number') { finish(probe.audioTracks.length > 0); return; }  // spec / Safari
+    // Chrome exposes neither, but it does count decoded bytes per track — so play it
+    // MUTED for a moment and see whether any audio actually decodes. Verified to
+    // discriminate correctly on real files: a clip with a `soun` track reports a non-zero
+    // count, a video-only clip stays at 0.
+    if (typeof probe.webkitAudioDecodedByteCount !== 'number') { finish(null); return; }
+    probe.play().then(() => {
+      setTimeout(() => { const n = probe.webkitAudioDecodedByteCount; try { probe.pause(); } catch {} finish(n > 0); }, 700);
+    }).catch(() => finish(null));
+  }, { once: true });
+  probe.addEventListener('error', () => finish(null), { once: true });
+  probe.src = url;
+}
+function clearSiteAudio() {
+  if (state.audio._url) { try { URL.revokeObjectURL(state.audio._url); } catch {} state.audio._url = null; }
+  state.audio.file = null; state.audio.blob = null; state.audio.name = null;
+  applySiteAudio(); onAlignmentChanged();
+  setAxStatus('Background audio removed. Click <strong>Save</strong> in the top bar to commit it.');
+}
+function updateAudioAdminUI() {
+  if (els.axAudioName) els.axAudioName.textContent = hasSiteAudio() ? (state.audio.name || baseName(state.audio.file) || 'audio') : 'no audio';
+  if (els.axAudioClear) els.axAudioClear.hidden = !hasSiteAudio();
+  if (els.axAudioPick) els.axAudioPick.textContent = hasSiteAudio() ? '\u{1F3B5} Replace\u2026' : '\u{1F3B5} Audio\u2026';
 }
 function clearBrandLogo() {
   if (state.brand._url) { try { URL.revokeObjectURL(state.brand._url); } catch {} state.brand._url = null; }
@@ -746,12 +914,27 @@ function rebuildPlots() {
 }
 
 // frame the placed layout: mean direction + angular span → lon/lat/fov
+// TWO OPPOSITE LON CONVENTIONS LIVE IN THIS FILE — the single most expensive trap here.
+//   • A stored lon (landmarks, amenities, `lonLatFromDir`, `dirFromLonLat`) uses
+//     `atan2(-v.x, v.z)`, because the pano sphere is viewed from INSIDE and its texture is
+//     X-mirrored (see `dir()` / the handedness note in CLAUDE.md).
+//   • `state.view.lon` is the CAMERA YAW, fed to `cam.rotation.set(lat, lon + PI, 0)`.
+//     Working that matrix out, the camera's forward vector is
+//     `(cos(lat)sin(lon), sin(lat), cos(lat)cos(lon))` — the X-mirror of `dirFromLonLat`.
+// So the two run in OPPOSITE directions: `state.view.lon = L` looks at stored lon `-L`.
+// Converting a world direction into a camera lon therefore needs `atan2(+v.x, v.z)`, NOT
+// the `atan2(-v.x, v.z)` used everywhere else — mixing them aims the camera at the
+// category's mirror image. That is exactly the bug fixed on 2026-09-04: it was invisible
+// for landmarks sitting near lon 0 (a 2° group was 4° off, lost in a 100°+ FOV) and
+// catastrophic away from it (a group at 53° was aimed 106° wrong, i.e. nowhere near it).
+// Always go through this helper for anything that ends up in `state.view.lon`.
+function viewLonFromDir(v) { return Math.atan2(v.x, v.z); }
 function computeHome() {
   if (!state.geom.length) return;
   const mean = new THREE.Vector3(); const dirs = [];
   state.geom.forEach((g) => g.pts.forEach((p) => { const d = placeOnSphere(p); dirs.push(d); mean.add(d); }));
   mean.normalize();
-  state.home.lon = Math.atan2(-mean.x, mean.z);
+  state.home.lon = viewLonFromDir(mean);          // camera yaw, not a stored lon (see above)
   // True Nadir Top-Down Bird's-Eye View (pitch -87° facing straight down at layout center)
   state.home.lat = -1.50;
   state.home.fov = FOV_MAX; // Max zoomed out (120°)
@@ -763,10 +946,22 @@ function computeHome() {
 // flat meshes; could be made on-demand later if idle GPU cost ever matters.
 function requestRender(rebuild = false) { if (rebuild) plotsDirty = true; }
 let cameraAnimTimer = null;
+// Idle auto-pan speed. Advancing a fixed amount PER FRAME tied the pan rate to the
+// display: the same scene drifted twice as fast on a 120Hz phone as on a 60Hz laptop,
+// and slowed to a crawl whenever the frame rate dipped. Expressed per millisecond
+// instead, preserving the long-standing 60fps feel (0.00035 rad/frame) exactly.
+const AUTOPAN_RATE = 0.00035 / (1000 / 60);   // rad per ms
+let lastFrameTs = 0;
 function renderLoop() {
   requestAnimationFrame(renderLoop);
   if (!three) return;
   if (plotsDirty) { plotsDirty = false; rebuildPlots(); }
+
+  const nowTs = performance.now();
+  // Cap dt so returning to a backgrounded tab resumes the drift instead of lurching
+  // through however many seconds of rAF the browser skipped.
+  const dtMs = lastFrameTs ? Math.min(100, nowTs - lastFrameTs) : (1000 / 60);
+  lastFrameTs = nowTs;
 
   // Slow motion auto-pan when enabled in client view (!state.admin) and user is idle.
   // With no category selected: free 360° spin (unchanged). With a category selected:
@@ -783,12 +978,14 @@ function renderLoop() {
       while (lon - mid > Math.PI) lon -= TAU;
       while (mid - lon > Math.PI) lon += TAU;
 
-      lon += 0.00035 * (state.autoPanDir || 1);
+      // A swept category carries its own pace (`radPerMs`, sized so one pass takes
+      // LANDMARK_SWEEP_MS); a fitted one just sways at the ambient rate.
+      lon += (range.radPerMs || AUTOPAN_RATE) * dtMs * (state.autoPanDir || 1);
       if (lon >= hi) { lon = hi; state.autoPanDir = -1; }
       else if (lon <= lo) { lon = lo; state.autoPanDir = 1; }
       state.view.lon = lon;
     } else {
-      state.view.lon = (state.view.lon + 0.00035) % TAU;
+      state.view.lon = (state.view.lon + AUTOPAN_RATE * dtMs) % TAU;
     }
   }
 
@@ -803,9 +1000,18 @@ function updateCamera() {
   const cam = three.camera;
   // Hard limit: while a landmark category is selected in the client, the view can
   // never leave that category's own arc — enforced here (the single place the view
-  // is consumed) so no path out of it exists: auto-pan, the fly-in, or a drag.
+  // is consumed) so no path out of it exists: auto-pan or a drag.
+  //
+  // ...but NOT while a fly-in is in flight (`cameraAnimTimer`). `applyCategoryFilter`
+  // installs the new range and *then* starts the fly-in, and the fly-in by definition
+  // begins outside that range — so clamping it made every frame render pinned to the
+  // range boundary: the camera snapped to the destination on frame 1 and sat there
+  // while only the FOV animated. Measured on a real project (2026-09-04): 5 of 6
+  // categories jumped 15-70 degrees instantly and stayed frozen for 22-29 of the 36
+  // animation frames. The arc lock is meant to bound where the view can WANDER, not to
+  // fight the animation that is delivering it there, so it engages once the fly-in ends.
   const range = state.landmarkPanRange;
-  if (range && !state.admin) {
+  if (range && !state.admin && !cameraAnimTimer) {
     const mid = (range.sweepMin + range.sweepMax) / 2;
     let lon = state.view.lon;
     while (lon - mid > Math.PI) lon -= TAU;
@@ -856,7 +1062,19 @@ function wireViewControls() {
     } else if (panStart) {                            // drag empty → look around
       const k = (state.view.fov * Math.PI / 180) / els.pano.clientHeight;
       const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
-      if (Math.abs(dx) + Math.abs(dy) > 6) didMove = true;
+      if (Math.abs(dx) + Math.abs(dy) > 6) {
+        didMove = true;
+        // A deliberate drag outranks the selected category's arc: the auto-framing and
+        // sweep are a helpful default, not a cage. Releasing the range here (the same
+        // thing leaving Landmarks does) restores free 360° look AND free idle spin, while
+        // the category FILTER stays put — that's `state.selectedCategory`, untouched, so
+        // the chosen landmarks stay highlighted while the visitor looks around. Also stops
+        // an in-flight fly-in from yanking the view back mid-drag.
+        if (!state.admin && state.landmarkPanRange) {
+          state.landmarkPanRange = null;
+          if (cameraAnimTimer) { clearInterval(cameraAnimTimer); cameraAnimTimer = null; }
+        }
+      }
       state.view.lon = panStart.lon - dx * k; state.view.lat = clampLat(panStart.lat + dy * k); requestRender();
     } else hover(e);
   });
@@ -878,6 +1096,7 @@ function wireViewControls() {
   els.zoomIn.addEventListener('click', () => { setFov(state.view.fov / 1.3); if (state.admin) onAlignmentChanged(); });
   els.zoomOut.addEventListener('click', () => { setFov(state.view.fov * 1.3); if (state.admin) onAlignmentChanged(); });
   els.zoomReset.addEventListener('click', () => { computeHome(); Object.assign(state.view, state.home); requestRender(); if (state.admin) onAlignmentChanged(); });
+  for (const btn of zoomStatusButtons()) btn.addEventListener('click', () => toggleFilter(btn.dataset.status));
   els.labelToggle?.addEventListener('click', () => {
     state.showLabels = !state.showLabels;
     try { localStorage.setItem('b91-show-labels', state.showLabels ? '1' : '0'); } catch {}
@@ -907,6 +1126,34 @@ function wireViewControls() {
     ['pointerdown', 'pointerup', 'click', 'mousedown', 'mouseup', 'touchstart', 'touchend'].forEach((evt) => {
       els.catDrawer.addEventListener(evt, (e) => e.stopPropagation());
     });
+    // Start collapsed on narrow PORTRAIT screens only: the drawer is ~80% of the viewport
+    // width there (fine as a tap-to-open overlay, the standard mobile drawer pattern), but
+    // left open by default it covers almost the whole phone screen before the visitor has
+    // even seen the panorama. A landscape phone has the width to spare — same as desktop,
+    // which this never touches (isMobilePortrait is never true on a real desktop window) —
+    // so it keeps the open-by-default behavior there too.
+    if (isMobilePortrait() && !state.admin) {
+      els.catDrawer.classList.add('is-collapsed');
+      if (els.catToggleIco) els.catToggleIco.textContent = '›';
+    }
+  }
+
+  els.lmOverflowHint?.addEventListener('click', (e) => { e.stopPropagation(); openLandmarksCategoryPicker(); });
+
+  // Nudge portrait mobile visitors toward landscape, where there's room for the layout to
+  // breathe (see the reference the admin's own screenshots were compared against). Purely
+  // a suggestion — reuses the existing showNotice toast, auto-dismisses, never blocks
+  // anything — and re-fires if they rotate back into portrait after having left it.
+  if (!state.admin) {
+    // No dismiss path on purpose — see showRotateHint. Listening on BOTH the orientation
+    // media query and resize: the media query is the right signal, but some mobile
+    // browsers fire it before the viewport dimensions settle, and isMobilePortrait()
+    // reads window.innerWidth — so resize is the one that reliably catches up afterwards.
+    const checkRotateHint = () => { if (isMobilePortrait()) showRotateHint(); else hideRotateHint(); };
+    checkRotateHint();
+    window.matchMedia('(orientation: portrait)').addEventListener?.('change', () => setTimeout(checkRotateHint, 60));
+    window.addEventListener('resize', checkRotateHint);
+    window.addEventListener('orientationchange', () => setTimeout(checkRotateHint, 60));
   }
 
   els.catDrawerToggle?.addEventListener('click', (e) => {
@@ -1016,6 +1263,21 @@ function isLandmarkMatchCategory(lm, cat) {
   return false;
 }
 
+// Per-landmark "featured" flag (the tick/cross in the admin Landmarks list, added
+// 2026-09-04). Showing every landmark at once made the default view unreadably
+// crowded, so the admin ticks the handful worth showing up-front; the rest stay in
+// the project and surface in full the moment a visitor picks their category -- a
+// category view is a deliberate, complete list, so nothing is ever unreachable.
+// Landmarks saved before the flag existed carry no `featured` key and stay visible
+// (hence `!== false`, not a truthiness test).
+function isLandmarkDefaultVisible(lm) { return !lm || lm.featured !== false; }
+function isLandmarkShown(lm, cat) {
+  if (state.admin && state.adminTab === 'landmarks') return true;   // editing -> see everything, incl. the hidden ones being placed
+  const c = cat || 'ALL';
+  if (c === 'ALL') return isLandmarkDefaultVisible(lm);
+  return isLandmarkMatchCategory(lm, c);
+}
+
 // Bounding arc (in state.view.lon's radian convention) of a set of directions,
 // found via the largest-empty-gap method so it's correct even when the landmarks
 // straddle the ±180° seam. Also returns the actual direction vector at each end
@@ -1033,10 +1295,22 @@ const LANDMARK_FIT_FOV_CAP = FOV_MAX;           // widest FOV willing to zoom ou
 const LANDMARK_FIT_FOV_FLOOR = 55;              // deg — floor so a single/tight-cluster category doesn't zoom in uncomfortably close
 const LANDMARK_SWEEP_FOV = 72;                  // deg — fixed viewing FOV used while sweeping across a category that doesn't fit
 const LANDMARK_SWAY_HALF = 3.5 * Math.PI / 180; // idle amplitude when a category already fits (gentle sway instead of a hard sweep)
+// A category too wide to fit one frame is TOURED, and a tour has a job to do: show every
+// landmark in it. Pacing it with the ambient idle-drift rate (AUTOPAN_RATE, ~1.2 deg/s)
+// meant a 161-degree arc took 134 seconds to cross one way — about a pixel every 20
+// frames, which reads as a frozen camera showing one landmark, not as a sweep. So the
+// sweep is timed instead of speed-capped: whatever the arc's width, one pass takes this
+// long, which keeps every project's tour equally readable. The gentle sway of a category
+// that DOES fit still uses the ambient rate — it's ambience, not a tour.
+const LANDMARK_SWEEP_MS = 24000;                // one-way traverse time for a swept category
 
 function computeLandmarkPanRange(dirs) {
   if (!dirs.length) return null;
-  const pts = dirs.map((d) => ({ lon: Math.atan2(-d.x, d.z), dir: d }));
+  // Camera-lon, per this function's contract above — every value it returns
+  // (minLon/maxLon/sweepMin/sweepMax) is consumed as `state.view.lon`, by the clamp in
+  // `updateCamera`, by `animateCameraTo`, and by the idle sweep. It used the stored-lon
+  // formula until 2026-09-04, which mirrored every category across lon 0.
+  const pts = dirs.map((d) => ({ lon: viewLonFromDir(d), dir: d }));
   let minLon, maxLon, minDir, maxDir;
   if (pts.length === 1) {
     minLon = maxLon = pts[0].lon;
@@ -1080,7 +1354,25 @@ function meanDirection(dirs) {
   return mean.divideScalar(dirs.length).normalize();
 }
 
-function applyCategoryFilter(cat) {
+// Opens the drawer straight to the Landmarks category picker — same steps as tapping
+// "Landmarks" in the drawer's top-level menu (see wireViewControls' `.cat-btn` handlers),
+// factored out so the mobile overflow hint (renderLandmarks' CAP logic) can trigger it too.
+function openLandmarksCategoryPicker() {
+  els.catDrawer?.classList.remove('is-collapsed');
+  if (els.catToggleIco) els.catToggleIco.textContent = '‹';
+  if (els.catLevel1) els.catLevel1.hidden = true;
+  if (els.catLevel2) els.catLevel2.hidden = false;
+  state.autoPan = true;
+  applyCategoryFilter('ALL');
+}
+
+// `moveCamera:false` re-applies only the highlight/dim styling for the current
+// selection — used when the landmark DOM is rebuilt (see rebuildLandmarkDOM), where the
+// selection hasn't changed and flying the camera is actively wrong: it stole the client's
+// saved WYSIWYG view at boot (setLandmarks -> rebuild, measured at 45 degrees off with the
+// FOV forced to 72) and yanked the admin's view away every time a landmark was added,
+// deleted or given a render image.
+function applyCategoryFilter(cat, { moveCamera = true } = {}) {
   state.selectedCategory = cat || 'ALL';
   if (els.catNav) {
     els.catNav.querySelectorAll('.cat-btn').forEach((btn) => {
@@ -1127,7 +1419,10 @@ function applyCategoryFilter(cat) {
     }
   });
 
-  const targetList = state.selectedCategory === 'ALL' ? state.landmarks : matched;
+  if (!moveCamera) return;                 // styling-only refresh — leave the view exactly where it is
+
+  // ALL frames only what's actually on screen -- the featured set (see isLandmarkShown).
+  const targetList = state.selectedCategory === 'ALL' ? state.landmarks.filter(isLandmarkDefaultVisible) : matched;
 
   if (targetList.length > 0 && three) {
     const validDirs = [];
@@ -1149,25 +1444,37 @@ function applyCategoryFilter(cat) {
     const panInfo = state.selectedCategory !== 'ALL' ? computeLandmarkPanRange(validDirs) : null;
 
     if (panInfo && panInfo.fits) {
+      // Aim at the midpoint of the ARC, not at the mean of the direction vectors. The
+      // fit decision (and the FOV it picks) is derived from [minLon,maxLon], so centring
+      // on anything else can leave an edge landmark outside the very frame the fit
+      // calculation promised would hold it — real case: a 3-landmark category whose
+      // vector mean sat 12.9 degrees off the arc centre, pushing one landmark out of a
+      // frame wide enough for all three. Latitude still comes from the mean: there's no
+      // seam to straddle vertically, so the average height is the right one to look at.
       const mean = meanDirection(validDirs);
-      const targetLon = Math.atan2(-mean.x, mean.z);
+      const targetLon = (panInfo.minLon + panInfo.maxLon) / 2;
       const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
       state.landmarkPanRange = { sweepMin: targetLon - LANDMARK_SWAY_HALF, sweepMax: targetLon + LANDMARK_SWAY_HALF };
       animateCameraTo(targetLon, targetLat, panInfo.fovDeg);
       state.autoPanDir = 1;
     } else if (panInfo) {
-      // Start on the RIGHTMOST landmark and sweep left. The pano sphere is viewed from
-      // the inside (mirrored texture), so on screen a SMALLER lon is further right —
-      // hence minLon is the visual right edge and increasing lon sweeps leftward.
-      state.landmarkPanRange = { sweepMin: panInfo.sweepMin, sweepMax: panInfo.sweepMax };
+      // Start at one end of the arc and pan across to the other. Now that the range is
+      // in CAMERA lon (see viewLonFromDir — it used to be built in the mirrored stored-lon
+      // convention), `sweepMin` is the arc's visual LEFT edge and increasing lon pans
+      // rightward, so the tour reads left-to-right. Measured, not assumed: at `sweepMin`
+      // every visible landmark of a real 5-landmark category sat in the left half of the
+      // frame. If you ever flip a lon convention here again, re-measure this — the old
+      // comment claimed the exact opposite and was silently stale.
+      state.landmarkPanRange = { sweepMin: panInfo.sweepMin, sweepMax: panInfo.sweepMax,
+        radPerMs: Math.abs(panInfo.sweepMax - panInfo.sweepMin) / LANDMARK_SWEEP_MS };
       const targetLon = panInfo.minLon;
       const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(panInfo.minDir.y, -1, 1)));
       animateCameraTo(targetLon, targetLat, LANDMARK_SWEEP_FOV);
-      state.autoPanDir = 1; // rightmost → leftmost first
+      state.autoPanDir = 1; // left edge → right edge first
     } else if (validDirs.length > 0) {
       state.landmarkPanRange = null;
       const mean = meanDirection(validDirs);
-      const targetLon = Math.atan2(-mean.x, mean.z);
+      const targetLon = viewLonFromDir(mean);
       const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
       animateCameraTo(targetLon, targetLat, 72);
     }
@@ -1179,7 +1486,101 @@ function applyCategoryFilter(cat) {
   }
 }
 
+// ─── Background audio ─────────────────────────────────────────────────
+// One button (🔊), two sources: an admin-uploaded track when the project has one,
+// otherwise the original synthesised ambience — kept so a project that never sets audio
+// behaves exactly as it did before this feature existed.
+const SITE_AUDIO_VOLUME = 0.35;          // background music, not a foreground track
+const AUDIO_MUTED_KEY = 'b91-audio-muted';
+function audioMutedPref() { try { return localStorage.getItem(AUDIO_MUTED_KEY) === '1'; } catch { return false; } }
+function setAudioMutedPref(m) { try { localStorage.setItem(AUDIO_MUTED_KEY, m ? '1' : '0'); } catch {} }
+
+function updateAudioToggleUI() {
+  if (!els.audioToggle) return;
+  els.audioToggle.textContent = state.audioPlaying ? '\u{1F50A}' : '\u{1F507}';
+  els.audioToggle.classList.toggle('is-active', state.audioPlaying);
+  els.audioToggle.title = hasSiteAudio()
+    ? (state.audioPlaying ? 'Mute the background music' : 'Play the background music')
+    : 'Toggle Sound';
+}
+
+// Every current browser refuses to start audible playback before the visitor has
+// interacted with the page, so play() rejects on load through no fault of ours. That's a
+// state to recover from, not an error: arm a one-shot listener and start on the first real
+// gesture — the earliest instant the browser will allow it.
+let audioGestureArmed = false;
+function armAudioGesture() {
+  if (audioGestureArmed) return;
+  audioGestureArmed = true;
+  const go = () => {
+    document.removeEventListener('pointerdown', go, true);
+    document.removeEventListener('keydown', go, true);
+    audioGestureArmed = false;
+    if (!audioMutedPref()) startSiteAudio(false);
+  };
+  document.addEventListener('pointerdown', go, true);
+  document.addEventListener('keydown', go, true);
+}
+
+function startSiteAudio(explicit) {
+  const el = els.siteAudio;
+  if (!el || !hasSiteAudio()) return;
+  const src = siteAudioSrc();
+  if (src && el.dataset.src !== src) { el.src = src; el.dataset.src = src; }   // only reload when it actually changed
+  el.loop = true;
+  el.volume = SITE_AUDIO_VOLUME;
+  // Optimistic, deliberately. `el.paused` flips synchronously and the visitor's intent is
+  // already known, but play()'s promise only settles once playback has actually BEGUN.
+  // Updating state there left two bugs (both caught in testing): the button kept showing
+  // the old glyph for as long as the media took to start, and state.audioPlaying stayed
+  // false — so an immediate second press re-started the track instead of muting it.
+  // Reflect the intent now; walk it back only if playback is genuinely refused.
+  state.audioPlaying = true;
+  updateAudioToggleUI();
+  el.play().catch(() => {
+    state.audioPlaying = false;
+    updateAudioToggleUI();
+    if (!explicit) armAudioGesture();      // an explicit press already WAS a gesture; if that failed, arming again won't help
+  });
+}
+
+// Called after the alignment lands (boot) and whenever the admin changes the track.
+function applySiteAudio() {
+  updateAudioAdminUI();
+  const el = els.siteAudio;
+  if (!el) return;
+  if (!hasSiteAudio()) {
+    try { el.pause(); } catch {}
+    el.removeAttribute('src'); delete el.dataset.src;
+    state.audioPlaying = false; updateAudioToggleUI();
+    return;
+  }
+  // Admin never gets music started at them mid-edit — the 🔊 button previews it on demand.
+  if (state.admin) { updateAudioToggleUI(); return; }
+  if (audioMutedPref()) { state.audioPlaying = false; updateAudioToggleUI(); return; }
+  startSiteAudio(false);
+}
+
 function toggleAudio() {
+  if (hasSiteAudio()) {
+    const el = els.siteAudio;
+    if (!el) return;
+    if (state.audioPlaying) {
+      try { el.pause(); } catch {}
+      state.audioPlaying = false;
+      setAudioMutedPref(true);            // a visitor who muted stays muted on their next visit
+      updateAudioToggleUI();
+    } else {
+      // Record the CHOICE here, synchronously, not in play()'s .then(): `paused` flips
+      // immediately but the promise only settles once playback actually begins, so writing
+      // the preference there raced (caught in testing — an unmute read back as still
+      // muted). What the visitor asked for shouldn't depend on how fast the media loads.
+      setAudioMutedPref(false);
+      startSiteAudio(true);
+    }
+    return;
+  }
+  // No track configured — the pre-existing synthesised ambience, unchanged.
   if (!state.audioCtx) {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -1203,10 +1604,7 @@ function toggleAudio() {
     state.audioCtx.suspend();
     state.audioPlaying = false;
   }
-  if (els.audioToggle) {
-    els.audioToggle.textContent = state.audioPlaying ? '🔊' : '🔇';
-    els.audioToggle.classList.toggle('is-active', state.audioPlaying);
-  }
+  updateAudioToggleUI();
 }
 
 function toggleFullscreen() {
@@ -1300,11 +1698,28 @@ function renderLegend(counts) {
     chip.addEventListener('click', () => toggleFilter(s));
     els.legend.appendChild(chip);
   });
+  // Landscape's compact stand-in for the header legend (hidden there, see styles.css) —
+  // keep all three counts in sync the same way the header chips just were.
+  syncZoomStatusButtons(counts);
+}
+
+// The landscape status chips mirror the header legend's state; kept in one place so the
+// two can't drift (counts come from renderLegend, pressed-state from toggleFilter).
+function zoomStatusButtons() {
+  return [els.zoomAvailableBtn, els.zoomReservedBtn, els.zoomSoldBtn].filter(Boolean);
+}
+function syncZoomStatusButtons(counts) {
+  for (const btn of zoomStatusButtons()) {
+    const s = btn.dataset.status;
+    if (counts) { const c = btn.querySelector('.count'); if (c) c.textContent = counts[s] || 0; }
+    btn.setAttribute('aria-pressed', String(state.activeFilters.has(s)));
+  }
 }
 function toggleFilter(status) {
   state.activeFilters.has(status) ? state.activeFilters.delete(status) : state.activeFilters.add(status);
   if (state.activeFilters.size === 0) STATUS_ORDER.forEach((s) => state.activeFilters.add(s));
   els.legend.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(state.activeFilters.has(c.dataset.status))));
+  syncZoomStatusButtons();
   colorPlots(); requestRender();
 }
 
@@ -1533,6 +1948,7 @@ function openModal(media, plotId = '') {
   const plotName = plotId ? plotId.replace('Plot-', 'Plot ') : '';
   const mediaTypeName = type === 'youtube' ? 'YouTube Video' : type === 'vimeo' ? 'Vimeo Video' : type === 'image' ? 'Image' : '3D Walkthrough';
   const displayTitle = title ? `${title}${plotName ? ' · ' + plotName : ''}` : `${mediaTypeName}${plotName ? ' · ' + plotName : ''}`;
+  noteIfExternal(rawUrl, mediaTypeName.toLowerCase()); // shared by plot tours/videos AND amenity tours — see openModal's callers
 
   els.modalTitle.textContent = displayTitle;
   els.modalOpenNew.href = rawUrl || '#';
@@ -1593,6 +2009,29 @@ function onModalKey(e) {
 }
 
 // ─── Notices / sync / refresh ─────────────────────────────────────────────────
+// Portrait phones are GATED, not nudged: the content stays hidden behind this animated
+// screen until the device is actually turned. So there's no dismiss — no timer, no tap to
+// close — because either of those would drop the visitor into the squeezed portrait layout
+// this exists to keep them out of. The only way past it is rotating (checkRotateHint in
+// wireViewControls, driven by the orientation media query + a resize fallback).
+let rotateHintTimer = null;
+function showRotateHint() {
+  if (!els.rotateHint || !els.rotateHint.hidden) return;
+  clearTimeout(rotateHintTimer);
+  els.rotateHint.classList.remove('is-leaving');
+  els.rotateHint.hidden = false;
+}
+function hideRotateHint() {
+  if (!els.rotateHint || els.rotateHint.hidden) return;
+  clearTimeout(rotateHintTimer);
+  els.rotateHint.classList.add('is-leaving');
+  // Let the fade finish before actually removing it from layout.
+  rotateHintTimer = setTimeout(() => {
+    els.rotateHint.hidden = true;
+    els.rotateHint.classList.remove('is-leaving');
+  }, 280);
+}
+
 function showNotice(msg) { els.notice.innerHTML = `<strong>Heads up:</strong> ${msg}`; els.notice.hidden = false; clearTimeout(showNotice._t); showNotice._t = setTimeout(() => { els.notice.hidden = true; }, 9000); }
 function setSync(src) { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); els.syncMeta.textContent = `${state.rows.size} plots · ${src} · synced ${t}`; }
 async function refresh() { els.refreshBtn.disabled = true; try { const src = await loadData(); applyData(); setSync(src); } catch (err) { showNotice(err.message); } finally { els.refreshBtn.disabled = false; } }
@@ -1806,13 +2245,14 @@ function parseAlignment(d) {
   const savedAt = (d && d.savedAt) || '';
   const b = d && d.brand;
   const brand = b ? { name: (b.name || '').toString(), tagline: (b.tagline || '').toString(), logo: (b.logo && b.logo.file) ? b.logo.file : null, _ver: savedAt } : null;
+  const au = d && d.audio; const audio = (au && au.file) ? { file: au.file, _ver: savedAt } : null;
   const dc = d && d.data, sh = dc && dc.sheet;                       // plot-data source (Google Sheet | committed file)
   const data = { enabled: !!(dc && dc.source === 'sheet'), url: (sh && sh.url || '').toString(), gid: (sh && sh.gid != null ? String(sh.gid) : '') };
   const menuConfig = d && d.menuConfig ? d.menuConfig : null;
-  return { transform, view, opacity, groundImage, panoImage, brand, data, menuConfig, savedAt };
+  return { transform, view, opacity, groundImage, panoImage, brand, audio, data, menuConfig, savedAt };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
-  try { const res = await fetch(dataUrl('alignment.json'), { cache: 'no-store' }); if (!res.ok) return null; return parseAlignment(await res.json()); }
+  try { const res = await loadProjectFile('alignment.json'); if (!res || !res.ok) return null; return parseAlignment(await res.json()); }
   catch { return null; }
 }
 function readDraft() { try { const raw = localStorage.getItem(DRAFT_KEY); return raw ? parseAlignment(JSON.parse(raw)) : null; } catch { return null; } }
@@ -1824,6 +2264,7 @@ function alignmentData() {
     ...(state.groundImage ? { groundImage: { file: state.groundImage.file, opacity: +(+state.groundImage.opacity).toFixed(2) } } : {}),
     ...(state.panoImage ? { panoImage: { file: state.panoImage.file } } : {}),
     ...(brandData() ? { brand: brandData() } : {}),
+    ...(audioData() ? { audio: audioData() } : {}),
     ...(sheetData() ? { data: sheetData() } : {}),
     ...(menuConfigData() ? { menuConfig: menuConfigData() } : {}) };
 }
@@ -1875,7 +2316,8 @@ function buildSession() {                                // a complete snapshot 
     plan: state.planBlob ? { name: state.planName || 'plan.web.png', blob: state.planBlob, opacity: state.groundImage?.opacity ?? 1 } : null,
     pano: state.panoBlob ? { name: state.panoName || 'pano.web.jpg', blob: state.panoBlob } : null,
     brandLogo: state.brand.logoBlob ? { name: state.brand.logoName || 'logo.web.png', blob: state.brand.logoBlob } : null,
-    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
+    siteAudio: state.audio.blob ? { name: state.audio.name || 'audio.mp3', blob: state.audio.blob } : null,
+    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
     amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes, render: a.render, renderBlob: a.renderBlob || null, hotspot: { ...a.hotspot } })),
   };
 }
@@ -1980,26 +2422,85 @@ function buildPlotsCSV(rowsMap = state.rows) {
   return cols.join(',') + '\n' + rows.join('\n') + '\n';
 }
 // ─── Server-side save ─────────────────────────────────────────────────────────
-// POST files to server.py, which writes them into projects/<projectId>/. Files are
-// [name, data, mime]; text is sent as-is, Blobs as base64. Throws on any failure so
-// callers can fall back to a browser download.
+// POST files to server.py, which writes them into projects/<projectId>/. Text
+// data and small blobs (< UPLOAD_BINARY_THRESHOLD) go as base64 JSON to the
+// existing /api/save endpoint. Large blobs (videos, images) are sent as raw
+// binary to /api/upload — no btoa() cap, no RAM spike from arrayBuffer().
 async function blobToBase64(blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let s = ''; const CH = 0x8000;
-  for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
-  return btoa(s);
+  // FileReader.readAsDataURL is browser-native and doesn't share btoa()'s
+  // ~500 MB string-length limit. Only call this for small blobs; large ones
+  // go through /api/upload as raw binary and never need base64 at all.
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.slice(reader.result.indexOf(',') + 1));
+    reader.onerror = () => reject(new Error('FileReader error encoding file for upload'));
+    reader.readAsDataURL(blob);
+  });
 }
+
+// Files (Blobs) above this size are uploaded as raw binary to /api/upload
+// instead of being base64-encoded into the JSON body. 5 MB is a conservative
+// threshold — small enough that base64 JSON is still fine, large enough that
+// we don't split unnecessarily for logo / landmark / plan images.
+const UPLOAD_BINARY_THRESHOLD = 5 * 1024 * 1024; // 5 MB
+
 async function serverSave(files) {
-  const payload = { project: state.projectId, files: [] };
-  for (const [name, data] of files) {
-    if (data instanceof Blob) payload.files.push({ name, encoding: 'base64', data: await blobToBase64(data) });
-    else payload.files.push({ name, encoding: 'utf8', data: String(data) });
+  const project = state.projectId;
+  const jsonEntries   = [];  // small / text files → /api/save  (JSON + base64)
+  const binaryUploads = [];  // large blobs       → /api/upload (raw binary stream)
+
+  for (const [name, data, mime] of files) {
+    if (data instanceof Blob && data.size > UPLOAD_BINARY_THRESHOLD) {
+      binaryUploads.push([name, data, mime || 'application/octet-stream']);
+    } else if (data instanceof Blob) {
+      jsonEntries.push({ name, encoding: 'base64', data: await blobToBase64(data) });
+    } else {
+      jsonEntries.push({ name, encoding: 'utf8', data: String(data) });
+    }
   }
-  const res = await fetch('/api/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!res.ok) throw new Error(`server responded ${res.status}`);
-  const j = await res.json();
-  if (!j.ok) throw new Error(j.error || 'save failed');
-  return j;
+
+  let lastResult = null;
+
+  // ── Small / text files via existing JSON endpoint ──────────────────────────
+  if (jsonEntries.length > 0) {
+    const res = await fetch('/api/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project, files: jsonEntries }),
+    });
+    if (!res.ok) throw new Error(`server responded ${res.status}`);
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || 'save failed');
+    lastResult = j;
+  }
+
+  // ── Large binaries via raw binary stream — no base64, no JSON wrapper ──────
+  for (const [name, blob, mime] of binaryUploads) {
+    const url = `/api/upload?project=${encodeURIComponent(project)}&name=${encodeURIComponent(name)}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': mime },
+      body: blob,
+    });
+    if (!res.ok) throw new Error(`upload of "${name}" failed: ${res.status}`);
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || `upload of "${name}" failed`);
+    lastResult = j;
+  }
+
+  // Synthesise a result when we only did binary uploads (no JSON batch)
+  if (!lastResult) {
+    lastResult = {
+      ok: true, project,
+      dir: `projects/${project}`,
+      written: binaryUploads.map((f) => f[0]),
+      skipped: [],
+    };
+  } else if (binaryUploads.length > 0) {
+    lastResult.written = (lastResult.written || []).concat(binaryUploads.map((f) => f[0]));
+  }
+
+  return lastResult;
 }
 function downloadFiles(files) {
   files.forEach(([n, data, mime]) => { const a = document.createElement('a'); a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: mime || 'text/plain' })); a.download = n; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); });
@@ -2032,6 +2533,7 @@ async function fetchReferencedImages(haveNames) {
   if (!state.panoBlob) add(state.panoImage?.file);
   if (!state.planBlob) add(state.groundImage?.file);
   if (!state.brand.logoBlob) add(state.brand.logo);
+  if (!state.audio.blob) add(state.audio.file);
   state.amenities.forEach((a) => { if (!a.renderBlob) add(a.render); });
   state.landmarks.forEach((l) => { if (!l.renderBlob) add(l.render); });
   const out = [];
@@ -2083,7 +2585,7 @@ async function exportSite() {
   const hasLandmarks = state.landmarks.length > 0;
   const hasAmenities = state.amenities.length > 0;
   const hasPano = !!(state.panoBlob || state.panoImage?.file);
-  const hasBrand = !!(state.brand?.name || state.brand?.tagline || state.brand?.logo || state.brand?.logoBlob);
+  const hasBrand = !!(state.brand?.name || state.brand?.tagline || state.brand?.logo || state.brand?.logoBlob || state.audio?.file || state.audio?.blob);
   const hasPlan = !!(trace.planBlob || state.planBlob || trace.objURL || state.groundImage?.file);
 
   if (!hasGeom && !hasLandmarks && !hasAmenities && !hasPano && !hasBrand && !hasPlan) {
@@ -2103,6 +2605,7 @@ async function exportSite() {
     ...(planBlob ? [[baseName(planName), planBlob, 'image/png']] : []),
     ...(panoBlob && panoName ? [[panoName, panoBlob, 'image/jpeg']] : []),
     ...(state.brand.logoBlob && state.brand.logo ? [[baseName(state.brand.logo), state.brand.logoBlob, 'image/png']] : []),
+    ...(state.audio.blob && state.audio.file ? [[baseName(state.audio.file), state.audio.blob, state.audio.blob.type || (/\.(mp4|m4v|mov|mkv|webm)$/i.test(state.audio.file) ? 'video/mp4' : 'audio/mpeg')]] : []),
     ['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json'],
     ['amenities.json', JSON.stringify(buildAmenitiesData(), null, 2), 'application/json'],
     // freshly-imported render images (an already-on-disk path has no blob to re-ship)
@@ -2135,6 +2638,22 @@ async function headerSave() {
 async function exportBundle() {
   const id = sanitizeProjectId(state.projectId);
   if (!id) { showNotice('Set a valid Project ID first (letters, digits, - or _).'); return; }
+
+  // Pre-flight: warn about menu items that link to something online instead of an uploaded
+  // file — those need internet no matter what, even in an otherwise fully offline export
+  // (see server.py's scan_menu_for_online_content). Best-effort: never block the export
+  // itself if this check fails for some reason.
+  try {
+    const chk = await fetch(`/api/export-bundle-check?project=${encodeURIComponent(id)}`);
+    if (chk.ok) {
+      const { flagged } = await chk.json();
+      if (Array.isArray(flagged) && flagged.length > 0) {
+        const proceed = await showExportFlaggedModal(flagged);
+        if (!proceed) return; // cancelled, or admin chose to jump into editing one — showExportFlaggedModal already handled the notice
+      }
+    }
+  } catch {}
+
   showNotice(`Building the standalone site for “${esc(id)}”…`);
   try {
     const res = await fetch(`/api/export-bundle?project=${encodeURIComponent(id)}`);
@@ -2144,10 +2663,58 @@ async function exportBundle() {
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 8000);
     const embed = `<iframe src="https://YOUR-HOST/${id}/index.html" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen loading="lazy"></iframe>`;
     let copied = false; try { await navigator.clipboard.writeText(embed); copied = true; } catch {}
-    showNotice(`Downloaded <code>${id}-plotmap.zip</code>. Unzip &amp; upload the <code>${id}/</code> folder to any static host — it runs view-only with no server. ${copied ? 'An <strong>&lt;iframe&gt; embed snippet is on your clipboard</strong>' : 'Embed it with an <code>&lt;iframe&gt;</code> pointing at <code>index.html</code>'} (replace <code>YOUR-HOST</code> with your domain).`);
+    showNotice(`Downloaded <code>${id}-plotmap.zip</code>. Unzip the <code>${id}/</code> folder — <strong>open <code>index.html</code> directly, no server needed</strong> — or upload it to any static host. ${copied ? 'An <strong>&lt;iframe&gt; embed snippet is on your clipboard</strong>' : 'Embed it with an <code>&lt;iframe&gt;</code> pointing at <code>index.html</code>'} (replace <code>YOUR-HOST</code> with your domain).`);
   } catch (e) {
     showNotice(`Couldn’t build the standalone site (${esc(String(e.message || e))}). This needs <code>python server.py</code> running — a plain static server can’t zip the bundle.`);
   }
+}
+
+// Pre-flight popup for exportBundle: lists every menu item that needs internet even in the
+// offline export (see scan_menu_for_online_content), each with an Edit button that jumps
+// straight into that item's existing "Add/Edit Menu Item" wizard — so the admin can swap
+// the pasted link for an uploaded file right there instead of hunting through the menu tree.
+// Resolves true only if the admin explicitly clicks "Export Anyway"; Cancel OR Edit both
+// resolve false (Edit takes them off to fix the item — export can be retried once it's fixed).
+function showExportFlaggedModal(flagged) {
+  return new Promise((resolve) => {
+    const modal = els.exportFlaggedModal, list = els.exportFlaggedList;
+    if (!modal || !list) { resolve(true); return; } // markup missing — don't block export over it
+
+    list.innerHTML = flagged.map((f, i) => `
+      <div class="export-flag-row" style="display:flex; align-items:center; gap:12px; padding:10px 0; ${i > 0 ? 'border-top:1px solid rgba(255,255,255,0.08);' : ''}">
+        <div style="flex:1; min-width:0;">
+          <div style="font-weight:600; font-size:13.5px; color:#f8fafc;">${esc(f.title)}</div>
+          <div style="font-size:10.5px; font-weight:600; color:#9aa5b1; text-transform:uppercase; letter-spacing:.04em; margin-top:2px;">${esc(f.contentType)}</div>
+          ${f.url ? `<div style="font-size:11.5px; color:#7dd3fc; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(f.url)}">${esc(f.url)}</div>` : ''}
+        </div>
+        <button class="btn btn-ghost" type="button" data-edit-node="${esc(f.id || '')}" data-edit-source="${esc(f.source || 'menu')}" style="flex:none; font-size:12px;">Edit</button>
+      </div>
+    `).join('');
+
+    const finish = (result) => {
+      closeCustomModal(modal);
+      els.exportFlaggedProceed.removeEventListener('click', onProceed);
+      els.exportFlaggedCancel.removeEventListener('click', onCancel);
+      list.removeEventListener('click', onListClick);
+      resolve(result);
+    };
+    const onProceed = () => finish(true);
+    const onCancel = () => { showNotice('Export cancelled.'); finish(false); };
+    const onListClick = (e) => {
+      const btn = e.target.closest('[data-edit-node]');
+      if (!btn) return;
+      const nodeId = btn.dataset.editNode, source = btn.dataset.editSource;
+      finish(false);
+      if (!nodeId) return;
+      if (source === 'amenity') { setAdminTab('amenities'); selectAmenity(nodeId); }
+      else openNodeBuilderModal(nodeId);
+    };
+    els.exportFlaggedProceed.addEventListener('click', onProceed);
+    els.exportFlaggedCancel.addEventListener('click', onCancel);
+    list.addEventListener('click', onListClick);
+
+    openCustomModal(modal);
+  });
 }
 function wireAdmin() {
   if (!state.admin) return;
@@ -2182,6 +2749,9 @@ function wireAdmin() {
   els.axBrandLogo?.addEventListener('click', () => els.axBrandLogoFile.click());
   els.axBrandLogoFile?.addEventListener('change', () => { const f = els.axBrandLogoFile.files?.[0]; if (f) setBrandLogo(f); els.axBrandLogoFile.value = ''; });
   els.axBrandLogoClear?.addEventListener('click', clearBrandLogo);
+  els.axAudioPick?.addEventListener('click', () => els.axAudioFile.click());
+  els.axAudioFile?.addEventListener('change', () => { const f = els.axAudioFile.files?.[0]; if (f) setSiteAudioFile(f); els.axAudioFile.value = ''; });
+  els.axAudioClear?.addEventListener('click', clearSiteAudio);
   updateBrandAdminUI();
   els.axSheetOn?.addEventListener('change', () => { state.sheet.enabled = els.axSheetOn.checked; updateSheetAdminUI(); if (state.sheet.enabled && !state.sheet.url) setSheetMsg('Paste your Google Sheet link, then Test.', ''); onAlignmentChanged(); });
   els.axSheetUrl?.addEventListener('input', () => { state.sheet.url = els.axSheetUrl.value; state.sheet.gid = ''; onAlignmentChanged(); });
@@ -2191,6 +2761,8 @@ function wireAdmin() {
   els.axTabBtnLandmarks.addEventListener('click', () => setAdminTab('landmarks'));
   els.axTabBtnAmenities?.addEventListener('click', () => setAdminTab('amenities'));
   els.axLmAdd.addEventListener('click', addLandmark);
+  els.axLmShowAll?.addEventListener('click', () => setAllLandmarksFeatured(true));
+  els.axLmHideAll?.addEventListener('click', () => setAllLandmarksFeatured(false));
   els.axLmSave?.addEventListener('click', saveLandmarksAs);
   els.axLmLoad?.addEventListener('click', () => els.axLmFile?.click());
   els.axLmFile?.addEventListener('change', async () => { const f = els.axLmFile.files?.[0]; if (f) { try { setLandmarks(parseLandmarks(JSON.parse(await f.text()))); onLandmarksChanged(); setAxStatus(`Loaded ${state.landmarks.length} landmark(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that landmarks file (${err.message}).`); } } els.axLmFile.value = ''; });
@@ -2213,6 +2785,9 @@ function wireAdmin() {
       if (state.brand._url) { try { URL.revokeObjectURL(state.brand._url); } catch {} } // loaded file's brand replaces the current one
       state.brand = { name: a.brand?.name || '', tagline: a.brand?.tagline || '', logo: a.brand?.logo || null, logoBlob: null, logoName: null, _url: null, _ver: a.brand?._ver || '' };
       applyBrand();
+      if (state.audio._url) { try { URL.revokeObjectURL(state.audio._url); } catch {} }
+      state.audio = { file: a.audio?.file || null, blob: null, name: a.audio?.file ? baseName(a.audio.file) : null, _url: null, _ver: a.audio?._ver || '' };
+      applySiteAudio();
       if (a.data) { state.sheet = { url: a.data.url || '', gid: a.data.gid || '', enabled: !!a.data.enabled }; updateSheetAdminUI(); }
       computeHome(); Object.assign(state.view, a.view || state.home); clampView(); // restore saved view (kept off the pole)
       updateAdminUI(); colorPlots(); requestRender(true); onAlignmentChanged(); setAxStatus(`Loaded ${f.name}.`);
@@ -2976,27 +3551,57 @@ function rebuildLandmarkDOM() {
     lmDom.set(lm.id, { line, pin, banner });
   });
   renderLandmarks();
-  if (typeof applyCategoryFilter === 'function') applyCategoryFilter(state.selectedCategory);
+  if (typeof applyCategoryFilter === 'function') applyCategoryFilter(state.selectedCategory, { moveCamera: false });
 }
 function projectDir(dir, cam, W, H) {
   const p = dir.clone().multiplyScalar(R).project(cam);
   if (p.z > 1) return null;                               // behind the camera → hide
   return { x: (p.x * 0.5 + 0.5) * W, y: (-p.y * 0.5 + 0.5) * H };
 }
+// On a narrow PORTRAIT screen, showing every matching landmark at once causes heavy label
+// overlap (confirmed via screenshot — a density problem, not the edge-overflow one the
+// clamp below solves). Rather than attempt real collision-avoidance, portrait mobile caps
+// how many render at once: landmarks with a render image (renderSrc) are prioritized (an
+// existing signal for "the admin fleshed this one out"), the rest fill remaining slots in
+// existing order, and #lmOverflowHint (wired once in wireViewControls) surfaces a "+N more"
+// tap into the existing category picker so nothing is silently unreachable — applies on
+// both portrait and landscape phones (confirmed by screenshot: even ~844px-wide landscape
+// still overlaps badly with a dozen labels at full size), never on desktop or in admin.
+const LANDMARK_MOBILE_CAP = 6;
 function renderLandmarks() {
   if (!three || !els.landmarks || els.landmarks.hidden) return;
   const rect = els.pano.getBoundingClientRect(), W = rect.width, H = rect.height, cam = three.camera;
   const filterCat = state.selectedCategory || 'ALL';
+
+  let capSet = null, hiddenCount = 0;
+  if (!state.admin && (isMobilePortrait() || isMobileLandscape())) {
+    const matched = state.landmarks.filter((lm) => isLandmarkShown(lm, filterCat));
+    if (matched.length > LANDMARK_MOBILE_CAP) {
+      const prioritized = [...matched.filter((lm) => renderSrc(lm)), ...matched.filter((lm) => !renderSrc(lm))];
+      capSet = new Set(prioritized.slice(0, LANDMARK_MOBILE_CAP).map((lm) => lm.id));
+      hiddenCount = matched.length - LANDMARK_MOBILE_CAP;
+    }
+  }
+  if (els.lmOverflowHint) {
+    els.lmOverflowHint.hidden = hiddenCount === 0;
+    if (hiddenCount > 0) els.lmOverflowHint.textContent = `+${hiddenCount} more — filter by category`;
+  }
+
   for (const lm of state.landmarks) {
     const d = lmDom.get(lm.id); if (!d) continue;
 
-    // Strict category filtering: if a category is selected and lm icon/label does not match -> hide completely
-    if (filterCat !== 'ALL') {
-      const isMatch = isLandmarkMatchCategory(lm, filterCat);
-      if (!isMatch) {
-        d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
-        continue;
-      }
+    // Visibility (isLandmarkShown): a selected category shows exactly its own members,
+    // featured or not; the default ALL view shows only the featured ones. Admin editing
+    // sees everything, with the unfeatured banners marked (.is-unfeatured) so it's obvious
+    // which ones the client won't show up-front.
+    d.banner.classList.toggle('is-unfeatured', lm.featured === false);
+    if (!isLandmarkShown(lm, filterCat)) {
+      d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
+      continue;
+    }
+    if (capSet && !capSet.has(lm.id)) {
+      d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
+      continue;
     }
 
     const hp = projectDir(dirFromLonLat(lm.hotspot.lon, lm.hotspot.lat), cam, W, H);
@@ -3004,6 +3609,18 @@ function renderLandmarks() {
     const show = hp && bp;
     d.line.style.display = d.pin.style.display = d.banner.style.display = show ? '' : 'none';
     if (!show) continue;
+    // A banner sits where its landmark actually is — never dragged inward to stay visible.
+    // It used to be clamped to the viewport so a label couldn't be cut off at the edge, but
+    // that made everything currently out of view pile up against the sides, tracking along
+    // as you panned; a landmark that isn't in shot should simply not be in shot. So: no
+    // clamping, and one that won't fit fully is hidden rather than shown half-cut.
+    // offsetWidth is a layout read, but landmark counts are small (a handful to a few
+    // dozen), so this doesn't meaningfully add up per frame.
+    const halfW = d.banner.offsetWidth / 2, margin = 6;
+    if (bp.x - halfW < margin || bp.x + halfW > W - margin) {
+      d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
+      continue;
+    }
     d.line.setAttribute('x1', hp.x); d.line.setAttribute('y1', hp.y); d.line.setAttribute('x2', bp.x); d.line.setAttribute('y2', bp.y);
     d.pin.style.left = hp.x + 'px'; d.pin.style.top = hp.y + 'px';
     d.banner.style.left = bp.x + 'px'; d.banner.style.top = bp.y + 'px';
@@ -3053,7 +3670,7 @@ function selectLandmark(id) {
 function addLandmark() {
   const fwd = three ? new THREE.Vector3(0, 0, -1).applyQuaternion(three.camera.quaternion) : new THREE.Vector3(0, 0, 1);
   const hs = lonLatFromDir(fwd);
-  const lm = { id: 'lm' + (++lmSeq), label: '', distance: '', driveTime: '', icon: 'place', render: null, renderBlob: null, hotspot: hs, banner: { lon: hs.lon, lat: Math.max(-80, Math.min(80, hs.lat + 12)) } };
+  const lm = { id: 'lm' + (++lmSeq), label: '', distance: '', driveTime: '', icon: 'place', featured: true, render: null, renderBlob: null, hotspot: hs, banner: { lon: hs.lon, lat: Math.max(-80, Math.min(80, hs.lat + 12)) } };
   state.landmarks.push(lm); rebuildLandmarkDOM(); selectLandmark(lm.id); onLandmarksChanged();
   setAxStatus('Landmark added — drag its pin onto a spot, drag the banner to place it, and fill the label/distance/time.');
 }
@@ -3062,6 +3679,23 @@ function deleteLandmark(id) {
   state.landmarks = state.landmarks.filter((l) => l.id !== id);
   if (state.lmSel === id) state.lmSel = null;
   rebuildLandmarkDOM(); refreshLmList(); onLandmarksChanged();
+}
+// The tick/cross toggle in the admin list. Unticking never removes anything -- the
+// landmark just stops riding in the client's default "all landmarks" view, and still
+// appears whenever a visitor filters to its category. (Deleting is the separate x.)
+function setLandmarkFeatured(lm, on) {
+  if ((lm.featured !== false) === !!on) return;      // clicking the already-active button is a no-op, not a flip
+  lm.featured = !!on;
+  refreshLmList(); renderLandmarks(); onLandmarksChanged();
+  const kept = state.landmarks.filter(isLandmarkDefaultVisible).length;
+  // Unticking the last one leaves the client's default view empty \u2014 legal, but almost
+  // never what's meant, so say it outright rather than letting it be discovered live.
+  const tail = kept === 0
+    ? ` <strong>No landmarks are ticked now</strong>, so the default view shows none at all \u2014 tick at least one, or visitors only see landmarks after picking a category.`
+    : ` ${kept} of ${state.landmarks.length} landmark(s) show by default.`;
+  setAxStatus((on
+    ? `<strong>${esc(lm.label || lm.id)}</strong> is now <strong>shown by default</strong> \u2014 it appears in the client's all-landmarks view.`
+    : `<strong>${esc(lm.label || lm.id)}</strong> is now <strong>hidden by default</strong> \u2014 it still appears when a visitor picks its category. Nothing was deleted.`) + tail);
 }
 async function setLandmarkRender(lm, file) {
   if (!file) return;
@@ -3073,19 +3707,57 @@ async function setLandmarkRender(lm, file) {
   rebuildLandmarkDOM(); refreshLmList(); onLandmarksChanged();      // rebuild so the banner gains its hover/tap card
   setAxStatus(`Render set for <strong>${esc(lm.label || lm.id)}</strong> (${out.W}×${out.H}). It shows on hover/tap in the client. Click <strong>Save</strong> in the top bar to commit it.`);
 }
+// Bulk ✓/✕ for the whole list. With a couple of dozen landmarks, "hide all, then tick
+// the handful I want" is the fastest way to curate (and the fastest way to recover from
+// having ticked the wrong set).
+function setAllLandmarksFeatured(on) {
+  if (!state.landmarks.length) return;
+  state.landmarks.forEach((lm) => { lm.featured = !!on; });
+  refreshLmList(); renderLandmarks(); onLandmarksChanged();
+  setAxStatus(on
+    ? `All <strong>${state.landmarks.length}</strong> landmarks are now <strong>shown by default</strong>.`
+    : `All <strong>${state.landmarks.length}</strong> landmarks are now <strong>hidden from the default view</strong> — tick the ones you want up-front. Nothing was deleted; every one still appears under its category.`);
+}
 function refreshLmList() {
   if (!els.axLmList) return;
   els.axLmEmpty.hidden = state.landmarks.length > 0;
+  if (els.axLmCount) {
+    const kept = state.landmarks.filter(isLandmarkDefaultVisible).length;
+    els.axLmCount.textContent = state.landmarks.length
+      ? `✓ ${kept} of ${state.landmarks.length} shown by default`
+      : '';
+  }
   els.axLmList.innerHTML = '';
   state.landmarks.forEach((lm) => {
-    const li = document.createElement('li'); li.className = 'ax-lm-li' + (lm.id === state.lmSel ? ' is-sel' : '');
+    const shown = lm.featured !== false;
+    const li = document.createElement('li'); li.className = 'ax-lm-li' + (lm.id === state.lmSel ? ' is-sel' : '') + (shown ? '' : ' is-hidden-default');
     const head = document.createElement('div'); head.className = 'ax-lm-li-head';
     const ico = document.createElement('span'); ico.className = 'ax-lm-ico-sel'; ico.textContent = LM_ICONS[lm.icon] || LM_ICONS.place;
     const title = document.createElement('span'); title.className = 'ax-lm-title'; title.textContent = (lm.label || '').trim() || 'New landmark';
-    const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete landmark';
+    // TWO buttons, not one toggle. A single button showing the CURRENT state reads as an
+    // action ("tick this one to include it") when every landmark starts ticked, so going
+    // down the list clicking the ones you want silently turns them OFF -- exactly the
+    // inversion reported on 2026-09-04. Separate ✓ / ✕ buttons are idempotent: ✓ always
+    // means show, ✕ always means hide, clicking the active one changes nothing.
+    const grp = document.createElement('div'); grp.className = 'ax-lm-vis-grp'; grp.setAttribute('role', 'group');
+    grp.setAttribute('aria-label', 'Show by default: ' + ((lm.label || '').trim() || 'new landmark'));
+    const mkVis = (want, glyph, cls, tip) => {
+      const b = document.createElement('button'); b.type = 'button';
+      b.className = 'ax-lm-vis ' + cls + ((shown === want) ? ' is-active' : '');
+      b.textContent = glyph; b.title = tip; b.setAttribute('aria-pressed', String(shown === want));
+      b.addEventListener('click', (e) => { e.stopPropagation(); setLandmarkFeatured(lm, want); });
+      return b;
+    };
+    grp.append(
+      mkVis(true, '✓', 'ax-lm-vis-yes', 'SHOW this landmark by default — it appears in the client’s all-landmarks view.\nDoes NOT delete anything.'),
+      mkVis(false, '✕', 'ax-lm-vis-no', 'HIDE this landmark from the default view — it still appears when a visitor picks its category.\nDoes NOT delete anything.'));
+    const vis = grp;
+    const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×';
+    del.title = 'DELETE this landmark permanently.\nTo only keep it out of the default view, use the ✓ / ✕ button instead.';
+    del.setAttribute('aria-label', 'Delete landmark ' + ((lm.label || '').trim() || 'new landmark'));
     del.addEventListener('click', (e) => { e.stopPropagation(); deleteLandmark(lm.id); });
-    head.append(ico, title, del); li.appendChild(head);
-    li.addEventListener('click', (e) => { if (e.target.closest('.ax-lm-edit,.ax-lm-del')) return; selectLandmark(lm.id === state.lmSel ? null : lm.id); });
+    head.append(ico, title, vis, del); li.appendChild(head);
+    li.addEventListener('click', (e) => { if (e.target.closest('.ax-lm-edit,.ax-lm-del,.ax-lm-vis-grp')) return; selectLandmark(lm.id === state.lmSel ? null : lm.id); });
     if (lm.id === state.lmSel) {
       const ed = document.createElement('div'); ed.className = 'ax-lm-edit';
       const sync = () => { const d = lmDom.get(lm.id); if (d) d.banner.innerHTML = lmBannerHTML(lm); ico.textContent = LM_ICONS[lm.icon] || LM_ICONS.place; title.textContent = (lm.label || '').trim() || 'New landmark'; onLandmarksChanged(); };
@@ -3137,16 +3809,16 @@ function parseLandmarks(d) {
   const ver = (d && d.savedAt) || '';                    // cache-bust token for committed render images
   return arr.map((l, i) => {
     const render = (l.render && l.render.file) ? l.render.file : (typeof l.render === 'string' ? l.render : null);
-    return { id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', render, renderBlob: l.renderBlob || null, _ver: ver, hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot) };
+    return { id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', featured: l.featured !== false, render, renderBlob: l.renderBlob || null, _ver: ver, hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot) };
   }).filter((l) => l.hotspot && l.banner);
 }
 function buildLandmarksData() {
   return { version: 1, note: 'Build91 landmark hotspots', savedAt: new Date().toISOString(),
-    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon,
+    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, featured: l.featured !== false,
       ...(l.render ? { render: { file: l.render } } : {}), hotspot: { lonDeg: +l.hotspot.lon.toFixed(2), latDeg: +l.hotspot.lat.toFixed(2) }, banner: { lonDeg: +l.banner.lon.toFixed(2), latDeg: +l.banner.lat.toFixed(2) } })) };
 }
 async function loadLandmarksFile() {
-  try { const r = await fetch(dataUrl('landmarks.json'), { cache: 'no-store' }); if (!r.ok) return null; return parseLandmarks(await r.json()); } catch { return null; }
+  try { const r = await loadProjectFile('landmarks.json'); if (!r || !r.ok) return null; return parseLandmarks(await r.json()); } catch { return null; }
 }
 function setLandmarks(list) {
   state.landmarks.forEach((l) => { if (l._url) { try { URL.revokeObjectURL(l._url); } catch {} } });
@@ -3214,6 +3886,16 @@ function renderAmenities() {
     m.style.display = p ? '' : 'none';
     if (!p) continue;
     m.style.left = p.x + 'px'; m.style.top = p.y + 'px';
+    // Same rule as renderLandmarks' banner: the chip is never nudged inward to stay
+    // visible (that made off-view amenities crowd the edges and slide along while
+    // panning). It stays centered on its true spot, and an amenity whose label won't fit
+    // fully is hidden instead of being shown clipped.
+    const chip = m.querySelector('.am-chip');
+    if (chip) {
+      chip.style.transform = '';
+      const halfW = chip.offsetWidth / 2, margin = 6;
+      if (p.x - halfW < margin || p.x + halfW > W - margin) { m.style.display = 'none'; continue; }
+    }
   }
 }
 function applyAmenityVisibility() {
@@ -3427,7 +4109,7 @@ function buildAmenitiesData() {
       ...(a.render ? { render: { file: a.render } } : {}), hotspot: { lonDeg: +a.hotspot.lon.toFixed(2), latDeg: +a.hotspot.lat.toFixed(2) } })) };
 }
 async function loadAmenitiesFile() {
-  try { const r = await fetch(dataUrl('amenities.json'), { cache: 'no-store' }); if (!r.ok) return null; return parseAmenities(await r.json()); } catch { return null; }
+  try { const r = await loadProjectFile('amenities.json'); if (!r || !r.ok) return null; return parseAmenities(await r.json()); } catch { return null; }
 }
 function setAmenities(list) {
   state.amenities.forEach((a) => { if (a._url) { try { URL.revokeObjectURL(a._url); } catch {} } });
@@ -3572,6 +4254,80 @@ function moveNode(nodeId, direction) {
 
 // ─── Client Sidebar Dynamic Rendering (Recursive Stack Navigation) ────────────
 
+// ─── What a folder click should actually DO ──────────────────────────────────
+// A folder is a navigation aid, not content. Drilling into one that presents no actual
+// choice costs a tap and shows a screen with nothing to decide. Both shapes below came
+// from a real project (2026-09-04):
+//   • three folders holding a single video / PDF each — two taps to play one video, with
+//     a one-row submenu in between;
+//   • a "gallery" folder holding 25 image nodes titled GALLERY 1..25 — 25 near-identical
+//     labels, every one of which lands in the SAME scrolling viewer, because
+//     openClientFolderImageModal already gathers every image sibling regardless of which
+//     one you picked. The list was pure friction.
+// Returns { action, node }:
+//   'open'   → open that node's content directly (node is the content child)
+//   'images' → open the image viewer at node (the folder's FIRST image; prev/next does the rest)
+//   'menu'   → render node's children as a submenu — there's a genuine choice here
+//   'empty'  → nothing inside
+const MENU_SKIP_MAX_HOPS = 8;
+function resolveFolderTarget(node) {
+  const seen = new Set();
+  let cur = node;
+  for (let hop = 0; cur && hop < MENU_SKIP_MAX_HOPS; hop++) {
+    if (cur.kind !== 'parent') return { action: 'open', node: cur };
+    // A hand-edited or round-tripped tree could point a folder back at an ancestor;
+    // walking that would spin here inside a click handler. Bail to the plain list.
+    if (seen.has(cur.id)) return { action: 'menu', node: cur };
+    seen.add(cur.id);
+
+    const kids = Array.isArray(cur.children) ? cur.children : [];
+    if (!kids.length) return { action: 'empty', node: cur };
+
+    // One thing inside is never a choice — keep skipping, however deep it nests.
+    if (kids.length === 1) { cur = kids[0]; continue; }
+
+    // A folder of nothing but images IS the gallery. Open it at the first image and let
+    // the viewer carry the visitor through the rest — which is all the submenu was doing,
+    // one manual pick at a time. A single sub-folder or a mixed folder is a real choice
+    // and keeps its list.
+    if (kids.every((k) => k && k.kind === 'child' && k.contentType === 'image')) {
+      return { action: 'images', node: kids[0] };
+    }
+    return { action: 'menu', node: cur };
+  }
+  return { action: 'menu', node };
+}
+
+// Should this row advertise a submenu? Only if clicking it actually opens one — a folder
+// that jumps straight to content must not wear a "there's more inside" arrow.
+function menuRowOpensSubmenu(node) {
+  return !!node && node.kind === 'parent' && resolveFolderTarget(node).action === 'menu';
+}
+
+// The single "visitor clicked a menu row" entry point, shared by the root list and the
+// submenu list so the two can't drift apart.
+function activateMenuNode(node, { fromRoot = false } = {}) {
+  if (!node) return;
+  const target = resolveFolderTarget(node);
+
+  if (target.action === 'menu') {
+    // `target.node` is the folder actually worth showing, which may be several levels
+    // below the one clicked. Pushing just that keeps Back honest: it returns the visitor
+    // to where they came from, not through the levels that were skipped for them.
+    if (fromRoot) state.menuNavStack = [target.node];
+    else state.menuNavStack.push(target.node);
+    renderClientSidebar();
+    return;
+  }
+  if (target.action === 'empty') {
+    showNotice(`<strong>${esc((node.title || 'This section').trim())}</strong> has no content in it yet.`);
+    return;
+  }
+  const info = findNodeInfo(target.node.id);
+  if (target.action === 'images') openClientFolderImageModal(target.node, info);
+  else openNodeContent(target.node, info);
+}
+
 function renderClientSidebar() {
   const tree = getMenuTree();
   const stack = state.menuNavStack || [];
@@ -3590,9 +4346,9 @@ function renderClientSidebar() {
 
     tree.forEach((node) => {
       const title = (node.title || 'ITEM').trim().toUpperCase();
-      const isParent = node.kind === 'parent';
-      const arrow = isParent ? ' <span class="cat-btn-arrow">›</span>' : '';
-      html += `<button class="cat-btn ${isParent ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
+      const drills = menuRowOpensSubmenu(node);
+      const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
+      html += `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
     });
 
     els.catNavL1.innerHTML = html;
@@ -3618,9 +4374,9 @@ function renderClientSidebar() {
 
     container.innerHTML = children.map((node) => {
       const title = (node.title || 'ITEM').trim().toUpperCase();
-      const isParent = node.kind === 'parent';
-      const arrow = isParent ? ' <span class="cat-btn-arrow">›</span>' : '';
-      return `<button class="cat-btn ${isParent ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
+      const drills = menuRowOpensSubmenu(node);
+      const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
+      return `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
     }).join('');
 
     container.querySelectorAll('.cat-btn').forEach((btn) => {
@@ -3629,14 +4385,7 @@ function renderClientSidebar() {
         const nodeId = btn.dataset.nodeId;
         const nodeInfo = findNodeInfo(nodeId);
         if (!nodeInfo) return;
-        const node = nodeInfo.node;
-
-        if (node.kind === 'parent') {
-          state.menuNavStack.push(node);
-          renderClientSidebar();
-        } else {
-          openNodeContent(node, nodeInfo);
-        }
+        activateMenuNode(nodeInfo.node);
       });
     });
   }
@@ -3667,14 +4416,7 @@ function wireClientSidebarButtons() {
       } else if (nodeId) {
         const nodeInfo = findNodeInfo(nodeId);
         if (!nodeInfo) return;
-        const node = nodeInfo.node;
-
-        if (node.kind === 'parent') {
-          state.menuNavStack = [node];
-          renderClientSidebar();
-        } else {
-          openNodeContent(node, nodeInfo);
-        }
+        activateMenuNode(nodeInfo.node, { fromRoot: true });
       }
     });
   });
@@ -3714,6 +4456,16 @@ function openNodeContent(node, nodeInfo = null) {
 
 // ─── Viewer Dispatchers ───────────────────────────────────────────────────────
 
+// In a standalone offline export, content resolved to a raw external URL (as opposed to an
+// uploaded file, which was copied into the bundle) can't be reached without internet — the
+// export flags these to the admin already (see server.py's scan_menu_for_online_content),
+// but the viewer itself still surfaces it plainly instead of a silently blank embed.
+function noteIfExternal(rawSrc, kind) {
+  if (BUNDLE && /^https?:/i.test(rawSrc || '')) {
+    showNotice(`This ${kind} is hosted online — an internet connection is needed to view it.`);
+  }
+}
+
 function openClientVideoModal(title, config) {
   let rawSrc = config.fileBlob ? URL.createObjectURL(config.fileBlob) : null;
   if (!rawSrc && config.fileName) {
@@ -3726,6 +4478,7 @@ function openClientVideoModal(title, config) {
     showNotice(`No video uploaded or URL configured for "${title}".`);
     return;
   }
+  noteIfExternal(rawSrc, 'video');
 
   const isYt = isYoutubeUrl(rawSrc);
   const isVim = isVimeoUrl(rawSrc);
@@ -3768,6 +4521,7 @@ function openClientTourModal(title, config) {
     tourSrc = config.url;
   }
   if (tourSrc) {
+    noteIfExternal(tourSrc, 'virtual tour');
     openModal({ url: tourSrc, title });
   } else {
     showNotice(`No virtual tour link or file configured for "${title}".`);
@@ -3958,6 +4712,56 @@ function closeClientGalleryModal() {
   }, 220);
 }
 
+// pdf.js, loaded on demand and only where it's actually needed (see openClientBrochureModal):
+// vendor/pdf.min.js is a UMD build, so it goes in as a classic <script> that defines the
+// window.pdfjsLib global — app.js itself is an ES module and can't `import` it. v3 on
+// purpose, not v4: v4 relies on Promise.withResolvers and similar modern syntax that the
+// older Android Chrome builds this exists to work around don't have.
+let pdfJsReady = null;
+function loadPdfJs() {
+  if (pdfJsReady) return pdfJsReady;
+  pdfJsReady = new Promise((resolve, reject) => {
+    if (window.pdfjsLib) { resolve(window.pdfjsLib); return; }
+    const s = document.createElement('script');
+    s.src = 'vendor/pdf.min.js';
+    s.onload = () => {
+      if (!window.pdfjsLib) { reject(new Error('pdfjsLib missing')); return; }
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => reject(new Error('pdf.js failed to load'));
+    document.head.appendChild(s);
+  });
+  return pdfJsReady;
+}
+
+// Draw every page of `src` into `container` as stacked canvases. Sequential, not parallel,
+// so a long brochure doesn't spike memory on a low-end phone — the exact class of device
+// that needs this path in the first place. `onFirstPage` fires as soon as page 1 is
+// actually painted (the caller uses it to cancel its "this is taking too long" fallback),
+// and `shouldStop` lets the caller abandon a render it has already given up on.
+async function renderPdfInto(src, container, onFirstPage, shouldStop = () => false) {
+  const lib = await loadPdfJs();
+  const doc = await lib.getDocument(src).promise;
+  if (shouldStop()) return;
+  container.textContent = '';
+  const targetW = Math.min(container.clientWidth || window.innerWidth || 800, 1400);
+  for (let n = 1; n <= doc.numPages; n++) {
+    if (shouldStop()) return;
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: targetW / base.width });
+    const canvas = document.createElement('canvas');
+    canvas.className = 'brochure-page';
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    if (shouldStop()) return;
+    container.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    if (n === 1 && onFirstPage) onFirstPage();
+  }
+}
+
 function openClientBrochureModal(b = {}) {
   if (!els.clientBrochureModal) return;
   const frame = $('clientBrochureFrame');
@@ -3989,10 +4793,48 @@ function openClientBrochureModal(b = {}) {
     showNotice('No PDF brochure uploaded or URL configured yet.');
     return;
   }
-  if (frame) frame.src = src;
+  noteIfExternal(src, 'PDF');
+
   if (btn) { btn.href = src; btn.download = b.fileName || b.name || 'brochure.pdf'; }
   els.clientBrochureModal.classList.add('open');
   els.clientBrochureModal.setAttribute('aria-hidden', 'false');
+
+  // Android Chrome has no inline PDF viewer (older builds especially) — it downloads the
+  // file instead of showing it, both in an <iframe> AND on a direct top-level navigation
+  // (verified on a real device: the server sends a correct `application/pdf` with no
+  // attachment header, and the same file previews fine on iOS, so it's purely a missing
+  // browser capability). Nothing done at the URL/markup level can fix that, so Android
+  // renders the pages with pdf.js instead. Everywhere else keeps the native viewer, which
+  // is a better experience (real text selection, pinch-zoom) where it actually works.
+  // The `.style.display` toggles below are deliberate rather than `.hidden` — both
+  // elements carry an inline `display`, which would beat the `[hidden]` attribute (see
+  // Conventions & gotchas).
+  const canvasBox = $('clientBrochureCanvas');
+  if (/Android/i.test(navigator.userAgent) && canvasBox) {
+    if (frame) { frame.removeAttribute('src'); frame.style.display = 'none'; }
+    canvasBox.style.display = 'block';
+    canvasBox.textContent = 'Loading brochure…';
+    // A stalled render must never strand the visitor on "Loading brochure…", and a hang
+    // isn't a rejection so the catch below can't cover it — hence an explicit deadline.
+    // Whichever happens first wins: page 1 painting cancels the deadline; the deadline
+    // firing abandons the render and hands the PDF to the phone's own handling instead
+    // (which on Android means downloading it — not a preview, but never a dead end).
+    let abandoned = false;
+    const giveUp = () => {
+      if (abandoned) return;
+      abandoned = true;
+      canvasBox.style.display = 'none';
+      canvasBox.textContent = '';
+      closeCustomModal(els.clientBrochureModal);
+      window.open(src, '_blank');
+    };
+    const deadline = setTimeout(giveUp, 12000);
+    renderPdfInto(src, canvasBox, () => clearTimeout(deadline), () => abandoned)
+      .catch(() => { clearTimeout(deadline); giveUp(); });
+    return;
+  }
+  if (canvasBox) { canvasBox.style.display = 'none'; canvasBox.textContent = ''; }
+  if (frame) { frame.style.display = 'block'; frame.src = src; }
 }
 
 function openClientContactModal(c = {}) {
@@ -5397,6 +6239,428 @@ function closeCustomModal(modalEl) {
   if (video) { video.pause(); video.src = ''; }
   const iframe = modalEl.querySelector('iframe');
   if (iframe) iframe.src = 'about:blank';
+  const pdfBox = modalEl.querySelector('.brochure-canvas');
+  if (pdfBox) pdfBox.textContent = '';   // drop the rendered page canvases — they can be tens of MB on a long brochure
+}
+
+// ─── Offline support (PWA) — client only ───────────────────────────────────
+// sw.js caches the app shell + project data + on-demand video so the client experience
+// keeps working with no signal once it's been opened at least once online. Never
+// registered on ?admin=1 pages — sw.js's own admin passthrough is a second guard for the
+// case where the same browser already has the worker installed from an earlier client
+// visit. Requires a secure context (https:// or localhost — verified directly: a service
+// worker refuses to register under file:// or a plain LAN http:// origin with a "URL
+// protocol... not supported" error), so this silently no-ops there instead of erroring;
+// the rest of the app is unaffected either way.
+// The app shell (app.js/styles.css/index.html) is cached stale-while-revalidate (sw.js):
+// a returning visit renders the CACHED copy instantly while fetching the latest version
+// in the background for next time — a real fix shipped to the server is otherwise
+// invisible to an already-cached phone until a SECOND visit. Reloading once when a new
+// worker actually takes control (skipWaiting+clients.claim already make that happen
+// automatically) closes that gap — `refreshedOnce` guards against a reload loop.
+// Only reload when a worker REPLACES an existing one (a genuine update). On a first visit
+// there's no controller yet, and clients.claim() fires this same event — reloading there
+// was a self-inflicted bug: every first visit reloaded mid-boot, which discarded the
+// captured beforeinstallprompt event, so tapping Add downloaded the content but silently
+// offered no home-screen shortcut (there was nothing left to prompt with).
+const hadControllerAtLoad = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+let refreshedOnce = false;
+navigator.serviceWorker?.addEventListener('controllerchange', () => {
+  if (!hadControllerAtLoad || refreshedOnce) return;
+  refreshedOnce = true;
+  window.location.reload();
+});
+
+// Point the manifest (and the iOS touch icon) at THIS project, so the installed home-screen
+// icon and name are the admin's branding rather than a generic Build91 one. The manifest is
+// static JSON by nature, so the per-project version is generated by server.py's
+// /manifest.webmanifest route — it reads the same ?project= appended here. Runs during
+// module evaluation, well before the browser evaluates installability. Skipped in a
+// standalone bundle, which has no server to generate anything and ships the static file.
+function setupPwaIdentity() {
+  if (BUNDLE) return;
+  const q = `?project=${encodeURIComponent(state.projectId || 'sample')}`;
+  const link = document.querySelector('link[rel="manifest"]');
+  if (link) link.href = `manifest.webmanifest${q}`;
+  const touch = document.querySelector('link[rel="apple-touch-icon"]');
+  if (touch) touch.href = `api/pwa-icon-192.png${q}`;
+}
+setupPwaIdentity();
+
+// Just captures the event for maybeOfferOfflineSave's single "Add" button to fire later
+// (see its own comment) — this listener itself doesn't show anything, since the one
+// combined banner already covers both the install offer and the content download.
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  if (els.offlineSaveBanner) els.offlineSaveBanner.hidden = true;   // covers installing via the browser's own menu instead of our button
+  try { localStorage.setItem('b91-pwa-installed', '1'); } catch {}
+});
+
+async function registerOfflineSupport() {
+  // Mobile-only, on purpose: desktop already has a real offline mechanism (⋯ → Export
+  // standalone site…, a genuine local file/host-anywhere copy) — this whole PWA layer
+  // exists specifically for phones, which can't use that export the same way (see the
+  // Mobile Offline Rollout doc). Reuses the same width+orientation checks the rest of the
+  // mobile-responsive pass already relies on to distinguish a real phone from a resized
+  // desktop window ("never true on a real desktop window" — see their own definitions).
+  if (!('serviceWorker' in navigator)) return;
+  if (state.admin || !(isMobilePortrait() || isMobileLandscape())) {
+    // Actively revert, not just skip: a browser that visited before this mobile gate
+    // existed may already have sw.js registered and controlling the page, which keeps
+    // satisfying the browser's own beforeinstallprompt eligibility on every later visit
+    // regardless of this gate — unregistering here is what actually stops it going forward.
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((k) => k.startsWith('b91-')).map((k) => caches.delete(k)));
+      }
+    } catch {}
+    return;
+  }
+  let ready = false;
+  try {
+    await navigator.serviceWorker.register('sw.js');
+    // .ready resolves once a worker is actually active/controlling — the precondition for
+    // both caching downloads and the install offer below. Races it against a timeout so a
+    // stalled activation (a flaky connection, or another open tab pinning an older worker)
+    // can't silently wedge the rest of boot — falls through to the install offer alone.
+    await Promise.race([navigator.serviceWorker.ready, new Promise((_, rej) => setTimeout(rej, 5000))]);
+    ready = true;
+  } catch {
+    // unsupported browser / insecure origin / activation timeout — app still works online, just not offline
+  }
+  if (ready) await maybeOfferOfflineSave();  // the one combined "Add to Home Screen (+offline)" banner — see its own comment
+}
+
+// ─── Add to Home Screen + save-for-offline (one combined prompt) ───────────
+// Originally two separate prompts shown back to back (content download, then a plain
+// install offer) — collapsed into one after the user pointed out both were really asking
+// for the same "get this ready for offline" intent, and having a separate manual download
+// step before the (already separate) native install step just felt redundant. One tap on
+// "Add" now does both jobs at once: fires the native install prompt (where available) AND
+// starts the content download, in parallel — the two are unrelated under the hood (the
+// native prompt just builds an app-icon wrapper, it has no idea what a "gallery photo" is;
+// the content download is the only thing that makes the site actually usable offline —
+// see the discussion this session), so neither needs to wait on the other's outcome.
+// Sizes/consent are still shown up front before the tap, and video is still eagerly
+// included per the user's explicit request — but as one action, not two.
+function collectOfflineAssets() {
+  const items = [];
+  const seen = new Set();
+  // assetUrl() returns the raw string unchanged for anything already absolute
+  // (http(s)/data:/blob:) and a plain same-origin relative path otherwise (see its own
+  // comment) — so "local" here just means "not one of those absolute forms".
+  const isLocal = (u) => !!u && !/^[a-z][a-z0-9+.-]*:/i.test(u) && !u.startsWith('//');
+  const add = (u, kind) => { if (isLocal(u) && !seen.has(u)) { seen.add(u); items.push({ url: u, kind }); } };
+
+  if (state.panoImage?.file) add(assetUrl(state.panoImage.file), 'image');
+  if (state.groundImage?.file) add(assetUrl(state.groundImage.file), 'image');
+  if (state.brand?.logo) add(assetUrl(state.brand.logo), 'image');
+  if (state.audio?.file) add(siteAudioSrc(), 'audio');   // background music, same treatment as any other local asset
+  for (const lm of state.landmarks || []) if (lm.render) add(renderSrc(lm), 'image');
+  for (const am of state.amenities || []) if (am.render) add(renderSrc(am), 'image');
+
+  // Custom menu tree — mirrors server.py's scan_menu_for_online_content's walk of the same
+  // shape, but collecting local files to prefetch instead of flagging external ones. Plot
+  // media (getPlotMediaList) is deliberately NOT walked here: those URLs are always meant
+  // to point out to an externally-hosted tour/video by design (see noteIfExternal/the
+  // export-flagging feature), so isLocal() would exclude them anyway.
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (!node || typeof node !== 'object') continue;
+      if (node.kind === 'parent') { walk(node.children); continue; }
+      // Contact card photo. A `contact` node carries no `content`, so the child-only walk
+      // below skipped it entirely — a real gap found via device testing: the photo simply
+      // wasn't there offline until the visitor happened to open the card while online,
+      // after which the runtime cache picked it up and it "started working". Resolved the
+      // same way the card itself does (openClientContactModal: assetUrl(c.image)) so the
+      // cache key matches what the viewer will actually request.
+      if (node.kind === 'contact') {
+        const cc = node.contact || {};
+        if (cc.image) add(assetUrl(cc.image), 'image');
+        else if (cc.imageName) add(assetUrl(cc.imageName), 'image');
+        continue;
+      }
+      if (node.kind !== 'child') continue;
+      const c = node.content || {};
+      const ctype = node.contentType || 'link';
+      const kindFor = (t) => (t === 'video' ? 'video' : (t === 'pdf' ? 'pdf' : 'image'));
+      if (ctype === 'gallery') {
+        for (const img of c.images || []) {
+          if (!img) continue;
+          if (typeof img === 'string') { add(assetUrl(img), 'image'); continue; }
+          if (img.fileName) add(assetUrl(img.fileName), 'image');
+          else if (img.name && !/^https?:/i.test(img.name)) add(assetUrl(img.name), 'image');
+          else if (img.url) add(assetUrl(img.url), 'image');   // a local path can live in `url` too — the viewer accepts that, so it has to be collected
+        }
+      } else if (c.fileName) {
+        add(assetUrl(c.fileName), kindFor(ctype));
+      } else if (c.url) {
+        // Same fallback the viewers use (openClientVideoModal/Brochure/Tour all end at
+        // assetUrl(rawUrl) for a non-absolute string). assetUrl passes a real external URL
+        // through untouched, and add() drops anything that isn't same-origin, so a genuine
+        // http(s) link is still correctly ignored here.
+        add(assetUrl(c.url), kindFor(ctype));
+      }
+    }
+  };
+  walk(state.menuConfig?.tree);
+
+  return items;
+}
+
+async function estimateOfflineSize(items) {
+  const results = new Array(items.length);
+  let idx = 0;
+  const CONC = 6;
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      let size = 0;
+      try {
+        const res = await fetch(items[i].url, { method: 'HEAD', cache: 'no-store' });
+        size = parseInt(res.headers.get('content-length') || '0', 10) || 0;
+      } catch {}
+      results[i] = { ...items[i], size };
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONC, items.length) }, worker));
+  return { items: results, totalBytes: results.reduce((s, r) => s + (r.size || 0), 0) };
+}
+
+// Browsers hand a site a limited, evictable storage budget by default — and will silently
+// throw data away under pressure (iOS Safari also clears it after ~7 days of not opening
+// the site). Asking for "persistent" storage is what lifts both limits: it exempts the
+// data from eviction and, on Chromium, unlocks a much larger quota than the default
+// best-effort allowance. It's a no-op where unsupported, and browsers are more willing to
+// grant it during a user gesture, which is why this is called from the Add tap.
+async function requestPersistentStorage() {
+  try {
+    if (!navigator.storage || !navigator.storage.persist) return false;
+    if (navigator.storage.persisted && await navigator.storage.persisted()) return true;
+    return await navigator.storage.persist();
+  } catch { return false; }
+}
+
+// How much room this origin actually has left, or null if the browser won't say.
+async function storageHeadroom() {
+  try {
+    if (!navigator.storage || !navigator.storage.estimate) return null;
+    const est = await navigator.storage.estimate();
+    if (typeof est.quota !== 'number' || typeof est.usage !== 'number') return null;
+    return Math.max(0, est.quota - est.usage);
+  } catch { return null; }
+}
+
+function formatBytes(n) {
+  if (!n || n <= 0) return '';
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(n < 100 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+function isIosSafari() {
+  const isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
+  const isSafari = /Safari/.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+  return isIos && isSafari;   // iOS never fires beforeinstallprompt on ANY browser — Safari is the only one that even has a manual Share-sheet path
+}
+
+async function maybeOfferOfflineSave() {
+  if (state.admin || !els.offlineSaveBanner || isStandaloneDisplay() || navigator.onLine === false) return;
+  const pid = state.projectId || 'default';
+  let skip = false;
+  try { skip = localStorage.getItem(`b91-offline-saved-${pid}`) === '1' || localStorage.getItem(`b91-offline-declined-${pid}`) === '1'; } catch {}
+  if (skip) return;
+
+  const assets = collectOfflineAssets();
+  const iosManual = isIosSafari();
+  // Nothing this banner could actually do: no content worth caching, and no install path
+  // either (not a beforeinstallprompt browser, not iOS Safari's manual Share-sheet route).
+  if (!assets.length && !deferredInstallPrompt && !iosManual) return;
+
+  if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = 'Add to Home Screen';
+  const sizeLabel = (bytes) => {
+    const size = formatBytes(bytes);
+    const base = assets.length ? (size ? `Includes offline access — approx. ${size}` : 'Includes offline access') : 'Opens instantly next time';
+    return iosManual ? `${base} · tap Share → Add to Home Screen after` : base;
+  };
+  if (els.offlineSaveSize) els.offlineSaveSize.textContent = assets.length ? 'Checking size…' : sizeLabel(0);
+
+  els.offlineSavePrompt.hidden = false;
+  els.offlineSaveProgress.hidden = true;
+  els.offlineSaveBanner.hidden = false;
+
+  const { items, totalBytes } = assets.length ? await estimateOfflineSize(assets) : { items: [], totalBytes: 0 };
+  if (els.offlineSaveSize) {
+    // Say so BEFORE they commit if the phone plainly can't hold it, rather than letting
+    // them sit through a download that gets silently truncated at the quota.
+    const headroom = await storageHeadroom();
+    const tooBig = headroom !== null && totalBytes > 0 && totalBytes > headroom;
+    els.offlineSaveSize.textContent = tooBig
+      ? `${sizeLabel(totalBytes)} · may exceed this phone's free space (${formatBytes(headroom)} left)`
+      : sizeLabel(totalBytes);
+  }
+
+  await new Promise((resolve) => {
+    const onSkip = () => {
+      els.offlineSaveSkip.removeEventListener('click', onSkip);
+      els.offlineSaveGo.removeEventListener('click', onGo);
+      els.offlineSaveBanner.hidden = true;
+      try { localStorage.setItem(`b91-offline-declined-${pid}`, '1'); } catch {}
+      resolve();
+    };
+    const onGo = async () => {
+      els.offlineSaveSkip.removeEventListener('click', onSkip);
+      els.offlineSaveGo.removeEventListener('click', onGo);
+      // prompt() only works inside the tap that triggered it, so it can't be deferred or
+      // retried later — if the browser hasn't handed us an install event by now, the only
+      // honest option is telling the visitor where the manual control lives (below).
+      let promptedInstall = false;
+      if (deferredInstallPrompt) {
+        const p = deferredInstallPrompt;
+        deferredInstallPrompt = null;
+        promptedInstall = true;
+        p.prompt();               // native install dialog — fire-and-forget, doesn't block the content download below
+        p.userChoice.catch(() => {});
+      }
+      // Ask for non-evictable storage while we're still inside the tap that requested it —
+      // this is what gives the videos room to land and keeps them from being cleared later.
+      await requestPersistentStorage();
+      if (items.length) await runOfflineDownload(items, totalBytes, pid);
+      if (!promptedInstall && !isStandaloneDisplay()) {
+        showNotice(iosManual
+          ? 'Saved for offline. To add the icon: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.'
+          : 'Saved for offline. To add the icon: open your browser <strong>menu (⋮)</strong>, then <strong>Install app</strong> / <strong>Add to Home screen</strong>.');
+      }
+      else els.offlineSaveBanner.hidden = true;
+      resolve();
+    };
+    els.offlineSaveSkip.addEventListener('click', onSkip);
+    els.offlineSaveGo.addEventListener('click', onGo);
+  });
+}
+
+async function runOfflineDownload(items, totalBytes, pid) {
+  els.offlineSavePrompt.hidden = true;
+  els.offlineSaveProgress.hidden = false;
+
+  let bytesDone = 0;
+  const startedAt = Date.now();
+  const knownTotal = totalBytes > 0 ? totalBytes : items.length;   // falls back to a per-item unit if HEAD sizes were unavailable
+  const bump = (n) => {
+    bytesDone += n;
+    const pct = Math.min(99, Math.round((bytesDone / knownTotal) * 100));
+    if (els.offlineSaveBarFill) els.offlineSaveBarFill.style.width = pct + '%';
+    if (els.offlineSavePct) els.offlineSavePct.textContent = pct + '%';
+    const elapsed = (Date.now() - startedAt) / 1000;
+    if (els.offlineSaveEta && elapsed > 1 && bytesDone > 0) {
+      const remain = Math.max(0, knownTotal - bytesDone);
+      const etaSec = remain / (bytesDone / elapsed);
+      els.offlineSaveEta.textContent = etaSec > 8 ? `~${Math.max(1, Math.ceil(etaSec / 60))} min left` : 'almost done';
+    }
+  };
+
+  // A failed/incomplete fetch used to be counted the same as a real success just to keep
+  // the bar moving — meaning "100% / Done" could mean "actually cached" or "silently
+  // failed" with no way to tell the difference (a real bug: a Brochure PDF reported done
+  // but wasn't actually available offline). Now each item gets one retry, a non-OK
+  // response (including sw.js's own synthetic 503 "Offline" placeholder, if something
+  // upstream failed) counts as a failure not a success, and the final state — and whether
+  // this project gets marked "saved" at all — honestly reflects what actually cached.
+  const failed = [];
+  async function fetchOnce(item) {
+    const res = await fetch(item.url);
+    if (!res.ok) throw new Error('status ' + res.status);
+    if (res.body) {
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) bump(value.length);
+      }
+    } else {
+      await res.blob();
+      bump(item.size || 1);
+    }
+  }
+
+  // Smaller files first, video last: if the connection can't sustain everything (today's
+  // demo tunnel has already dropped requests under load — see above), the cheap, fast
+  // items are the ones most likely to land, and the videos — the expensive part — are what
+  // contends for bandwidth the least once they're the only thing left in flight. Lower
+  // concurrency than a normal connection would warrant, for the same reason.
+  const kindWeight = { image: 0, pdf: 0, video: 1 };
+  const queue = items.slice().sort((a, b) => (kindWeight[a.kind] ?? 0) - (kindWeight[b.kind] ?? 0));
+  const CONC = 2;
+  async function worker() {
+    while (queue.length) {
+      const item = queue.shift();
+      try {
+        await fetchOnce(item);
+      } catch {
+        try { await fetchOnce(item); }   // one retry — the free tunnel used for today's demo drops occasional requests under concurrent load
+        catch { failed.push(item); bump(item.size || 1); }   // still bump so the bar reaches 100% instead of stalling — failure is tracked separately below, not hidden
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONC, queue.length) }, worker));
+
+  // Downloading a file is NOT the same as it being stored. sw.js writes to the cache with
+  // cache.put(), and that can reject on its own — most plausibly a per-origin storage
+  // quota, which video is by far the most likely thing to blow past (mobile browsers cap
+  // this, iOS Safari tightly). Those writes happen in the worker, detached from the
+  // response the page sees, so a quota failure would otherwise be invisible here and get
+  // reported as a success — exactly the false "Done" this whole flow already got burned
+  // by once. So: ask the cache what it ACTUALLY holds before claiming anything.
+  const stored = await verifyCachedItems(items.filter((i) => !failed.includes(i)));
+  const missing = failed.length + stored.missing.length;
+
+  if (els.offlineSaveBarFill) els.offlineSaveBarFill.style.width = '100%';
+  if (els.offlineSavePct) els.offlineSavePct.textContent = '100%';
+  if (missing) {
+    // Name the cause: "download failed" and "phone wouldn't store it" need different
+    // responses from whoever is looking at this (retry vs. free up space / trim the project).
+    const headroom = await storageHeadroom();
+    const outOfSpace = headroom !== null && headroom < 5 * 1024 * 1024;
+    if (els.offlineSaveEta) {
+      els.offlineSaveEta.textContent = outOfSpace
+        ? `${items.length - missing}/${items.length} saved — phone storage full`
+        : `${items.length - missing}/${items.length} saved`;
+    }
+    // Deliberately NOT marking this project "saved" — leaving the flag unset means the
+    // prompt offers again on a later visit instead of silently declaring victory on a
+    // partial save the visitor has no way to know about otherwise.
+  } else {
+    if (els.offlineSaveEta) els.offlineSaveEta.textContent = 'Done';
+    try { localStorage.setItem(`b91-offline-saved-${pid}`, '1'); } catch {}
+  }
+  await new Promise((r) => setTimeout(r, missing ? 2600 : 1200));
+  if (els.offlineSaveBanner) els.offlineSaveBanner.hidden = true;
+}
+
+// Confirms, against Cache Storage itself, which of these are genuinely available offline.
+// The page shares the same Cache Storage as sw.js, so it can check the worker's work
+// directly. Keys are stored query-stripped (see sw.js's cacheKeyFor), so match the same way.
+async function verifyCachedItems(items) {
+  const missing = [];
+  if (!('caches' in window)) return { missing };   // can't verify → don't claim failure either
+  for (const item of items) {
+    try {
+      const hit = await caches.match(item.url.split('?')[0]);
+      if (!hit) missing.push(item);
+    } catch { /* a failed check isn't evidence of a failed save — leave it out of `missing` */ }
+  }
+  return { missing };
+}
+
+function isStandaloneDisplay() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 }
 
 // ─── Boot ───────────────────────────────────────────────────────────────────
@@ -5423,7 +6687,10 @@ function closeCustomModal(modalEl) {
     // site branding (title bar): alignment's brand (path) + session logo blob if any
     if (chosen?.brand) Object.assign(state.brand, { name: chosen.brand.name, tagline: chosen.brand.tagline, logo: chosen.brand.logo, _ver: chosen.brand._ver });
     if (restored?.brandLogo?.blob) { state.brand.logoBlob = restored.brandLogo.blob; state.brand.logoName = restored.brandLogo.name; if (!state.brand.logo) state.brand.logo = `sample/${restored.brandLogo.name}`; }
+    if (chosen?.audio) Object.assign(state.audio, { file: chosen.audio.file, name: baseName(chosen.audio.file), _ver: chosen.audio._ver });
+    if (restored?.siteAudio?.blob) { state.audio.blob = restored.siteAudio.blob; state.audio.name = restored.siteAudio.name; if (!state.audio.file) state.audio.file = `sample/${restored.siteAudio.name}`; }
     applyBrand();
+    applySiteAudio();
     if (chosen?.menuConfig) {
       state.menuConfig = Object.assign({}, state.menuConfig, chosen.menuConfig);
     }
@@ -5463,6 +6730,7 @@ function closeCustomModal(modalEl) {
     setAmenities(ams);
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
     initProjectBar();                                    // header project switcher / manage menu
+    registerOfflineSupport();                             // client-only PWA offline cache — see definition above
   } catch (err) {
     console.error(err);
     els.syncMeta.textContent = 'Load error';

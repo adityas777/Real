@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-08-27T11:55:37.552Z",
+  "savedAt": "2026-09-03T10:41:45.995Z",
   "transform": {
     "tx": 2.0785,
     "ty": 1.3717,
@@ -9,8 +9,8 @@
     "rotationDeg": 92.9
   },
   "view": {
-    "lonDeg": 184.77,
-    "latDeg": 2.99,
+    "lonDeg": 181.65,
+    "latDeg": 3.09,
     "fov": 72
   },
   "opacity": 1,
@@ -21,68 +21,15 @@
   "panoImage": {
     "file": "Demo.web.jpg"
   },
+  "brand": {
+    "name": "ANDAMAN",
+    "tagline": "ELEGANZA",
+    "logo": {
+      "file": "sample/logo.web.png"
+    }
+  },
   "menuConfig": {
     "tree": [
-      {
-        "id": "node_1787744175195_376",
-        "title": "CONTACT US",
-        "kind": "contact",
-        "contact": {
-          "title": "dfcad",
-          "about": "asdas",
-          "phone": "32543542",
-          "email": "efwer",
-          "image": "sample/Dinning Landscape Images_14.jpg",
-          "imageName": "Dinning Landscape Images_14.jpg"
-        }
-      },
-      {
-        "id": "node_1787818472445_190",
-        "title": "video",
-        "kind": "parent",
-        "children": [
-          {
-            "id": "node_1787818573180_356",
-            "title": "video 2",
-            "kind": "child",
-            "contentType": "video",
-            "content": {
-              "url": "",
-              "fileName": "Positioned and Resized.mp4"
-            }
-          },
-          {
-            "id": "node_1787818573180_120",
-            "title": "video 1",
-            "kind": "child",
-            "contentType": "video",
-            "content": {
-              "url": "",
-              "fileName": "Hero Video 3 Comp.mp4"
-            }
-          },
-          {
-            "id": "node_1787818573180_704",
-            "title": "video 3",
-            "kind": "child",
-            "contentType": "video",
-            "content": {
-              "url": "",
-              "fileName": "Recording 2026-02-18 165830.mp4"
-            }
-          },
-          {
-            "id": "node_1787818573180_893",
-            "title": "video 4",
-            "kind": "child",
-            "contentType": "video",
-            "content": {
-              "url": "",
-              "fileName": "Recording 2026-02-21 180515.mp4"
-            }
-          }
-        ]
-      },
       {
         "id": "node_1787818482692_969",
         "title": "images",
@@ -184,6 +131,16 @@
                 }
               }
             ]
+          },
+          {
+            "id": "node_1788178808976_572",
+            "title": "zhsxz",
+            "kind": "child",
+            "contentType": "pdf",
+            "content": {
+              "url": "",
+              "fileName": "Week3.pdf"
+            }
           }
         ]
       },
@@ -223,6 +180,66 @@
             }
           }
         ]
+      },
+      {
+        "id": "node_1787818472445_190",
+        "title": "video",
+        "kind": "parent",
+        "children": [
+          {
+            "id": "node_1787818573180_356",
+            "title": "video 2",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Positioned and Resized.mp4"
+            }
+          },
+          {
+            "id": "node_1787818573180_120",
+            "title": "video 1",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Hero Video 3 Comp.mp4"
+            }
+          },
+          {
+            "id": "node_1787818573180_704",
+            "title": "video 3",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Recording 2026-02-18 165830.mp4"
+            }
+          },
+          {
+            "id": "node_1787818573180_893",
+            "title": "video 4",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Recording 2026-02-21 180515.mp4"
+            }
+          }
+        ]
+      },
+      {
+        "id": "node_1788156898983_313",
+        "title": "CONTACT US",
+        "kind": "contact",
+        "contact": {
+          "title": "ADITYA BIRLA COMPANY",
+          "about": "Aditya Birla Centre, S.K. Ahire Marg, Worli, Mumbai, Maharashtra 400030",
+          "phone": "+91 22 2499 5000",
+          "email": "contact@adityabirla.com",
+          "image": "sample/WhatsApp Image 2026-04-30 at 14.44.52.jpeg",
+          "imageName": "WhatsApp Image 2026-04-30 at 14.44.52.jpeg"
+        }
       }
     ]
   }

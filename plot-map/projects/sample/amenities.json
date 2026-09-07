@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 in-layout amenities",
-  "savedAt": "2026-08-27T11:55:37.552Z",
+  "savedAt": "2026-09-03T10:41:45.995Z",
   "amenities": [
     {
       "id": "am1",
@@ -12,7 +12,7 @@
       "dimensions": "afeae",
       "price": "aefaef",
       "block": "afese",
-      "tour_url": "https://www.youtube.com/watch?v=X1aFkAkFASk",
+      "tour_url": "https://youtu.be/L2NAh3CIdig?si=zLIbVRsk7dZ6Bxb0",
       "notes": "",
       "render": {
         "file": "sample/amenity-priyadarshi-satyakam-aasram.web.jpg"
