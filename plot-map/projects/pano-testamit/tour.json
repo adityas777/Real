@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "note": "Build91 virtual tours",
+  "savedAt": "2026-09-08T14:13:09.518Z",
+  "tours": [
+    {
+      "id": "t1",
+      "name": "3BHK",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "01-master-bedroom.web",
+          "pano": {
+            "file": "sample/tour-t1-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -175.03,
+            "latDeg": -16,
+            "fov": 75
+          }
+        },
+        {
+          "id": "n2",
+          "name": "1._Master_Bedroom",
+          "pano": {
+            "file": "sample/tour-t1-n2.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -175.03,
+            "latDeg": -16,
+            "fov": 75
+          }
+        },
+        {
+          "id": "n3",
+          "name": "02-bedroom.web",
+          "pano": {
+            "file": "sample/tour-t1-n3.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -126.59,
+            "latDeg": -10.39,
+            "fov": 75
+          }
+        }
+      ],
+      "links": [
+        {
+          "from": "n1",
+          "to": "n2",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -16.24,
+            "latDeg": -24.59
+          }
+        },
+        {
+          "from": "n2",
+          "to": "n3",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 88.09,
+            "latDeg": -13.36
+          }
+        },
+        {
+          "from": "n3",
+          "to": "n1",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -20.53,
+            "latDeg": -22.76
+          }
+        }
+      ]
+    }
+  ]
+}

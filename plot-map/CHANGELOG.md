@@ -5,6 +5,58 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-08 (virtual tour Phase 1, step 1: tour.json data model + admin Tour tab)
+
+First code for the virtual tour. `app.js`, `index.html`, `styles.css`. Ships the data
+model + a 4th admin **Tour** tab for managing tours and their node panoramas. Hotspot
+linking + the client crossfade viewer are the next steps (not in this change).
+
+- **Data model (`tour.json`, D-13):** one file per project holding **many** tours —
+  `{ version, tours:[{ id, name, startNode, nodes:[{ id, name, pano{file}, defaultView{lonDeg,latDeg,fov} }],
+  links:[{ from, to, hotspot{lonDeg,latDeg}, label }] }] }`. New `parseTours`/`buildToursData`/
+  `loadToursFile`/`setTours`/`tourNodeBlobFiles`/`saveToursAs` mirror the landmarks/amenities
+  pattern exactly (basename-resolved node images, `loadProjectFile`/`saveToProject`). `parseTours`
+  drops links whose from/to node no longer exists and repairs a dangling `startNode`.
+- **State:** `state.tours` + admin `tourSel`/`tourNodeSel` (client `tourActive`/`tourNode`
+  reserved for the viewer step).
+- **Persistence wired:** `buildSession` snapshots tours (incl. node pano blobs) → session
+  autosave/restore; `exportSite` writes `tour.json` + fresh node images (and the empty-check
+  now counts tours); boot loads tours (session > committed `tour.json` > none).
+- **Admin Tour tab:** ＋ Add tour, inline rename, delete; per-tour node list — ＋ Add node
+  (upload a pano, auto-resized to a texture-safe `.web.jpg` via `resizeImageToBlob` at the
+  pano cap), rename node, ☆/★ set start node, delete node; Save tours… / Load…. `setAdminTab`
+  is now 4-way (align/landmarks/amenities/tour); `refreshTourList` renders it.
+- **Verified** end-to-end via the in-app Browser pane against a throwaway `zztourtest`
+  project (removed after): Tour tab shows; add tour → "Tour 1"; two node panos uploaded →
+  2 nodes; rename tour + node, set start node, delete node; **server save wrote
+  `projects/zztourtest/tour.json` + 3 node images** with basename `sample/tour-t1-nN.web.jpg`
+  paths and `startNode:"n2"`; **session-discarded reload restored** the tour, 2 nodes and
+  start node from the committed file; zero console errors; `node --check` + `python ast.parse`.
+
+---
+
+## 2026-09-08 (virtual tour: 0-B signed off, all OQs answered, Phase 1 scope locked — planning only)
+
+Docs only (`VIRTUAL-TOUR.md`, this file). No app code yet. The owner reviewed the `spike/`
+tour and green-lit building **node/hotspot placement + linking as a real admin feature**,
+and answered every open question. Recorded in `VIRTUAL-TOUR.md`:
+- **Decisions locked:** D-1 → **(a) drag-to-place only**; D-9 → **new Tour tab**; all
+  others as recommended. New build decisions: **D-11** client viewer *takes over the main
+  pano* (reuses camera + landmark projection/drag), **D-12** menu launches a tour via a new
+  **`panotour`** content type → `openClientPanoTour(tourId)`, **D-13** one
+  `projects/<id>/tour.json` holding **many** tours.
+- **OQ answers:** colour-only (no depth) → **crossfade, no glide**; ~15 nodes/tour,
+  ~30/project → LRU+prefetch required; **separate tours launched from the menu** (not one
+  graph, not auto-linked to the plot map); HTTPS to come for WebXR (Phase 3); scale/units
+  moot while colour-only.
+- **Consequence:** **Phase 2 (depth glide) deferred** (both prerequisites declined); Phase 1
+  = the crossfade 3DVista replacement, now `🟡 in progress`.
+
+Next: implement Phase 1 in the order data model → Tour tab → hotspot authoring → client
+crossfade viewer → menu launch. See `VIRTUAL-TOUR.md` Phase 1.
+
+---
+
 ## 2026-09-04 (landscape-phone responsiveness: status pills, contact card, drawer scroll)
 
 `styles.css` only. Reported as "contact page, and the sold / available / reserved buttons"
@@ -515,6 +567,119 @@ on-screen smoothness wants a real look.
 
 ---
 
+## 2026-09-08 (fix 2) — client drawer shows only the authored menu; SW served stale config
+
+- **Removed the hardcoded `AERIAL VIEW` and `LANDMARKS` rows** from the client drawer
+  (`renderClientSidebar`). The drawer is now exactly the menu built in admin. A project
+  with no authored menu shows **no drawer at all** rather than an empty panel.
+  Files: `app.js`.
+- **…and made both authorable instead, so the removal isn't a net loss.** 5 of 9 projects
+  here have landmarks but no menu items, and the drawer row was the only **desktop** route
+  into the landmark category filter (`openLandmarksCategoryPicker` is otherwise reachable
+  only from the mobile overflow hint). Added two zero-configuration content types —
+  **📍 Landmarks** and **🗺️ Aerial View** — dispatched from `openNodeContent`, described by
+  `NO_CONFIG_CONTENT_TYPES` (which drives the wizard hint that replaces the URL/upload
+  row). Any project that wants those rows back adds them in the menu builder.
+  Files: `app.js`, `index.html`.
+- **Service worker served STALE project config — the real reason a new menu item didn't
+  appear.** `sw.js` used `staleWhileRevalidate` for everything under `/projects/`, which
+  returns the *previous* copy on the first load after an admin save and only refreshes on a
+  **second** reload. For an authoring tool that reads as "my change didn't save". Project
+  **config** files (`.json`/`.csv`/`.svg` — a few KB each) are now **network-first with
+  cache fallback**; images and media stay stale-while-revalidate (large, and already
+  cache-busted by their own `_ver`). `VERSION` bumped to `v2` so an installed worker drops
+  the old caches and cannot keep serving under the previous rules. Files: `sw.js`.
+- Note: the `act === 'aerial'` / `act === 'landmarks'` click handlers in
+  `wireClientSidebarButtons` and `wireViewControls` are now unreachable (nothing emits
+  `data-act` any more). Left in place rather than removed in the same pass.
+
+## 2026-09-08 (fix) — `panotour` menu items lost their `tourId` on save
+
+- **`cleanNodeForSave` is a whitelist, and it silently dropped `content.tourId`.** It
+  rebuilds `content` from `url` + `fileName` only (plus `images` for galleries), so every
+  save of a `panotour` menu item threw the tour reference away. The item still appeared in
+  the menu and simply did nothing when clicked — the worst kind of failure. Added `tourId`
+  to the whitelist, with a comment marking it as a whitelist so the next content type that
+  carries its own field doesn't repeat this. Files: `app.js`.
+- **`openClientPanoTour` now fails loudly and recovers where it safely can.** A missing
+  `tourId` with exactly one tour in the project opens that tour (no ambiguity, and it
+  repairs items saved before the fix); with several tours it says which control to use
+  instead of doing nothing. Files: `app.js`.
+- **Repaired existing data:** `projects/pano-testamit/alignment.json`'s "3BHK" menu item
+  had `content:{url:"",fileName:""}` — re-pointed at tour `t1`.
+- **Not a bug, worth documenting:** `wireAdmin` hides the client nav drawer
+  (`els.catDrawer.hidden = true`) whenever `?admin=1` is set, because admin has its own
+  sidebar. The menu is therefore **only ever visible in the client view** — the reported
+  "menu is not visible" was this, on top of the `tourId` loss above.
+
+## 2026-09-08 (later) — tour viewer, hotspot linking, `panotour` menu type
+
+- **Fixed: every saved tour node pano was a 15-byte `[object Object]` file.**
+  `resizeImageToBlob` returns `{ blob, W, H }`, but `addTourNodeFromFile` stored the
+  **wrapper** as `panoBlob`, so `serverSave` stringified it. Every node image the admin
+  had uploaded was silently destroyed on save (the files existed on disk, which is why
+  the earlier end-to-end check passed — it verified files were *written*, not that they
+  decoded). Now unwraps `out.blob`. Repaired the three corrupt uploads in
+  `projects/pano-testamit/` from the demo renders. Files: `app.js`.
+
+- **Client tour viewer — `openClientPanoTour` (Phase 1 steps 2–5).** Ported from the
+  Phase 0 spike onto this file's own conventions: reuses `loadPanoTexture` (GPU cap +
+  `flipY=false` — the spike's default-flipY bug rendered panos upside down),
+  `dirFromLonLat`/`projectDir` from the landmark path, and the existing pano sphere.
+  Per **D-11** the tour **takes over the main viewer** rather than opening a second
+  canvas: plots/drape/landmarks/amenities hide, the sphere swaps textures, and
+  `closePanoTour` restores the saved view + texture exactly. Crossfade is a second
+  sphere at 0.985× **sharing the pano geometry** (dispose material only, never the shared
+  geometry). Heading is *carried over* between nodes; `defaultView` applies on entry only,
+  so walking never spins the camera. LRU texture cache (`TOUR_CACHE_MAX = 3`) + one-hop
+  neighbour prefetch, straight from the 0-A finding that download weight (~2 MB/node) and
+  GPU residency (~179 MB/node) are separate problems. Tour chrome (`refreshTourBar`):
+  title, room strip, exit. Files: `app.js`, `index.html` (`#tourHotspots`, `#tourBar`),
+  `styles.css`.
+
+- **Hotspot authoring (Phase 1 steps 3/1.4).** Nav hotspots are direction-anchored and
+  projected each frame, exactly like landmarks. In the admin **Tour** tab, each node row
+  gets a **▶ open in viewer** button; while a tour is open the tab grows a hotspot editor
+  for the current room — add (drops at view centre), retarget, relabel, delete, and
+  **drag onto the doorway** (`startTourHsDrag`, same raycast→`lonLatFromDir` model as
+  landmark pins). Plus **⌖ Set this view as the room's start view**. Client taps route
+  through `pick()` because `#pano` grabs pointer capture (the amenity-pin trap again).
+  Files: `app.js`, `styles.css`.
+
+- **New menu content type `panotour`.** Distinct from the existing `tour`, which iframes
+  an **external** 3DVista/Kuula URL or uploaded file; `panotour` stores a **`tourId`**
+  referencing a tour in this project's `tour.json` (D-12). Added the wizard type card
+  (🧭 360° Tour), a tour picker replacing the URL/upload row (`renderWizardTourPicker`,
+  which warns when a tour has no nodes or no hotspot links), save/edit round-trip via
+  `wizardState.tourId`, and the `openNodeContent` branch. Files: `app.js`, `index.html`.
+
+- **`server.py`: tour-only projects + tours in the standalone bundle.**
+  `/api/projects` and `do_bundle` required a `plots.svg`, which hid tour-only projects
+  entirely; both now accept `plots.svg` **or** `tour.json`. `tour.json` added to
+  `BUNDLE_DATA_FILES`, and new `tour_pano_basenames()` feeds node panos into
+  `build_embedded_images_json` — they are WebGL textures, so under `file://` they must be
+  data: URIs like the background pano (a loose sibling file is rejected as tainted).
+  Closes the Phase 1.7 bundle gap. Files: `server.py`.
+
+- **Demo project made openable.** `projects/panotour-demo/` was spike-format
+  (`{nodes, links}`) which `parseTours` reads as zero tours, and had no `alignment.json`
+  → empty `menuConfig.tree` → **no menu at all on the client**, which is why the feature
+  looked broken. Added `spike/seed-demo-tour.py`: converts it to the app's
+  `{tours:[…]}` shape (9 rooms, 16 links, living room as hub/start) and writes an
+  `alignment.json` carrying a `panotour` menu item. Hotspot directions are evenly spread,
+  **not surveyed** — drag them onto real doorways in admin. Also moved the 343 MB of raw
+  PNG masters into `panotour-demo/_source/`: `do_bundle` copies every **top-level** file
+  into `data/`, so the masters were shipping in every export — **bundle went 392 MB →
+  43.5 MB**. Files: `spike/seed-demo-tour.py` (new), `projects/panotour-demo/*`.
+
+- **Verified:** `node --check app.js`, `python ast.parse server.py`; all new helpers /
+  CSS classes / HTML ids cross-checked as defined; `/api/projects` now lists
+  `panotour-demo`; client + admin URLs 200; real bundle built via the endpoint contains
+  `data/tour.json`, the tour (9 nodes / 16 links) embedded in `B91_BUNDLE_FILES`, and all
+  9 node panos in `B91_BUNDLE_IMAGES`; seeded tour has no dangling links.
+  **Not verified in-browser** — no browser tooling in this session, so the visual result
+  (crossfade, hotspot placement, takeover/restore) needs the user's eyes.
+
 ## 2026-09-03
 
 - **A manual drag now releases the landmark category's pan arc.** Selecting a category
@@ -971,6 +1136,28 @@ on-screen smoothness wants a real look.
     tunnel before this is called solid.
 
 ## 2026-09-02
+
+
+- **Added [VIRTUAL-TOUR.md](VIRTUAL-TOUR.md) — living plan for a multi-node panoramic
+  virtual tour with hotspot navigation + WebXR.** Planning only; **no code written**.
+  Captures a requirements Q&A with the product owner: replace 3DVista with our own tour
+  engine (L1), panos are **3D renders** interior + exterior (L2), glide-through-space
+  transition preferred (L4), WebXR on Quest with mono acceptable (L5/L6). Key technical
+  finding: because the panos are rendered rather than photographed, a **depth pass** comes
+  essentially free, which makes a real-parallax "glide" transition achievable by displacing
+  a sphere mesh into a depth proxy — no photogrammetry or mesh reconstruction needed.
+  Key tension logged: **eyeballed node placement (L3) is incompatible with the glide**,
+  since depth warping needs the true inter-node translation vector (decision D-1,
+  recommending the 3D scene's camera transforms be exported instead). Structure: locked
+  decisions, a separate **Open Questions** table (external unknowns, OQ-1..7) and a
+  separate **Decisions to be made** table (engineering choices with recommendations,
+  D-1..9), a **render pipeline contract** flagged as the project's largest risk (radial vs
+  planar depth, units, camera manifest), then Phases 0–5 with checkboxes — Phase 0 being a
+  deliberately throwaway validation spike that proves the depth warp on two real adjacent
+  interior nodes before any product is built around it. Doc carries a Progress Log to be
+  appended each session. Files: `VIRTUAL-TOUR.md` (new), `CLAUDE.md` (planning-docs pointer
+  in the header, new "Current status" entry).
+
 
 - **Client offline layer (PWA) — minimal service worker + manifest + install prompt,
   built to demo mobile offline over a temporary tunnel while the real hosting decision

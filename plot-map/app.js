@@ -54,14 +54,16 @@ const els = {
   zoomStatusGroup: $('zoomStatusGroup'), zoomAvailableBtn: $('zoomAvailableBtn'),
   zoomReservedBtn: $('zoomReservedBtn'), zoomSoldBtn: $('zoomSoldBtn'), rotateHint: $('rotateHint'),
   landmarks: $('landmarks'), amenities: $('amenities'),
+  tourLayer: $('tourHotspots'), tourBar: $('tourBar'),
   axAudioPick: $('axAudioPick'), axAudioFile: $('axAudioFile'), axAudioName: $('axAudioName'), axAudioClear: $('axAudioClear'), siteAudio: $('siteAudio'),
   catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catLevelSubMenu: $('catLevelSubMenu'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'),
   catDrawerBrand: $('catDrawerBrand'), catDrawerLogo: $('catDrawerLogo'), catDrawerName: $('catDrawerName'), catDrawerTagline: $('catDrawerTagline'),
   fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
   lmOverflowHint: $('lmOverflowHint'),
   // admin tabs + landmarks
-  axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'),
-  axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'),
+  axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'), axTabBtnTour: $('axTabBtnTour'),
+  axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'), axTabTour: $('axTabTour'),
+  axTourAdd: $('axTourAdd'), axTourList: $('axTourList'), axTourEmpty: $('axTourEmpty'), axTourNodeFile: $('axTourNodeFile'), axTourLoad: $('axTourLoad'), axTourFile: $('axTourFile'), axTourSaveBtn: $('axTourSaveBtn'),
   axLmAdd: $('axLmAdd'), axLmList: $('axLmList'), axLmEmpty: $('axLmEmpty'), axLmCount: $('axLmCount'), axLmShowAll: $('axLmShowAll'), axLmHideAll: $('axLmHideAll'), axLmLoad: $('axLmLoad'), axLmFile: $('axLmFile'), axLmSave: $('axLmSave'),
   axAmAdd: $('axAmAdd'), axAmList: $('axAmList'), axAmEmpty: $('axAmEmpty'), axAmLoad: $('axAmLoad'), axAmFile: $('axAmFile'), axAmSave: $('axAmSave'),
   // amenity info card + full-render lightbox
@@ -177,6 +179,9 @@ const state = {
   showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
   landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   amenities: [], amSel: null, amCardOpen: null,  // in-layout amenities (icon pins + render); selected id; open card id
+  tours: [], tourSel: null, tourNodeSel: null,   // authored virtual tours (tour.json); admin: selected tour id + node id
+  tourView: null, tourHsSel: null,               // live tour takeover ({tourId,nodeId,…}) + admin-selected hotspot index
+  tourActive: null, tourNode: null,              // client: running tour object + current node id (null ⇒ not in a tour)
   cardAnchor: null, cardHoverMode: false,        // shared info-card anchor {lon,lat}; hover cards (landmarks) auto-hide
   serverSave: true,                              // is server.py's write API reachable? (else saves fall back to downloads)
   showAmenities: (() => { try { return localStorage.getItem('b91-show-amenities') !== '0'; } catch { return true; } })(), // amenities: shown by default (they're core content)
@@ -994,6 +999,7 @@ function renderLoop() {
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
   if (els.landmarks && !els.landmarks.hidden) renderLandmarks();  // keep banners/pins/lines glued to the scene
   if (els.amenities && !els.amenities.hidden) renderAmenities();  // keep amenity icon-pins glued to the scene
+  if (state.tourView) renderTourHotspots();                       // keep tour nav hotspots glued to the scene
   if (els.amCard && els.amCard.classList.contains('open')) placeAmCard(); // keep the amenity card glued to its pin
 }
 function updateCamera() {
@@ -1647,6 +1653,15 @@ function pick(e) {
   // real tap's `click` lands on #pano — the marker's own click never fires. Hit-test the
   // marker here (it takes precedence over any plot beneath it) so tapping a pin opens it.
   const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+  // In a tour the plot map is hidden, so there is nothing to raycast — but the nav
+  // hotspots are DOM and lose their own click to #pano's capture (same trap as amenity
+  // pins), so they are hit-tested here instead. Admin drags are handled by the element's
+  // own pointerdown, which stops propagation before capture happens.
+  if (state.tourView) {
+    const hs = hitEl?.closest?.('.tour-hs');
+    if (hs) { const i = tourHsDom.findIndex((h) => h.el === hs); if (i >= 0) hs.click(); }
+    return;
+  }
   const marker = hitEl?.closest?.('.am-marker');
   if (marker) { for (const [aid, m] of amDom) if (m === marker) { openAmCard(aid); return; } }
   // a render-bearing landmark banner is tappable too (mobile) — opens the same card sticky
@@ -2206,12 +2221,19 @@ function cleanNodeForSave(node) {
   } else if (node.kind === 'child') {
     clean.contentType = node.contentType || 'link';
     const c = node.content || {};
+    // NOTE: this is a WHITELIST — anything not copied here is dropped on every save.
+    // A new content type that carries its own field MUST be added below, or it will be
+    // silently lost on the round-trip (a `panotour` item saved without its `tourId`
+    // still appears in the menu and simply does nothing when clicked).
     clean.content = {
       url: c.url || '',
       fileName: c.fileName || (c.fileBlob ? c.fileBlob.name : '')
     };
     if (clean.contentType === 'gallery') {
       clean.content.images = Array.isArray(c.images) ? c.images.map(img => ({ name: img.name, url: img.url })) : [];
+    }
+    if (clean.contentType === 'panotour') {
+      clean.content.tourId = c.tourId || '';       // which tour in this project's tour.json
     }
   } else if (node.kind === 'contact') {
     const ct = node.contact || {};
@@ -2319,6 +2341,9 @@ function buildSession() {                                // a complete snapshot 
     siteAudio: state.audio.blob ? { name: state.audio.name || 'audio.mp3', blob: state.audio.blob } : null,
     landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
     amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes, render: a.render, renderBlob: a.renderBlob || null, hotspot: { ...a.hotspot } })),
+    tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
+      nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null, defaultView: { ...n.defaultView } })),
+      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot } })) })),
   };
 }
 let sessionTimer = null;
@@ -2584,12 +2609,13 @@ async function exportSite() {
   const hasGeom = state.geom.length > 0;
   const hasLandmarks = state.landmarks.length > 0;
   const hasAmenities = state.amenities.length > 0;
+  const hasTours = state.tours.length > 0;
   const hasPano = !!(state.panoBlob || state.panoImage?.file);
   const hasBrand = !!(state.brand?.name || state.brand?.tagline || state.brand?.logo || state.brand?.logoBlob || state.audio?.file || state.audio?.blob);
   const hasPlan = !!(trace.planBlob || state.planBlob || trace.objURL || state.groundImage?.file);
 
-  if (!hasGeom && !hasLandmarks && !hasAmenities && !hasPano && !hasBrand && !hasPlan) {
-    setAxStatus('Nothing to save yet — import/trace plots, set a panorama, or add landmarks / amenities first.');
+  if (!hasGeom && !hasLandmarks && !hasAmenities && !hasTours && !hasPano && !hasBrand && !hasPlan) {
+    setAxStatus('Nothing to save yet — import/trace plots, set a panorama, or add landmarks / amenities / tours first.');
     return false;
   }
   const planBlob = trace.planBlob || state.planBlob || (trace.objURL ? await (await fetch(trace.objURL)).blob() : null);
@@ -2608,6 +2634,7 @@ async function exportSite() {
     ...(state.audio.blob && state.audio.file ? [[baseName(state.audio.file), state.audio.blob, state.audio.blob.type || (/\.(mp4|m4v|mov|mkv|webm)$/i.test(state.audio.file) ? 'video/mp4' : 'audio/mpeg')]] : []),
     ['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json'],
     ['amenities.json', JSON.stringify(buildAmenitiesData(), null, 2), 'application/json'],
+    ...(hasTours ? [['tour.json', JSON.stringify(buildToursData(), null, 2), 'application/json'], ...tourNodeBlobFiles()] : []),
     // freshly-imported render images (an already-on-disk path has no blob to re-ship)
     ...state.amenities.filter((a) => a.renderBlob && a.render).map((a) => [baseName(a.render), a.renderBlob, 'image/jpeg']),
     ...state.landmarks.filter((l) => l.renderBlob && l.render).map((l) => [baseName(l.render), l.renderBlob, 'image/jpeg']),
@@ -2760,6 +2787,7 @@ function wireAdmin() {
   els.axTabBtnAlign.addEventListener('click', () => setAdminTab('align'));
   els.axTabBtnLandmarks.addEventListener('click', () => setAdminTab('landmarks'));
   els.axTabBtnAmenities?.addEventListener('click', () => setAdminTab('amenities'));
+  els.axTabBtnTour?.addEventListener('click', () => setAdminTab('tour'));
   els.axLmAdd.addEventListener('click', addLandmark);
   els.axLmShowAll?.addEventListener('click', () => setAllLandmarksFeatured(true));
   els.axLmHideAll?.addEventListener('click', () => setAllLandmarksFeatured(false));
@@ -2770,6 +2798,11 @@ function wireAdmin() {
   els.axAmSave?.addEventListener('click', saveAmenitiesAs);
   els.axAmLoad?.addEventListener('click', () => els.axAmFile?.click());
   els.axAmFile?.addEventListener('change', async () => { const f = els.axAmFile.files?.[0]; if (f) { try { setAmenities(parseAmenities(JSON.parse(await f.text()))); onAmenitiesChanged(); setAxStatus(`Loaded ${state.amenities.length} amenit${state.amenities.length === 1 ? 'y' : 'ies'} from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that amenities file (${err.message}).`); } } els.axAmFile.value = ''; });
+  els.axTourAdd?.addEventListener('click', addTour);
+  els.axTourSaveBtn?.addEventListener('click', saveToursAs);
+  els.axTourLoad?.addEventListener('click', () => els.axTourFile?.click());
+  els.axTourFile?.addEventListener('change', async () => { const f = els.axTourFile.files?.[0]; if (f) { try { setTours(parseTours(JSON.parse(await f.text()))); onToursChanged(); setAxStatus(`Loaded ${state.tours.length} tour(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that tour file (${err.message}).`); } } els.axTourFile.value = ''; });
+  els.axTourNodeFile?.addEventListener('change', async () => { const f = els.axTourNodeFile.files?.[0]; if (f) await addTourNodeFromFile(f); els.axTourNodeFile.value = ''; });
   setAdminTab('align');
   els.axSave?.addEventListener('click', saveAlignmentAs);
   els.axExport?.addEventListener('click', exportSite);
@@ -3792,15 +3825,16 @@ function refreshLmList() {
 }
 function setAdminTab(tab) {
   state.adminTab = tab;
-  els.axTabAlign.hidden = tab !== 'align'; els.axTabLandmarks.hidden = tab !== 'landmarks'; if (els.axTabAmenities) els.axTabAmenities.hidden = tab !== 'amenities';
-  els.axTabBtnAlign.classList.toggle('is-on', tab === 'align'); els.axTabBtnLandmarks.classList.toggle('is-on', tab === 'landmarks'); els.axTabBtnAmenities?.classList.toggle('is-on', tab === 'amenities');
-  els.axTabBtnAlign.setAttribute('aria-selected', String(tab === 'align')); els.axTabBtnLandmarks.setAttribute('aria-selected', String(tab === 'landmarks')); els.axTabBtnAmenities?.setAttribute('aria-selected', String(tab === 'amenities'));
-  const titles = { landmarks: 'Landmarks', amenities: 'Amenities', align: 'Align overlay' };
-  const subs = { landmarks: 'Add banners on the horizon; drag the pin and the banner to place them.', amenities: 'Add amenities in the layout; drag each icon-pin, name it, and attach a render image.', align: 'Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.' };
+  els.axTabAlign.hidden = tab !== 'align'; els.axTabLandmarks.hidden = tab !== 'landmarks'; if (els.axTabAmenities) els.axTabAmenities.hidden = tab !== 'amenities'; if (els.axTabTour) els.axTabTour.hidden = tab !== 'tour';
+  els.axTabBtnAlign.classList.toggle('is-on', tab === 'align'); els.axTabBtnLandmarks.classList.toggle('is-on', tab === 'landmarks'); els.axTabBtnAmenities?.classList.toggle('is-on', tab === 'amenities'); els.axTabBtnTour?.classList.toggle('is-on', tab === 'tour');
+  els.axTabBtnAlign.setAttribute('aria-selected', String(tab === 'align')); els.axTabBtnLandmarks.setAttribute('aria-selected', String(tab === 'landmarks')); els.axTabBtnAmenities?.setAttribute('aria-selected', String(tab === 'amenities')); els.axTabBtnTour?.setAttribute('aria-selected', String(tab === 'tour'));
+  const titles = { landmarks: 'Landmarks', amenities: 'Amenities', tour: 'Virtual tours', align: 'Align overlay' };
+  const subs = { landmarks: 'Add banners on the horizon; drag the pin and the banner to place them.', amenities: 'Add amenities in the layout; drag each icon-pin, name it, and attach a render image.', tour: 'Build multi-node 360° walkthroughs; add a tour and upload a panorama per node.', align: 'Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.' };
   if (els.axTitle) els.axTitle.textContent = titles[tab] || titles.align;
   if (els.axSubtitle) els.axSubtitle.textContent = subs[tab] || subs.align;
   applyLandmarkVisibility(); refreshLmList();
   applyAmenityVisibility(); refreshAmList();
+  refreshTourList();
 }
 // persistence
 function normLL(o) { if (!o) return null; const lon = o.lonDeg != null ? +o.lonDeg : +o.lon, lat = o.latDeg != null ? +o.latDeg : +o.lat; return (isFinite(lon) && isFinite(lat)) ? { lon, lat } : null; }
@@ -4122,6 +4156,507 @@ async function saveAmenitiesAs() {
     ...state.amenities.filter((a) => a.renderBlob && a.render).map((a) => [baseName(a.render), a.renderBlob, 'image/jpeg'])];
   await saveToProject(files, '<code>amenities.json</code>');
 }
+
+// ═══ Virtual tours (multi-node panoramic walkthroughs — VIRTUAL-TOUR.md Phase 1) ══════
+// A project's tour.json holds MANY independent tours (OQ-4). A tour = { id, name,
+// startNode, nodes:[{ id, name, pano{file}, defaultView{lon,lat,fov} }],
+// links:[{ from, to, hotspot{lon,lat}, label }] }. Each node's pano is a texture-safe
+// .web.jpg resolved by basename like every other project image. Absent tour.json ⇒ no
+// tours (today's behaviour). Loaded/saved/exported/sessioned exactly like landmarks/
+// amenities. The client crossfade viewer + hotspot authoring build on top of this (later
+// Phase-1 steps); this module is the data model + admin tour/node management.
+let tourSeq = 0;
+function newTourId() { return 't' + (++tourSeq); }
+function nodeSeqFor(tour) { return (tour.nodes || []).reduce((m, n) => { const k = parseInt(String(n.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(k) ? k : 0); }, 0); }
+function parseTours(d) {
+  const arr = (d && Array.isArray(d.tours)) ? d.tours : (Array.isArray(d) ? d : []);
+  const ver = (d && d.savedAt) || '';                    // cache-bust token for committed node images
+  return arr.map((t, i) => {
+    const nodes = (Array.isArray(t.nodes) ? t.nodes : []).map((n, j) => {
+      const pano = (n.pano && n.pano.file) ? n.pano.file : (typeof n.pano === 'string' ? n.pano : null);
+      const dv = n.defaultView || {};
+      return { id: (n.id || 'n' + (j + 1)).toString(), name: (n.name || '').toString() || ('Node ' + (j + 1)),
+        pano, panoBlob: n.panoBlob || null, _ver: ver, _url: null,
+        defaultView: { lon: +(dv.lonDeg != null ? dv.lonDeg : dv.lon) || 0, lat: +(dv.latDeg != null ? dv.latDeg : dv.lat) || 0, fov: +dv.fov || 75 } };
+    }).filter((n) => n.id);
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot) }))
+      .filter((k) => nodeIds.has(k.from) && nodeIds.has(k.to) && k.hotspot);   // drop links to deleted nodes
+    return { id: (t.id || 't' + (i + 1)).toString(), name: (t.name || '').toString() || ('Tour ' + (i + 1)),
+      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links };
+  }).filter((t) => t.id);
+}
+function buildToursData() {
+  return { version: 1, note: 'Build91 virtual tours', savedAt: new Date().toISOString(),
+    tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
+      nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, ...(n.pano ? { pano: { file: n.pano } } : {}),
+        defaultView: { lonDeg: +(+n.defaultView.lon).toFixed(2), latDeg: +(+n.defaultView.lat).toFixed(2), fov: Math.round(+n.defaultView.fov || 75) } })),
+      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) } })) })) };
+}
+// every node pano blob still in memory (fresh import / session restore), for Export + session
+function tourNodeBlobFiles() {
+  const out = [];
+  state.tours.forEach((t) => t.nodes.forEach((n) => { if (n.panoBlob && n.pano) out.push([baseName(n.pano), n.panoBlob, 'image/jpeg']); }));
+  return out;
+}
+async function loadToursFile() {
+  try { const r = await loadProjectFile('tour.json'); if (!r || !r.ok) return null; return parseTours(await r.json()); } catch { return null; }
+}
+function setTours(list) {
+  state.tours.forEach((t) => t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } }));
+  state.tours = list || [];
+  tourSeq = state.tours.reduce((m, t) => { const k = parseInt(String(t.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(k) ? k : 0); }, 0);
+  state.tourSel = state.tours[0]?.id || null; state.tourNodeSel = null;
+  if (typeof refreshTourList === 'function') refreshTourList();
+}
+function onToursChanged() { if (state.admin) scheduleSessionSave(); }
+const curTour = () => state.tours.find((t) => t.id === state.tourSel) || null;
+
+function addTour() {
+  const t = { id: newTourId(), name: 'Tour ' + (state.tours.length + 1), startNode: null, nodes: [], links: [] };
+  state.tours.push(t); state.tourSel = t.id; state.tourNodeSel = null;
+  refreshTourList(); onToursChanged();
+  setAxStatus('Tour added — give it a name, then <strong>Add node</strong> to upload each 360° panorama.');
+}
+function deleteTour(id) {
+  const t = state.tours.find((x) => x.id === id); if (t) t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } });
+  state.tours = state.tours.filter((x) => x.id !== id);
+  if (state.tourSel === id) { state.tourSel = state.tours[0]?.id || null; state.tourNodeSel = null; }
+  refreshTourList(); onToursChanged();
+}
+function selectTour(id) { state.tourSel = id; state.tourNodeSel = null; refreshTourList(); }
+async function addTourNodeFromFile(file) {
+  const t = curTour(); if (!t || !file) return;
+  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
+  // resizeImageToBlob returns { blob, W, H } — NOT a Blob. Unwrapping it matters: storing
+  // the wrapper made every saved node pano serialise as the string "[object Object]"
+  // (a 15-byte file on disk that silently fails to decode).
+  let out; try { out = await resizeImageToBlob(file, cap, 'image/jpeg', 0.85); } catch { setAxStatus('Could not read that image as a panorama.'); return; }
+  const id = 'n' + (nodeSeqFor(t) + 1);
+  const base = (file.name || 'node').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
+  const node = { id, name: base || ('Node ' + (t.nodes.length + 1)), pano: `sample/tour-${t.id}-${id}.web.jpg`, panoBlob: out.blob, _ver: '', _url: null,
+    defaultView: { lon: 0, lat: 0, fov: 75 } };
+  t.nodes.push(node);
+  if (!t.startNode) t.startNode = id;                    // first node is the entry point by default
+  state.tourNodeSel = id; refreshTourList(); onToursChanged();
+  setAxStatus(`Node “${node.name}” added to ${esc(t.name)}. (Hotspot linking + preview land in the tour viewer — next build step.)`);
+}
+function deleteTourNode(tourId, nodeId) {
+  const t = state.tours.find((x) => x.id === tourId); if (!t) return;
+  const n = t.nodes.find((x) => x.id === nodeId); if (n && n._url) { try { URL.revokeObjectURL(n._url); } catch {} }
+  t.nodes = t.nodes.filter((x) => x.id !== nodeId);
+  t.links = t.links.filter((k) => k.from !== nodeId && k.to !== nodeId);   // drop links touching it
+  if (t.startNode === nodeId) t.startNode = t.nodes[0]?.id || null;
+  if (state.tourNodeSel === nodeId) state.tourNodeSel = null;
+  refreshTourList(); onToursChanged();
+}
+async function saveToursAs() {
+  const files = [['tour.json', JSON.stringify(buildToursData(), null, 2), 'application/json'], ...tourNodeBlobFiles()];
+  await saveToProject(files, '<code>tour.json</code>');
+}
+// Admin Tour-tab list: each tour is a row; the selected one expands to its node list +
+// Add-node. (Hotspot linking + per-node default view are set inside the tour viewer, the
+// next build step — this tab manages the tour/node structure and pano uploads.)
+function refreshTourList() {
+  if (!els.axTourList) return;
+  if (els.axTourEmpty) els.axTourEmpty.hidden = state.tours.length > 0;
+  els.axTourList.innerHTML = '';
+  state.tours.forEach((t) => {
+    const li = document.createElement('div'); li.className = 'ax-tour-li' + (t.id === state.tourSel ? ' is-sel' : '');
+    const head = document.createElement('div'); head.className = 'ax-lm-li-head';
+    const name = document.createElement('input'); name.className = 'ax-tour-name'; name.value = t.name; name.title = 'Tour name';
+    name.addEventListener('input', () => { t.name = name.value; onToursChanged(); });
+    name.addEventListener('click', (e) => e.stopPropagation());
+    const count = document.createElement('span'); count.className = 'ax-tour-count'; count.textContent = `${t.nodes.length} node${t.nodes.length === 1 ? '' : 's'}`;
+    const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete tour';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteTour(t.id); });
+    head.append(name, count, del); li.appendChild(head);
+    li.addEventListener('click', (e) => { if (e.target.closest('.ax-tour-edit,.ax-lm-del,input,button')) return; selectTour(t.id === state.tourSel ? null : t.id); });
+    if (t.id === state.tourSel) {
+      const ed = document.createElement('div'); ed.className = 'ax-tour-edit';
+      if (!t.nodes.length) { const p = document.createElement('p'); p.className = 'ax-tour-hint'; p.textContent = 'No nodes yet — Add node to upload a 360° panorama.'; ed.appendChild(p); }
+      const liveNode = (state.tourView && state.tourView.tourId === t.id) ? state.tourView.nodeId : null;
+      t.nodes.forEach((n) => {
+        const row = document.createElement('div'); row.className = 'ax-tour-node' + (n.id === liveNode ? ' is-live' : '');
+        const star = document.createElement('button'); star.type = 'button'; star.className = 'ax-tour-start' + (t.startNode === n.id ? ' is-on' : '');
+        star.textContent = t.startNode === n.id ? '★' : '☆'; star.title = t.startNode === n.id ? 'Start node' : 'Set as the tour’s start node';
+        star.addEventListener('click', (e) => { e.stopPropagation(); t.startNode = n.id; refreshTourList(); onToursChanged(); });
+        const nn = document.createElement('input'); nn.className = 'ax-tour-nodename'; nn.value = n.name; nn.title = 'Node name';
+        nn.addEventListener('input', () => { n.name = nn.value; onToursChanged(); rebuildTourHotspotDOM(); refreshTourBar(); });
+        // Open this node in the live viewer — where hotspots are placed and the start
+        // view is set (both are inherently spatial, so they are authored in the pano).
+        const go = document.createElement('button'); go.type = 'button'; go.className = 'ax-tour-open';
+        go.textContent = n.id === liveNode ? '◉' : '▶'; go.title = n.id === liveNode ? 'Currently open in the viewer' : 'Open this node in the viewer';
+        go.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (state.tourView && state.tourView.tourId === t.id) tourGoTo(n.id);
+          else { state.tourSel = t.id; openClientPanoTour(t.id, t.name); setTimeout(() => tourGoTo(n.id), 0); }
+        });
+        const dn = document.createElement('button'); dn.type = 'button'; dn.className = 'ax-lm-del'; dn.textContent = '×'; dn.title = 'Delete node';
+        dn.addEventListener('click', (e) => { e.stopPropagation(); deleteTourNode(t.id, n.id); });
+        row.append(star, go, nn, dn); ed.appendChild(row);
+      });
+      const add = document.createElement('button'); add.type = 'button'; add.className = 'btn btn-ghost ax-tour-addnode'; add.textContent = '＋ Add node (upload pano)';
+      add.addEventListener('click', (e) => { e.stopPropagation(); els.axTourNodeFile?.click(); });
+      ed.appendChild(add);
+
+      // ── Hotspot authoring, only while this tour is open in the viewer ──
+      if (state.tourView && state.tourView.tourId === t.id && state.tourView.nodeId) {
+        const here = t.nodes.find((n) => n.id === state.tourView.nodeId);
+        const box = document.createElement('div'); box.className = 'ax-tour-hs';
+        const h = document.createElement('div'); h.className = 'ax-tour-hs-h';
+        h.innerHTML = `Hotspots in <strong>${esc(here ? here.name : '')}</strong>`;
+        box.appendChild(h);
+
+        const mine = t.links.map((k, i) => ({ k, i })).filter((x) => x.k.from === state.tourView.nodeId);
+        if (!mine.length) { const p = document.createElement('p'); p.className = 'ax-tour-hint'; p.textContent = 'No exits from this room yet — add one below, then drag it onto the doorway.'; box.appendChild(p); }
+        mine.forEach(({ k, i }) => {
+          const r = document.createElement('div'); r.className = 'ax-tour-hsrow' + (state.tourHsSel === i ? ' is-sel' : '');
+          const tgt = t.nodes.find((n) => n.id === k.to);
+          const lbl = document.createElement('input'); lbl.className = 'ax-tour-hslabel';
+          lbl.value = k.label || ''; lbl.placeholder = tgt ? tgt.name : k.to; lbl.title = 'Hotspot label (blank = target node name)';
+          lbl.addEventListener('input', () => { k.label = lbl.value; onToursChanged(); rebuildTourHotspotDOM(); });
+          const arrow = document.createElement('span'); arrow.className = 'ax-tour-hsarrow'; arrow.textContent = '→';
+          const to = document.createElement('select'); to.className = 'ax-tour-hsto'; to.title = 'Target node';
+          t.nodes.filter((n) => n.id !== k.from).forEach((n) => { const o = document.createElement('option'); o.value = n.id; o.textContent = n.name; to.appendChild(o); });
+          to.value = k.to;
+          to.addEventListener('change', () => { k.to = to.value; onToursChanged(); rebuildTourHotspotDOM(); });
+          const del = document.createElement('button'); del.type = 'button'; del.className = 'ax-lm-del'; del.textContent = '×'; del.title = 'Delete hotspot';
+          del.addEventListener('click', (e) => { e.stopPropagation(); deleteTourHotspot(i); });
+          r.append(lbl, arrow, to, del); box.appendChild(r);
+        });
+
+        const others = t.nodes.filter((n) => n.id !== state.tourView.nodeId);
+        const addRow = document.createElement('div'); addRow.className = 'ax-tour-hsadd';
+        if (others.length) {
+          const pick = document.createElement('select'); pick.className = 'ax-tour-hsto';
+          others.forEach((n) => { const o = document.createElement('option'); o.value = n.id; o.textContent = n.name; pick.appendChild(o); });
+          const ab = document.createElement('button'); ab.type = 'button'; ab.className = 'btn btn-ghost'; ab.textContent = '＋ Add hotspot here';
+          ab.title = 'Drops a hotspot at the centre of the current view — then drag it into place';
+          ab.addEventListener('click', (e) => { e.stopPropagation(); addTourHotspot(pick.value); });
+          addRow.append(pick, ab);
+        } else {
+          const p = document.createElement('p'); p.className = 'ax-tour-hint'; p.textContent = 'Upload at least one more node to link to.';
+          addRow.appendChild(p);
+        }
+        box.appendChild(addRow);
+
+        const dv = document.createElement('button'); dv.type = 'button'; dv.className = 'btn btn-ghost ax-tour-dv';
+        dv.textContent = '⌖ Set this view as the room’s start view';
+        dv.title = 'Visitors arriving in this room will face the direction you are looking now';
+        dv.addEventListener('click', (e) => { e.stopPropagation(); setTourNodeDefaultView(); });
+        box.appendChild(dv);
+
+        const ex = document.createElement('button'); ex.type = 'button'; ex.className = 'btn btn-ghost ax-tour-dv';
+        ex.textContent = '✕ Close viewer (back to the plot map)';
+        ex.addEventListener('click', (e) => { e.stopPropagation(); closePanoTour(); refreshTourList(); });
+        box.appendChild(ex);
+
+        ed.appendChild(box);
+      } else if (t.nodes.length) {
+        const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btn-primary ax-tour-openall';
+        open.textContent = '▶ Open tour to place hotspots';
+        open.addEventListener('click', (e) => { e.stopPropagation(); openClientPanoTour(t.id, t.name); refreshTourList(); });
+        ed.appendChild(open);
+      }
+      li.appendChild(ed);
+    }
+    els.axTourList.appendChild(li);
+  });
+}
+// ═══ Tour viewer (Phase 1 steps 2–5) ════════════════════════════════════════════════
+// Ported from the Phase 0 spike (spike/index.html), rewritten onto this file's own
+// conventions rather than the spike's: it reuses `loadPanoTexture` (which already caps to
+// the GPU max and — critically — sets flipY=false; the spike's default-flipY bug rendered
+// every pano upside down), `dirFromLonLat`/`projectDir` from the landmark path, and the
+// existing pano sphere.
+//
+// D-11: the tour TAKES OVER the main viewer rather than opening a second canvas — the
+// pano sphere just swaps textures, so there is one WebGL context and one camera. Plots,
+// drape, landmarks and amenities are hidden for the duration and restored on exit.
+//
+// Texture lifecycle (the 0-A finding): download weight and GPU residency are separate
+// problems. ~2 MB/node downloads fine, but an 8192×4096 RGBA texture with mips is ~179 MB,
+// so holding a 15-node tour resident (OQ-3) would be ~2.7 GB. Hence a hard LRU cap plus
+// one-hop prefetch: walking the tour is instant, and only the resident set is bounded.
+const TOUR_CACHE_MAX = 3;                                  // nodes kept in VRAM (~537 MB at 8K)
+const tourTex = new Map();                                 // nodeKey -> THREE.Texture (insertion order = LRU)
+const tourInflight = new Map();
+let tourHsDom = [];                                        // [{ el, dir, idx }] projected each frame
+let tourFadeMesh = null;
+let tourHsDrag = null;
+
+const tourKey = (t, n) => `${t.id}/${n.id}`;
+const curTourView = () => state.tourView ? state.tours.find((t) => t.id === state.tourView.tourId) : null;
+const curTourNode = () => { const t = curTourView(); return t ? t.nodes.find((n) => n.id === state.tourView.nodeId) : null; };
+
+// Node image source: a fresh in-memory blob (admin, pre-export) wins over the committed
+// file, exactly like renderSrc does for landmark/amenity renders.
+function tourNodeSrc(node) {
+  if (node.panoBlob) { if (!node._url) node._url = URL.createObjectURL(node.panoBlob); return node._url; }
+  return node.pano ? assetUrl(node.pano, node._ver) : null;
+}
+function tourTouch(k) { const v = tourTex.get(k); if (v) { tourTex.delete(k); tourTex.set(k, v); } }
+function tourEvict() {
+  const keep = state.tourView ? `${state.tourView.tourId}/${state.tourView.nodeId}` : null;
+  while (tourTex.size > TOUR_CACHE_MAX) {
+    const [k, tex] = tourTex.entries().next().value;
+    if (k === keep) { tourTouch(k); break; }                // never evict what is on screen
+    tex.dispose(); tourTex.delete(k);
+  }
+}
+function loadTourNodeTex(tour, node) {
+  const k = tourKey(tour, node);
+  if (tourTex.has(k)) { tourTouch(k); return Promise.resolve(tourTex.get(k)); }
+  if (tourInflight.has(k)) return tourInflight.get(k);
+  const src = tourNodeSrc(node);
+  if (!src) return Promise.reject(new Error(`Node “${node.name}” has no panorama image.`));
+  const p = loadPanoTexture(src).then((tex) => {
+    tourInflight.delete(k); tourTex.set(k, tex); tourEvict(); return tex;
+  }).catch((e) => { tourInflight.delete(k); throw e; });
+  tourInflight.set(k, p);
+  return p;
+}
+// Prefetch every node one hop away, so the next click is instant. Fire-and-forget.
+function prefetchTourNeighbours(tour, nodeId) {
+  tour.links.filter((k) => k.from === nodeId).forEach((k) => {
+    const n = tour.nodes.find((x) => x.id === k.to);
+    if (n) loadTourNodeTex(tour, n).catch(() => {});
+  });
+}
+
+// ─── Enter / exit the takeover ──────────────────────────────────────────────
+function openClientPanoTour(tourId, title) {
+  let tour = state.tours.find((t) => t.id === tourId);
+  // Be forgiving about a missing tourId: menu items saved before `cleanNodeForSave` kept
+  // the field lost it on every save, and an item that silently does nothing is the worst
+  // possible failure. With exactly one tour in the project there is no ambiguity — open
+  // it. With several, say plainly what to fix rather than guessing.
+  if (!tour && !tourId && state.tours.length === 1) tour = state.tours[0];
+  if (!tour) {
+    if (!state.tours.length) showNotice('This project has no virtual tours yet. Add one in the admin <strong>Tour</strong> tab.');
+    else showNotice('This menu item isn’t pointing at a tour. Edit it in the menu builder and pick one under <strong>360° Tour</strong>.');
+    return;
+  }
+  if (!tour.nodes.length) { showNotice(`“${tour.name}” has no panoramas yet.`); return; }
+  if (!three) return;
+  if (state.tourView) closePanoTour({ silent: true });
+
+  state.tourView = { tourId, nodeId: null, title: title || tour.name, busy: false,
+    saved: { view: { ...state.view }, panoMap: three.pano.material.map } };
+
+  // Takeover: everything that belongs to the plot map goes away for the duration.
+  state.plots.forEach((p) => { p.group.visible = false; });
+  if (three.ground) three.ground.mesh.visible = false;
+  if (els.landmarks) els.landmarks.hidden = true;
+  if (els.amenities) els.amenities.hidden = true;
+  if (els.panel?.classList.contains('open')) closePanel();
+  if (els.amCard?.classList.contains('open')) closeAmCard();
+  document.body.classList.add('tour-open');
+  if (els.tourLayer) els.tourLayer.hidden = false;
+  if (els.tourBar) els.tourBar.hidden = false;
+
+  state.view.fov = 75;
+  tourGoTo(tour.startNode || tour.nodes[0].id, { instant: true });
+}
+function closePanoTour({ silent = false } = {}) {
+  const tv = state.tourView; if (!tv) return;
+  if (tourFadeMesh) { three.scene.remove(tourFadeMesh); tourFadeMesh.material.dispose(); tourFadeMesh = null; }
+  state.tourView = null;
+
+  // Restore the plot map exactly as it was.
+  state.plots.forEach((p) => { p.group.visible = true; });
+  if (three.ground) three.ground.mesh.visible = true;
+  applyLandmarkVisibility(); applyAmenityVisibility();     // restore per each one's own rules
+  document.body.classList.remove('tour-open');
+  if (els.tourLayer) { els.tourLayer.hidden = true; els.tourLayer.innerHTML = ''; }
+  if (els.tourBar) els.tourBar.hidden = true;
+  tourHsDom = [];
+  if (tv.saved?.panoMap) { three.pano.material.map = tv.saved.panoMap; three.pano.material.needsUpdate = true; }
+  if (tv.saved?.view) Object.assign(state.view, tv.saved.view);
+  clampView(); requestRender();
+  // Drop the tour's textures — the plot map has no use for them and they are the biggest
+  // thing in VRAM. The committed background pano is untouched (it is not in this cache).
+  tourTex.forEach((tex) => tex.dispose()); tourTex.clear(); tourInflight.clear();
+  if (!silent) setAxStatus('');
+}
+
+// ─── Node switching + crossfade ─────────────────────────────────────────────
+// The spike's swappable transition interface, reduced to what Phase 1 ships: `cut` and
+// `crossfade`. Phase 2's depth glide would slot in here as a third branch (deferred —
+// the owner declined both its prerequisites, see VIRTUAL-TOUR.md D-1/OQ-1).
+function tourTween(ms, fn) {
+  return new Promise((res) => {
+    const t0 = performance.now();
+    (function step() {
+      const t = Math.min(1, (performance.now() - t0) / ms);
+      fn(t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);   // easeInOutQuad
+      t < 1 ? requestAnimationFrame(step) : res();
+    })();
+  });
+}
+async function tourGoTo(nodeId, { instant = false } = {}) {
+  const tv = state.tourView, tour = curTourView();
+  if (!tv || !tour || tv.busy) return;
+  const node = tour.nodes.find((n) => n.id === nodeId);
+  if (!node) return;
+  if (node.id === tv.nodeId) return;
+
+  tv.busy = true; refreshTourBar();
+  try {
+    const tex = await loadTourNodeTex(tour, node);
+    if (!state.tourView) return;                            // exited while loading
+
+    if (instant || !three.pano.material.map) {
+      swapPano(tex);
+    } else {
+      // Crossfade: a second sphere just inside the first, sharing its geometry, fades in
+      // over the outgoing texture. Geometry is SHARED — dispose only the material.
+      tourFadeMesh = new THREE.Mesh(three.pano.geometry, new THREE.MeshBasicMaterial({
+        map: tex, side: THREE.DoubleSide, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+      tourFadeMesh.scale.setScalar(0.985); tourFadeMesh.renderOrder = 2;
+      three.scene.add(tourFadeMesh);
+      await tourTween(460, (e) => { if (tourFadeMesh) tourFadeMesh.material.opacity = e; });
+      if (three.pano.material.map !== tex) { three.pano.material.map = tex; three.pano.material.needsUpdate = true; }
+      three.scene.remove(tourFadeMesh); tourFadeMesh.material.dispose(); tourFadeMesh = null;
+    }
+
+    tv.nodeId = node.id;
+    // Heading continuity: the visitor's facing direction is CARRIED OVER, not reset — a
+    // node's defaultView is only applied on entry (instant), so walking a tour never
+    // spins the camera under them. `state.view.lon` is a CAMERA yaw (see the two-lon-
+    // conventions note above `computeHome`), which is the convention defaultView stores.
+    if (instant) {
+      state.view.lon = (node.defaultView.lon || 0) * Math.PI / 180;
+      state.view.lat = (node.defaultView.lat || 0) * Math.PI / 180;
+      state.view.fov = node.defaultView.fov || 75;
+      clampView();
+    }
+    tourTouch(tourKey(tour, node)); tourEvict();
+    prefetchTourNeighbours(tour, node.id);
+    state.tourHsSel = null;
+    rebuildTourHotspotDOM(); refreshTourBar(); requestRender();
+    if (state.admin && state.adminTab === 'tour') refreshTourList();   // hotspot box follows the open node
+  } catch (e) {
+    showNotice(e.message || 'Could not load that panorama.');
+  } finally {
+    if (state.tourView) { state.tourView.busy = false; refreshTourBar(); }
+  }
+}
+
+// ─── Navigation hotspots (DOM overlay, projected each frame) ────────────────
+// Same model as landmarks: anchored to a fixed sphere DIRECTION and projected to screen
+// every frame, so a hotspot stays glued to its doorway as the visitor looks around.
+// Stored lon/lat use the `lonLatFromDir`/`dirFromLonLat` convention (NOT the camera-yaw
+// one) — placement round-trips through the same reflection, so it stays self-consistent.
+function rebuildTourHotspotDOM() {
+  if (!els.tourLayer) return;
+  const tv = state.tourView, tour = curTourView();
+  els.tourLayer.innerHTML = ''; tourHsDom = [];
+  if (!tv || !tour) return;
+  tour.links.forEach((k, idx) => {
+    if (k.from !== tv.nodeId) return;
+    const target = tour.nodes.find((n) => n.id === k.to); if (!target) return;
+    const el = document.createElement('button');
+    el.type = 'button'; el.className = 'tour-hs' + (state.admin && state.tourHsSel === idx ? ' is-sel' : '');
+    el.innerHTML = `<span class="tour-hs-ring">↗</span><span class="tour-hs-lbl"></span>`;
+    el.querySelector('.tour-hs-lbl').textContent = k.label || target.name;
+    el.title = state.admin ? `Link → ${target.name} (drag to reposition)` : `Go to ${target.name}`;
+    if (state.admin && state.adminTab === 'tour') {
+      el.addEventListener('pointerdown', (e) => startTourHsDrag(e, idx));
+    }
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.admin && state.adminTab === 'tour') { if (!tourHsDrag?.moved) { state.tourHsSel = idx; refreshTourList(); rebuildTourHotspotDOM(); } return; }
+      tourGoTo(k.to);
+    });
+    els.tourLayer.appendChild(el);
+    tourHsDom.push({ el, dir: dirFromLonLat(k.hotspot.lon, k.hotspot.lat) });
+  });
+  renderTourHotspots();
+}
+function renderTourHotspots() {
+  if (!tourHsDom.length || !three) return;
+  const rect = els.pano.getBoundingClientRect(), W = rect.width, H = rect.height, cam = three.camera;
+  tourHsDom.forEach((h) => {
+    const p = projectDir(h.dir, cam, W, H);
+    if (!p) { h.el.style.display = 'none'; return; }
+    h.el.style.display = '';
+    h.el.style.left = `${p.x}px`; h.el.style.top = `${p.y}px`;
+  });
+}
+function startTourHsDrag(e, idx) {
+  if (!(state.admin && state.adminTab === 'tour')) return;
+  e.preventDefault(); e.stopPropagation();                 // stops #pano's pointer capture
+  tourHsDrag = { idx, moved: false }; state.tourHsSel = idx;
+  window.addEventListener('pointermove', onTourHsDragMove);
+  window.addEventListener('pointerup', endTourHsDrag, { once: true });
+}
+function onTourHsDragMove(e) {
+  if (!tourHsDrag || !three) return;
+  const tour = curTourView(); if (!tour) return;
+  const k = tour.links[tourHsDrag.idx]; if (!k) return;
+  three.raycaster.setFromCamera(ndcOf(e), three.camera);
+  k.hotspot = lonLatFromDir(three.raycaster.ray.direction);
+  tourHsDrag.moved = true;
+  rebuildTourHotspotDOM();
+}
+function endTourHsDrag() {
+  window.removeEventListener('pointermove', onTourHsDragMove);
+  if (tourHsDrag?.moved) onToursChanged();
+  const moved = tourHsDrag?.moved;
+  tourHsDrag = null;
+  if (moved) refreshTourList();
+}
+
+// ─── Admin authoring inside the viewer (Phase 1 step 3) ─────────────────────
+function addTourHotspot(targetId) {
+  const tour = curTourView(), tv = state.tourView; if (!tour || !tv) return;
+  const target = tour.nodes.find((n) => n.id === targetId); if (!target) return;
+  // Drop it where the admin is looking. `dirFromView` is the camera→stored-lon bridge:
+  // the camera's forward direction, converted with the STORED convention.
+  const fwd = new THREE.Vector3(); three.camera.getWorldDirection(fwd);
+  tour.links.push({ from: tv.nodeId, to: targetId, label: '', hotspot: lonLatFromDir(fwd) });
+  state.tourHsSel = tour.links.length - 1;
+  rebuildTourHotspotDOM(); refreshTourList(); onToursChanged();
+  setAxStatus(`Hotspot → <strong>${esc(target.name)}</strong> added. Drag it onto the doorway it leads through.`);
+}
+function deleteTourHotspot(idx) {
+  const tour = curTourView(); if (!tour) return;
+  tour.links.splice(idx, 1);
+  if (state.tourHsSel === idx) state.tourHsSel = null;
+  rebuildTourHotspotDOM(); refreshTourList(); onToursChanged();
+}
+function setTourNodeDefaultView() {
+  const node = curTourNode(); if (!node) return;
+  node.defaultView = { lon: state.view.lon * 180 / Math.PI, lat: state.view.lat * 180 / Math.PI, fov: state.view.fov };
+  onToursChanged(); refreshTourList();
+  setAxStatus(`Start view saved for <strong>${esc(node.name)}</strong> — visitors arrive facing this way.`);
+}
+
+// ─── Viewer chrome (node strip + exit) ──────────────────────────────────────
+function refreshTourBar() {
+  if (!els.tourBar) return;
+  const tv = state.tourView, tour = curTourView();
+  if (!tv || !tour) return;
+  els.tourBar.innerHTML = '';
+  const title = document.createElement('span'); title.className = 'tour-bar-title';
+  title.textContent = tv.title || tour.name;
+  const strip = document.createElement('div'); strip.className = 'tour-bar-nodes';
+  tour.nodes.forEach((n) => {
+    const b = document.createElement('button'); b.type = 'button';
+    b.className = 'tour-chip' + (n.id === tv.nodeId ? ' is-on' : '');
+    b.textContent = n.name; b.title = `Jump to ${n.name}`;
+    // A jump is the one navigation that was never prefetched (0-A): show it is working.
+    b.addEventListener('click', () => tourGoTo(n.id));
+    strip.appendChild(b);
+  });
+  const exit = document.createElement('button'); exit.type = 'button'; exit.className = 'tour-exit';
+  exit.textContent = '✕ Exit tour'; exit.addEventListener('click', () => closePanoTour());
+  els.tourBar.append(title, strip, exit);
+  els.tourBar.classList.toggle('is-busy', !!tv.busy);
+}
+
 // generic downscale-to-blob (renders): keeps the longest side ≤ cap, re-encodes JPEG
 async function resizeImageToBlob(file, cap, mime = 'image/jpeg', q = 0.9) {
   const bmp = await createImageBitmap(file);
@@ -4339,11 +4874,13 @@ function renderClientSidebar() {
     if (els.catLevel2) els.catLevel2.hidden = true;
 
     if (!els.catNavL1) return;
-    let html = `
-      <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
-      <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
-    `;
-
+    // The drawer is EXACTLY the menu the admin built — no built-in rows. "AERIAL VIEW"
+    // and "LANDMARKS" used to be hardcoded here, which meant a project that had authored
+    // no menu still showed two entries, and every project carried them whether or not
+    // they were wanted. Both remain reachable without a menu row: the ⊡ control recenters
+    // on the layout, and 📍 toggles landmarks (with the category picker on the pin/hint).
+    // If a project WANTS them in the drawer, they can be authored as menu items.
+    let html = '';
     tree.forEach((node) => {
       const title = (node.title || 'ITEM').trim().toUpperCase();
       const drills = menuRowOpensSubmenu(node);
@@ -4352,6 +4889,8 @@ function renderClientSidebar() {
     });
 
     els.catNavL1.innerHTML = html;
+    // Nothing authored ⇒ no drawer at all, rather than an empty panel over the panorama.
+    if (els.catDrawer && !state.admin) els.catDrawer.hidden = tree.length === 0;
     wireClientSidebarButtons();
   } else {
     // Level 2 / Level 3: Drilled-in Parent Navigation
@@ -4439,6 +4978,17 @@ function openNodeContent(node, nodeInfo = null) {
       openClientBrochureModal(content);
     } else if (cType === 'gallery') {
       openClientGalleryModal(content, 0);
+    } else if (cType === 'landmarks') {
+      openLandmarksCategoryPicker();          // was the hardcoded LANDMARKS drawer row
+    } else if (cType === 'aerial') {
+      state.landmarkPanRange = null;          // leaving a category — release its arc
+      computeHome();
+      animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
+      state.autoPan = true;
+    } else if (cType === 'panotour') {
+      // Our own multi-node walkthrough (takes over the viewer). Distinct from 'tour',
+      // which iframes an EXTERNAL tour (3DVista/Kuula) by URL or uploaded file.
+      openClientPanoTour(content.tourId, node.title || 'Virtual Tour');
     } else if (cType === 'tour') {
       openClientTourModal(node.title || 'Virtual Tour', content);
     } else if (cType === 'image') {
@@ -4910,7 +5460,10 @@ let wizardState = {
   editingNodeId: null,
   presetParentId: 'root',
   kind: 'parent', // 'parent' | 'child' | 'contact'
-  contentType: 'video', // 'video' | 'pdf' | 'image' | 'gallery' | 'tour' | 'link'
+  contentType: 'video', // 'video' | 'pdf' | 'image' | 'gallery' | 'tour' | 'panotour' | 'link'
+                        // 'tour' = external (3DVista/Kuula) in an iframe; 'panotour' = our
+                        // own multi-node walkthrough, referenced by tourId (tour.json)
+  tourId: '',
   sourceType: 'url', // 'url' | 'upload'
   selectedPlacement: 'root',
   title: '',
@@ -5488,6 +6041,7 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root', presetKin
     fileBlob: node?.content?.fileBlob || null,
     fileName: node?.content?.fileName || '',
     selectedFiles: [],
+    tourId: node?.content?.tourId || '',           // 'panotour' items reference a tour.json tour
     contact: Object.assign({ title: '', about: '', phone: '', email: '', image: '', imageName: '', imageBlob: null }, node?.contact || {}),
     galleryImages: (node?.content?.images && Array.isArray(node.content.images)) ? [...node.content.images] : []
   };
@@ -5626,6 +6180,23 @@ function updateWizardStepUI() {
   // Source toggle & group visibility
   const sourceGroup = $('wizardSourceGroup');
   const galleryGroup = $('wizardGalleryGroup');
+  const tourGroup = $('wizardTourGroup');
+  const noCfgHint = $('wizardNoConfigHint');
+  // A 360° tour has no URL and no upload — it points at a tour already authored in the
+  // Tour tab — so it swaps the whole URL/upload row for a picker.
+  if (tourGroup) tourGroup.style.display = wizardState.contentType === 'panotour' ? 'block' : 'none';
+  // Built-in viewer actions take no configuration at all — just a title.
+  const noConfig = NO_CONFIG_CONTENT_TYPES[wizardState.contentType];
+  if (noCfgHint) {
+    noCfgHint.style.display = noConfig ? 'block' : 'none';
+    if (noConfig) noCfgHint.innerHTML = noConfig;
+  }
+  if (wizardState.contentType === 'panotour' || noConfig) {
+    if (sourceGroup) sourceGroup.style.display = 'none';
+    if (galleryGroup) galleryGroup.style.display = 'none';
+    if (wizardState.contentType === 'panotour') renderWizardTourPicker();
+    return;
+  }
   if (wizardState.contentType === 'gallery') {
     if (sourceGroup) sourceGroup.style.display = 'none';
     if (galleryGroup) galleryGroup.style.display = 'block';
@@ -5656,6 +6227,45 @@ function updateWizardStepUI() {
 
     if (urlGroup) urlGroup.style.display = wizardState.sourceType === 'url' ? 'block' : 'none';
     if (fileGroup) fileGroup.style.display = wizardState.sourceType === 'upload' ? 'block' : 'none';
+  }
+}
+
+// Content types that are a built-in viewer action rather than a piece of media: they take
+// only a title. Value = the hint shown in place of the URL/upload row.
+const NO_CONFIG_CONTENT_TYPES = {
+  landmarks: 'Opens the landmark category list in this drawer. Needs no link — it uses the landmarks already placed in the <strong>Landmarks</strong> tab.',
+  aerial: 'Flies the camera back to the full site view. Needs no link.',
+};
+
+// Populates the wizard's tour dropdown from the project's authored tours, and says
+// plainly when there are none yet (the most likely reason a menu item would do nothing).
+function renderWizardTourPicker() {
+  const sel = $('wizardTourSelect'), hint = $('wizardTourHint');
+  if (!sel) return;
+  const tours = state.tours || [];
+  sel.innerHTML = '';
+  if (!tours.length) {
+    sel.innerHTML = '<option value="">— no tours in this project yet —</option>';
+    sel.disabled = true;
+    if (hint) hint.innerHTML = 'Build one first in the admin sidebar’s <strong>Tour</strong> tab: add a tour, upload a panorama per room, then link them with hotspots.';
+    return;
+  }
+  sel.disabled = false;
+  tours.forEach((t) => {
+    const o = document.createElement('option');
+    o.value = t.id;
+    o.textContent = `${t.name} — ${t.nodes.length} node${t.nodes.length === 1 ? '' : 's'}`;
+    sel.appendChild(o);
+  });
+  if (wizardState.tourId && tours.some((t) => t.id === wizardState.tourId)) sel.value = wizardState.tourId;
+  else wizardState.tourId = sel.value;
+  sel.onchange = () => { wizardState.tourId = sel.value; renderWizardTourPicker(); };
+  const t = tours.find((x) => x.id === sel.value);
+  if (hint) {
+    if (!t) hint.textContent = '';
+    else if (!t.nodes.length) hint.innerHTML = '⚠️ This tour has no panoramas yet — it will not open.';
+    else if (!t.links.length) hint.innerHTML = `⚠️ No hotspots linked yet: visitors can still jump between the ${t.nodes.length} rooms from the strip, but cannot walk between them.`;
+    else hint.textContent = `${t.nodes.length} rooms · ${t.links.length} hotspot link${t.links.length === 1 ? '' : 's'}.`;
   }
 }
 
@@ -6001,6 +6611,11 @@ function initCustomMenuAdminAndClient() {
 
         if (wizardState.contentType === 'gallery') {
           nodeData.content.images = pendingGalleryImages;
+        }
+        // A 360° tour stores a tourId reference, not a URL/file — the panos live in
+        // tour.json and are shipped by Export like any other project image.
+        if (wizardState.contentType === 'panotour') {
+          nodeData.content.tourId = ($('wizardTourSelect')?.value || wizardState.tourId || existingContent.tourId || '');
         }
       } else if (kind === 'contact') {
         const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
@@ -6728,6 +7343,11 @@ function isStandaloneDisplay() {
     if (restored?.amenities?.length) ams = parseAmenities({ amenities: restored.amenities });
     else { const amFile = await loadAmenitiesFile(); if (amFile) ams = amFile; }
     setAmenities(ams);
+    // tours: session (freshest, incl. node pano blobs) > committed tour.json > none
+    let trs = [];
+    if (restored?.tours?.length) trs = parseTours({ tours: restored.tours });
+    else { const trFile = await loadToursFile(); if (trFile) trs = trFile; }
+    setTours(trs);
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
     initProjectBar();                                    // header project switcher / manage menu
     registerOfflineSupport();                             // client-only PWA offline cache — see definition above

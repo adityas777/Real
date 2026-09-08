@@ -59,7 +59,7 @@ BUNDLE_SHELL = ["index.html", "app.js", "styles.css", os.path.join("vendor", "th
 
 # Project data files a bundle embeds inline into index.html (see build_embedded_files_json)
 # so the exported site needs zero fetch() calls for its own data — see do_bundle's docstring.
-BUNDLE_DATA_FILES = ["plots.svg", "plots.csv", "alignment.json", "landmarks.json", "amenities.json"]
+BUNDLE_DATA_FILES = ["plots.svg", "plots.csv", "alignment.json", "landmarks.json", "amenities.json", "tour.json"]
 
 def module_to_global(js, global_name):
     """Rewrite the vendored three.module.js — a single flat ES module whose only
@@ -97,6 +97,27 @@ def build_embedded_files_json(src_dir):
                 files[name] = fh.read()
     return json.dumps(files).replace("</", "<\\/")
 
+def tour_pano_basenames(src_dir):
+    """Every virtual-tour node panorama in this project. These are WebGL textures exactly
+    like the background pano, so under file:// they must be inlined as data: URIs too —
+    a loose file next to index.html is rejected as tainted. Read from tour.json rather
+    than globbing, so only panos an authored tour actually references get embedded."""
+    names = set()
+    p = os.path.join(src_dir, "tour.json")
+    if not os.path.isfile(p):
+        return names
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except Exception:
+        return names                                # malformed tour.json must not kill the export
+    for tour in (doc.get("tours") or []):
+        for node in (tour.get("nodes") or []):
+            f = (node.get("pano") or {}).get("file")
+            if f:
+                names.add(os.path.basename(f))
+    return names
+
 def build_embedded_images_json(src_dir, alignment_dict):
     """Base64-embed the pano + site-plan (drape) images as data: URIs. Unlike every other
     asset (logos, landmark/amenity renders, contact photos — all plain <img> elements),
@@ -112,6 +133,7 @@ def build_embedded_images_json(src_dir, alignment_dict):
         f = ((alignment_dict or {}).get(key) or {}).get("file")
         if f:
             names.add(os.path.basename(f))
+    names |= tour_pano_basenames(src_dir)          # tour node panos are textures too
     images = {}
     for name in names:
         p = os.path.join(src_dir, name)
@@ -259,7 +281,10 @@ class Handler(SimpleHTTPRequestHandler):
                     if name.startswith("."):
                         continue                    # skip .trash and other hidden dirs
                     d = os.path.join(PROJECTS_DIR, name)
-                    if os.path.isdir(d) and os.path.isfile(os.path.join(d, "plots.svg")):
+                    # A project is a plot map OR a virtual tour (or both). Requiring
+                    # plots.svg used to hide tour-only projects from the switcher entirely.
+                    if os.path.isdir(d) and (os.path.isfile(os.path.join(d, "plots.svg"))
+                                             or os.path.isfile(os.path.join(d, "tour.json"))):
                         projects.append(name)
             return self._send_json(200, {"projects": projects})
         if route == "/manifest.webmanifest":
@@ -482,7 +507,9 @@ class Handler(SimpleHTTPRequestHandler):
         if not pid:
             return self._send_json(400, {"ok": False, "error": "invalid project id"})
         src = os.path.join(PROJECTS_DIR, pid)
-        if not os.path.isdir(src) or not os.path.isfile(os.path.join(src, "plots.svg")):
+        # A project is a plot map OR a virtual tour (or both) — same rule as /api/projects.
+        if not os.path.isdir(src) or not (os.path.isfile(os.path.join(src, "plots.svg"))
+                                          or os.path.isfile(os.path.join(src, "tour.json"))):
             return self._send_json(404, {"ok": False, "error": f"'{pid}' not found"})
         buf = io.BytesIO()
         try:

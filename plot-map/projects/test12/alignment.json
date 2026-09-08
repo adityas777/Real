@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "note": "Build91 plot-map overlay alignment",
+  "savedAt": "2026-09-08T12:17:39.171Z",
+  "transform": {
+    "tx": 248.327,
+    "ty": -319.6076,
+    "scale": 2.36,
+    "rotationDeg": -178.3
+  },
+  "view": {
+    "lonDeg": 139.4,
+    "latDeg": -52.82,
+    "fov": 83
+  },
+  "opacity": 0.65,
+  "groundImage": {
+    "file": "Untitled - July 14, 2026 at 17.06.17_2.web.web.png",
+    "opacity": 1
+  },
+  "panoImage": {
+    "file": "sample/DJI_20251106132132_0055_D.web.jpg"
+  },
+  "brand": {
+    "name": "Pano Test Amit",
+    "tagline": "VT Demo",
+    "logo": {
+      "file": "sample/logo.web.png"
+    }
+  },
+  "data": {
+    "source": "sheet",
+    "sheet": {
+      "url": "https://docs.google.com/spreadsheets/d/1bR1u1J6-4hkLtLP3jse9dVxFHueAbuEi6QwB6x38YlU/edit?gid=0#gid=0"
+    }
+  },
+  "menuConfig": {
+    "tree": []
+  }
+}

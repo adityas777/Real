@@ -392,6 +392,70 @@ keeps this separate from Align and Landmarks.
 
 ---
 
+## Admin: virtual tours (`?admin=1` → **Tour** tab)
+
+A **multi-node 360° walkthrough** built from your own panoramas — the visitor stands in a
+room, clicks a hotspot on a doorway, and crossfades into the next room. This is our own
+tour engine (it replaces linking out to 3DVista), and a project can hold **several
+independent tours** — a 2BHK and a 3BHK, say — each launched from its own menu item.
+
+**Build a tour:**
+
+1. **Tour** tab → **＋ Add tour**, and give it a name (e.g. *3BHK Show Flat*).
+2. **＋ Add node (upload pano)** once per room. Each image is auto-resized to a
+   texture-safe `.web.jpg`. Rename the node to the room name — that name is what a
+   hotspot says by default.
+3. **★** marks the **start node** — the room visitors arrive in.
+4. **▶ Open tour to place hotspots** opens the tour in the viewer itself (the plot map
+   steps aside while you work).
+
+**Inside the viewer**, the Tour tab grows a hotspot editor for whichever room you're
+standing in:
+
+- **＋ Add hotspot here** drops a link at the centre of your current view — then
+  **drag it onto the doorway** it leads through. Pick its target room from the dropdown,
+  and give it a label if the room name isn't what you want on screen.
+- **⌖ Set this view as the room's start view** — visitors arriving in this room will face
+  the direction you're looking now.
+- **▶** on any node jumps you there so you can place its hotspots too.
+- Links are one-way. For a doorway you can walk **both** ways, add a hotspot in each room.
+
+> **The client menu shows only what you build.** There are no built-in rows: the drawer is
+> exactly the menu you author, and a project with no menu items shows no drawer at all.
+> The two rows that used to be hardcoded are now item types you can add if you want them —
+> **📍 Landmarks** (opens the landmark category list) and **🗺️ Aerial View** (flies back to
+> the whole-site view). Neither needs a link. If your project has landmarks, add the
+> **Landmarks** item, or visitors on desktop have no way to filter them by category.
+>
+> **After saving in admin, the client may need one reload** to pick the change up — and if
+> you had the client open already, reload it. (Project data is fetched fresh whenever
+> you're online; it's only cached for offline use.)
+
+**Put it on the client menu:** open the menu builder, add an item, choose the
+**🧭 360° Tour** type, and pick your tour from the list. (This is different from the
+*virtual tour* type, which embeds an **external** 3DVista/Kuula tour by URL.) Visitors
+click that menu item and the tour takes over the screen, with a room strip and an
+**✕ Exit tour** button along the bottom.
+
+> **Performance, and why it matters to the visitor.** Panoramas are big. A room downloads
+> in about a second on 4G, and the tour quietly pre-loads every room your current room
+> links to — so *walking* the tour has no waiting. **Jumping** to a distant room from the
+> strip is the one move that can pause, because it was never pre-loaded. Only a few rooms
+> are held in graphics memory at once (they're far too large to keep all of them), which
+> is why a room you visited a while ago may load again.
+>
+> **Keep your full-resolution masters out of the project folder** — put them in a
+> subfolder like `_source/`. Everything sitting directly in the project folder is copied
+> into every standalone export, and raw renders will bloat it enormously.
+
+`tour.json` shape: `{ version, tours:[{ id, name, startNode,
+nodes:[{ id, name, pano:{file}, defaultView:{lonDeg,latDeg,fov} }],
+links:[{ from, to, label, hotspot:{lonDeg,latDeg} }] }] }`. Tours ride the working
+session, ship with **Export site files…**, and are embedded in the standalone bundle
+(panoramas included, so an exported tour works offline).
+
+---
+
 ## Data schema (CSV / Google Sheet)
 
 One row per plot. Header row **exactly**:
@@ -559,6 +623,9 @@ above. Empty `tour_url` ⇒ the "Walk through" button is disabled for that plot.
   plots; look around to explore the whole site.
 - **Plots projected onto the ground** — irregular parcels sit on their real
   ground pixels and track the view in perspective.
+- **Virtual tours** — multi-node 360° walkthroughs built from your own panoramas, with
+  drag-placed navigation hotspots and a crossfade between rooms; several per project,
+  each launched from its own **🧭 360° Tour** menu item. Works in the standalone export.
 - **Hover** highlights a plot (raycast) and shows a tooltip (id + status).
 - **Legend + status filter** — click a chip to toggle that status on/off.
 - **Last-synced timestamp + Refresh** — re-pulls the data source.

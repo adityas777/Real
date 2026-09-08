@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Phase 0 spike — multi-node pano tour</title>
+<style>
+  :root{
+    --bg:#12100c; --panel:rgba(20,18,14,.92); --line:#3a3527;
+    --ink:#eee8d9; --ink-soft:#b7af99; --ink-faint:#857e6c;
+    --gold:#ddab4f; --good:#6fae8a; --warn:#d6a24c; --bad:#c77a73;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font:13px/1.45 ui-sans-serif,-apple-system,"Segoe UI",sans-serif}
+  #view{position:fixed;inset:0;touch-action:none;cursor:grab}
+  #view.dragging{cursor:grabbing}
+  canvas{display:block}
+
+  /* ---- hotspot overlay ---- */
+  #hotspots{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+  .hs{position:absolute;transform:translate(-50%,-50%);pointer-events:auto;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:4px;
+    transition:opacity .18s ease}
+  .hs .ring{width:34px;height:34px;border-radius:50%;border:2px solid var(--gold);
+    background:rgba(221,171,79,.16);display:grid;place-items:center;
+    color:var(--gold);font-size:15px;backdrop-filter:blur(3px);
+    transition:transform .15s ease,background .15s ease}
+  .hs:hover .ring{transform:scale(1.16);background:rgba(221,171,79,.34)}
+  .hs .lbl{font-size:11px;letter-spacing:.04em;color:var(--ink);
+    background:rgba(18,16,12,.78);padding:2px 7px;border-radius:999px;white-space:nowrap}
+
+  /* ---- HUD ---- */
+  .panel{position:fixed;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;backdrop-filter:blur(8px)}
+  #hud{top:12px;left:12px;width:290px;padding:12px 14px;max-height:calc(100vh - 24px);
+    overflow:auto}
+  #hud h1{margin:0 0 2px;font-size:13px;letter-spacing:.02em}
+  #hud .sub{color:var(--ink-faint);font-size:11px;margin-bottom:10px}
+  .grp{border-top:1px solid var(--line);padding-top:9px;margin-top:9px}
+  .grp>.t{font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--ink-faint);margin-bottom:7px}
+  .row{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px;
+    font-variant-numeric:tabular-nums}
+  .row .k{color:var(--ink-soft)}
+  .row .v{color:var(--ink)}
+  .v.good{color:var(--good)} .v.warn{color:var(--warn)} .v.bad{color:var(--bad)}
+  label.ctl{display:block;margin-bottom:8px}
+  label.ctl>span{display:flex;justify-content:space-between;color:var(--ink-soft);
+    margin-bottom:3px;font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--gold)}
+  .seg{display:flex;gap:4px;flex-wrap:wrap}
+  .seg button{flex:1;min-width:62px;padding:5px 6px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--line);background:transparent;color:var(--ink-soft);font:inherit;
+    font-size:11px}
+  .seg button[aria-pressed=true]{border-color:var(--gold);color:var(--gold);
+    background:rgba(221,171,79,.12)}
+  .seg button:disabled{opacity:.4;cursor:not-allowed}
+  #nodes{display:flex;flex-direction:column;gap:2px}
+  #nodes button{text-align:left;padding:5px 8px;border-radius:6px;border:1px solid transparent;
+    background:transparent;color:var(--ink-soft);font:inherit;font-size:12px;cursor:pointer;
+    display:flex;justify-content:space-between;gap:8px}
+  #nodes button:hover{background:rgba(255,255,255,.05)}
+  #nodes button[aria-current=true]{border-color:var(--gold);color:var(--gold);
+    background:rgba(221,171,79,.1)}
+  #nodes .st{font-size:10px;color:var(--ink-faint);font-variant-numeric:tabular-nums}
+  #note{bottom:12px;left:12px;right:12px;max-width:640px;margin:0 auto;padding:9px 13px;
+    font-size:11.5px;color:var(--ink-soft);text-align:center}
+  #note b{color:var(--warn)}
+  #title{top:12px;left:50%;transform:translateX(-50%);padding:7px 16px;font-size:13px;
+    letter-spacing:.04em}
+  #err{top:50%;left:50%;transform:translate(-50%,-50%);padding:16px 20px;max-width:520px;
+    color:var(--bad);display:none;white-space:pre-wrap;font-size:12px}
+  kbd{border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:10px;
+    color:var(--ink-faint)}
+  @media (max-width:760px){ #hud{width:calc(100vw - 24px)} #title{display:none} }
+</style>
+</head>
+<body>
+
+<div id="view"><div id="hotspots"></div></div>
+<div class="panel" id="title">—</div>
+
+<div class="panel" id="hud">
+  <h1>Phase 0 spike</h1>
+  <div class="sub">multi-node pano tour · transition + texture lifecycle</div>
+
+  <div class="grp">
+    <div class="t">Transition</div>
+    <div class="seg" id="modeSeg">
+      <button data-mode="cut">Cut</button>
+      <button data-mode="crossfade" aria-pressed="true">Crossfade</button>
+      <button data-mode="glide" disabled title="Needs a depth pass — see OQ-1">Glide</button>
+    </div>
+    <label class="ctl" style="margin-top:8px">
+      <span>Duration <b id="durV">500 ms</b></span>
+      <input type="range" id="dur" min="120" max="1600" step="20" value="500">
+    </label>
+  </div>
+
+  <div class="grp">
+    <div class="t">Orientation — this node</div>
+    <label class="ctl">
+      <span>Yaw <b id="yawV">0°</b></span>
+      <input type="range" id="yaw" min="-180" max="180" step="1" value="0">
+    </label>
+    <div class="seg">
+      <button data-yaw="-90">↺ 90°</button>
+      <button data-yaw="90">↻ 90°</button>
+      <button data-yaw="180">180°</button>
+      <button data-yaw="0" data-abs="1">Reset</button>
+    </div>
+    <div class="seg" style="margin-top:4px">
+      <button id="flip" title="180° roll — for a node rendered upside down">⤯ Flip 180°</button>
+      <button id="copyOri" title="Copy all nodes' yaw/flip as JSON">⧉ Copy orientations</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="t">Texture lifecycle</div>
+    <label class="ctl">
+      <span>Cache size <b id="capV">3 nodes</b></span>
+      <input type="range" id="cap" min="1" max="9" step="1" value="3">
+    </label>
+    <div class="seg"><button id="pf" aria-pressed="true">Prefetch neighbours</button></div>
+    <div class="row" style="margin-top:8px"><span class="k">Resident</span><span class="v" id="mRes">—</span></div>
+    <div class="row"><span class="k">Est. GPU</span><span class="v" id="mGpu">—</span></div>
+    <div class="row"><span class="k">Downloaded</span><span class="v" id="mNet">—</span></div>
+    <div class="row"><span class="k">Last load</span><span class="v" id="mLoad">—</span></div>
+    <div class="row"><span class="k">FPS</span><span class="v" id="mFps">—</span></div>
+  </div>
+
+  <div class="grp">
+    <div class="t">Nodes <kbd>1</kbd>–<kbd>9</kbd> · <kbd>←</kbd><kbd>→</kbd></div>
+    <div id="nodes"></div>
+  </div>
+</div>
+
+<div class="panel" id="note">
+  <b>Phase 0-C (depth glide) is blocked:</b> these renders ship colour only — no depth pass,
+  no camera transforms. Crossfade + texture lifecycle are what this spike validates.
+</div>
+<div class="panel" id="err"></div>
+
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+
+// ---------------------------------------------------------------------------
+// Phase 0 validation spike.  THROWAWAY — see VIRTUAL-TOUR.md.
+// Deliberately does NOT touch app.js. Nothing here is meant to be merged as-is;
+// the point is to answer questions cheaply, then be deleted.
+//
+// What it validates (runs on colour-only assets):
+//   0-A  asset weight + texture lifecycle (LRU eviction, prefetch, GPU ceiling)
+//   0-B  multi-node navigation, crossfade, heading continuity
+// What it CANNOT validate (needs depth + camera transforms — OQ-1/D-1):
+//   0-C  depth-warp glide.  The `glide` transition is registered but disabled,
+//        so the seam it slots into is visible and real rather than hypothetical.
+// ---------------------------------------------------------------------------
+
+const TOUR_URL = '../projects/panotour-demo/tour.json';
+const ASSET_BASE = '../projects/panotour-demo/';
+const R_OUT = 500, R_IN = 480;   // two nested spheres; inner one fades in over the outer
+const PANO_CAP = 8192;
+
+const els = id => document.getElementById(id);
+const fail = msg => { const e = els('err'); e.style.display = 'block'; e.textContent = msg;
+                      console.error(msg); };
+
+const state = {
+  tour: null, nodes: new Map(), current: null,
+  view: { lon: 0, lat: 0, fov: 75 },
+  mode: 'crossfade', dur: 500, prefetch: true, cacheCap: 3,
+  transitioning: false,
+  orient: new Map(),          // nodeId -> { yaw:deg, flip:bool }  (see applyOrient)
+  bytes: 0, lastLoadMs: 0,
+};
+try { const s = JSON.parse(localStorage.getItem('b91-spike-orient') || '{}');
+      for (const [k, v] of Object.entries(s)) state.orient.set(k, v); } catch {}
+
+// --- three ------------------------------------------------------------------
+const view = els('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.insertBefore(renderer.domElement, els('hotspots'));
+const scene = new THREE.Scene();
+const cam = new THREE.PerspectiveCamera(75, 1, 0.1, 1200);
+
+const maxTex = (() => { const gl = renderer.getContext();
+  return gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096; })();
+const texCap = Math.min(PANO_CAP, maxTex);
+
+// Deliberately mirrors app.js's buildPanoSphere()/dir() rather than using the canonical
+// SphereGeometry.scale(-1,1,1) recipe. Those two differ by a reflection AND a 90 deg yaw,
+// so mixing them silently mirrors every hotspot — the numeric projection test caught
+// exactly that. Matching the app means lon/lat here mean the same thing as a landmark's
+// lon/lat there, and anything lifted into Phase 1 transfers without a handedness audit.
+const TAU = Math.PI * 2;
+function makeSphere(radius, renderOrder) {
+  const segW = 128, segH = 128, pos = [], uv = [], idx = [];
+  for (let iy = 0; iy <= segH; iy++) for (let ix = 0; ix <= segW; ix++) {
+    const u = ix / segW, v = iy / segH;
+    const d = dirFromLonLat(u * 360, (0.5 - v) * 180);
+    pos.push(d.x * radius, d.y * radius, d.z * radius);
+    uv.push(u, v);                                  // flipY=true ⇒ v=0 is the image top = zenith
+  }
+  for (let iy = 0; iy < segH; iy++) for (let ix = 0; ix < segW; ix++) {
+    const a = iy * (segW + 1) + ix, b = a + 1, c = a + (segW + 1), d = c + 1;
+    idx.push(a, b, d, a, d, c);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide,
+    transparent: true, depthTest: false, depthWrite: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = renderOrder;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+const outer = makeSphere(R_OUT, 0);   // the node we are leaving
+const inner = makeSphere(R_IN, 1);    // the node we are arriving at
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+// --- texture cache (LRU) ----------------------------------------------------
+// Download weight is solved by the JPEG conversion (343 MB -> 21 MB). GPU residency
+// is NOT: each 8192x4096 RGBA texture with mips is ~179 MB, so nine resident nodes
+// would be ~1.6 GB. Eviction is mandatory, not an optimisation. That distinction is
+// the main thing 0-A exists to make concrete.
+const cache = new Map();            // nodeId -> { tex, bytes }; insertion order = LRU
+const inflight = new Map();
+
+const texBytes = t => { const i = t.image; return i ? i.width * i.height * 4 * 1.333 : 0; };
+
+// --- per-node orientation ---------------------------------------------------
+// Stands in for the camera world transform we do not have (OQ-1 / D-1). `yaw` sets which
+// direction this node faces in the tour's shared frame; `flip` is a true 180 deg ROLL
+// (both axes) for a node rendered upside down -- not a bare vertical flip, which would
+// mirror the room. Applied as a texture transform so it costs nothing per frame and each
+// node keeps its own value. Dial these in, then "Copy orientations" to lift them out.
+const ORIENT_KEY = 'b91-spike-orient';
+function orientOf(id) { return state.orient.get(id) || { yaw: 0, flip: false }; }
+function applyOrient(tex, id) {
+  const { yaw, flip } = orientOf(id);
+  tex.center.set(0.5, 0.5);
+  tex.repeat.set(1, flip ? -1 : 1);
+  tex.offset.set((yaw / 360) + (flip ? 0.5 : 0), 0);
+  tex.needsUpdate = true;
+}
+function setOrient(id, patch) {
+  state.orient.set(id, { ...orientOf(id), ...patch });
+  const entry = cache.get(id);
+  if (entry) applyOrient(entry.tex, id);
+  try { localStorage.setItem(ORIENT_KEY,
+    JSON.stringify(Object.fromEntries(state.orient))); } catch {}
+  paintOrient(id);
+}
+function paintOrient(id) {
+  const { yaw, flip } = orientOf(id);
+  els('yaw').value = yaw; els('yawV').textContent = `${yaw}°`;
+  els('flip').setAttribute('aria-pressed', String(flip));
+}
+
+function touch(id) { const v = cache.get(id); if (v) { cache.delete(id); cache.set(id, v); } }
+
+function evict() {
+  while (cache.size > state.cacheCap) {
+    const [id, v] = cache.entries().next().value;
+    if (id === state.current) { touch(id); continue; }   // never evict what is on screen
+    v.tex.dispose(); cache.delete(id);
+  }
+  meters();
+}
+
+function loadNode(id) {
+  if (cache.has(id)) { touch(id); return Promise.resolve(cache.get(id).tex); }
+  if (inflight.has(id)) return inflight.get(id);
+
+  const node = state.nodes.get(id);
+  if (!node) return Promise.reject(new Error(`unknown node "${id}"`));
+
+  const t0 = performance.now();
+  const p = new Promise((res, rej) => {
+    new THREE.TextureLoader().load(ASSET_BASE + node.pano.file, res, undefined,
+      () => rej(new Error(`failed to load ${node.pano.file}`)));
+  }).then(tex => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    // flipY = false, matching app.js's panoTextureFromSource. Three defaults this to TRUE,
+    // which flips the image on upload so uv.y=0 lands on the image BOTTOM -- putting the
+    // floor at the zenith and rendering the whole pano upside down. Getting the geometry
+    // right is not enough; this flag is the other half of the convention.
+    tex.flipY = false;
+    tex.wrapS = THREE.RepeatWrapping;                 // keeps the lon=0/2pi seam clean
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    applyOrient(tex, id);
+    tex.needsUpdate = true;
+    if (tex.image.width > texCap) console.warn(`${id}: ${tex.image.width}px > cap ${texCap}`);
+    state.lastLoadMs = performance.now() - t0;
+    state.bytes += texBytes(tex) / 1.333;             // rough decoded-source estimate
+    cache.set(id, { tex, bytes: texBytes(tex) });
+    inflight.delete(id); evict();
+    return tex;
+  }).catch(e => { inflight.delete(id); throw e; });
+
+  inflight.set(id, p);
+  return p;
+}
+
+function prefetchFrom(id) {
+  if (!state.prefetch) return;
+  for (const l of state.tour.links) if (l.from === id) loadNode(l.to).catch(() => {});
+}
+
+// --- transitions ------------------------------------------------------------
+// The interface Phase 2's glide must implement. Keeping it swappable from day one is
+// the point: `glide` is registered and refuses, rather than being absent.
+const transitions = {
+  cut: {
+    label: 'Cut',
+    async run(toTex) { outer.material.map = toTex; outer.material.opacity = 1;
+                       outer.visible = true; inner.visible = false; },
+  },
+  crossfade: {
+    label: 'Crossfade',
+    async run(toTex, fromTex, ms) {
+      if (!fromTex) return transitions.cut.run(toTex);
+      outer.material.map = fromTex; outer.material.opacity = 1; outer.visible = true;
+      inner.material.map = toTex;   inner.material.opacity = 0; inner.visible = true;
+      await tween(ms, t => {
+        const e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;  // easeInOutQuad
+        inner.material.opacity = e;
+      });
+      outer.material.map = toTex; outer.material.opacity = 1;
+      inner.visible = false; inner.material.map = null;
+    },
+  },
+  glide: {
+    label: 'Depth glide',
+    available: () => false,
+    async run() {
+      throw new Error(
+        'Glide needs a per-node depth pass and camera world transforms.\n' +
+        'Neither ships with these renders — see VIRTUAL-TOUR.md OQ-1 and D-1.');
+    },
+  },
+};
+
+const tween = (ms, fn) => new Promise(res => {
+  const t0 = performance.now();
+  (function step() {
+    const t = Math.min(1, (performance.now() - t0) / ms);
+    fn(t);
+    t < 1 ? requestAnimationFrame(step) : res();
+  })();
+});
+
+async function goTo(id, { instant = false } = {}) {
+  if (state.transitioning || id === state.current) return;
+  const node = state.nodes.get(id);
+  if (!node) return fail(`unknown node "${id}"`);
+
+  state.transitioning = true;
+  paintNodes(id);
+  try {
+    const toTex = await loadNode(id);
+    const fromTex = state.current ? cache.get(state.current)?.tex : null;
+
+    // Heading continuity: the visitor's facing direction is simply CARRIED OVER (view.lon
+    // is left alone). That is only meaningful once every node's `yaw` puts them in a
+    // shared frame — which is exactly what a camera world transform would give us for
+    // free (D-1). Dialling it by hand, per node, is the authoring cost D-1 argues against.
+    const mode = instant ? 'cut' : state.mode;
+    await transitions[mode].run(toTex, fromTex, state.dur);
+
+    state.current = id;
+    els('title').textContent = node.name;
+    paintOrient(id);
+    touch(id); evict(); prefetchFrom(id);
+    buildHotspots();
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    state.transitioning = false;
+    paintNodes(state.current); meters();
+  }
+}
+
+// --- hotspots ---------------------------------------------------------------
+// Direction-anchored, projected to screen each frame — the same model app.js already
+// uses for landmarks, which is why Phase 1 can reuse that code rather than invent this.
+let hotspots = [];
+// X-reflected, exactly as app.js's dir()/dirFromLonLat: the sphere is viewed from the
+// inside, so its texture is mirrored and the -sin(lon) un-mirrors it. Dropping the minus
+// sign mirrors every hotspot horizontally — subtle enough to look "nearly right".
+function dirFromLonLat(lonDeg, latDeg) {
+  const lon = lonDeg * Math.PI / 180, lat = latDeg * Math.PI / 180, cl = Math.cos(lat);
+  return new THREE.Vector3(-cl * Math.sin(lon), Math.sin(lat), cl * Math.cos(lon));
+}
+function buildHotspots() {
+  const host = els('hotspots');
+  host.innerHTML = ''; hotspots = [];
+  for (const l of state.tour.links) {
+    if (l.from !== state.current) continue;
+    const to = state.nodes.get(l.to); if (!to) continue;
+    const el = document.createElement('div');
+    el.className = 'hs';
+    el.innerHTML = `<div class="ring">↗</div><div class="lbl"></div>`;
+    el.querySelector('.lbl').textContent = l.label || to.name;
+    el.title = `Go to ${to.name}`;
+    el.addEventListener('click', ev => { ev.stopPropagation(); goTo(l.to); });
+    host.appendChild(el);
+    hotspots.push({ el, dir: dirFromLonLat(l.hotspot.lonDeg, l.hotspot.latDeg) });
+  }
+}
+const proj = new THREE.Vector3();
+function placeHotspots() {
+  const w = innerWidth, h = innerHeight;
+  for (const hs of hotspots) {
+    proj.copy(hs.dir).project(cam);
+    const behind = proj.z > 1;
+    hs.el.style.display = behind ? 'none' : '';
+    if (behind) continue;
+    hs.el.style.left = `${(proj.x * .5 + .5) * w}px`;
+    hs.el.style.top = `${(-proj.y * .5 + .5) * h}px`;
+  }
+}
+
+// --- camera + input ---------------------------------------------------------
+function updateCamera() {
+  state.view.lat = Math.max(-Math.PI / 2 + .01, Math.min(Math.PI / 2 - .01, state.view.lat));
+  // yaw = PI - lon, NOT app.js's lon + PI.
+  // With the X-reflected dirFromLonLat above, `lon + PI` leaves the camera mirrored in x
+  // against the hotspot directions: looking at view.lon = L then centres a hotspot stored
+  // at -L, and only lon = 0 appears correct (which is why it survives casual inspection).
+  // `PI - lon` makes "look at lon L" centre a hotspot at lon L for every L. Verified
+  // numerically in spike/proj-test.mjs. See VIRTUAL-TOUR.md Progress Log 2026-09-03 —
+  // app.js may carry the same mismatch; it is masked there because landmarks are
+  // drag-placed (screen->dir->store round-trips through the same reflection).
+  cam.rotation.set(state.view.lat, Math.PI - state.view.lon, 0, 'YXZ');
+  cam.fov = state.view.fov; cam.updateProjectionMatrix();
+}
+let drag = null;
+view.addEventListener('pointerdown', e => {
+  if (e.target.closest('.hs')) return;
+  drag = { x: e.clientX, y: e.clientY, lon: state.view.lon, lat: state.view.lat };
+  view.classList.add('dragging'); view.setPointerCapture(e.pointerId);
+});
+view.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const k = (state.view.fov / 75) * .0032;
+  state.view.lon = drag.lon - (e.clientX - drag.x) * k;
+  state.view.lat = drag.lat + (e.clientY - drag.y) * k;
+});
+const endDrag = () => { drag = null; view.classList.remove('dragging'); };
+view.addEventListener('pointerup', endDrag);
+view.addEventListener('pointercancel', endDrag);
+view.addEventListener('wheel', e => {
+  e.preventDefault();
+  state.view.fov = Math.max(20, Math.min(120, state.view.fov + Math.sign(e.deltaY) * 3));
+}, { passive: false });
+addEventListener('keydown', e => {
+  const ids = [...state.nodes.keys()];
+  if (/^[1-9]$/.test(e.key)) { const n = ids[+e.key - 1]; if (n) goTo(n); }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const i = ids.indexOf(state.current);
+    goTo(ids[(i + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length]);
+  }
+});
+
+// --- HUD --------------------------------------------------------------------
+function paintNodes(active) {
+  const host = els('nodes');
+  host.innerHTML = '';
+  for (const [id, n] of state.nodes) {
+    const b = document.createElement('button');
+    b.setAttribute('aria-current', String(id === active));
+    const resident = cache.has(id);
+    b.innerHTML = `<span>${n.name}</span><span class="st">${
+      resident ? '● cached' : inflight.has(id) ? '◐ loading' : '○'}</span>`;
+    b.addEventListener('click', () => goTo(id));
+    host.appendChild(b);
+  }
+}
+function meters() {
+  const gpu = [...cache.values()].reduce((a, v) => a + v.bytes, 0) / 1048576;
+  els('mRes').textContent = `${cache.size} / ${state.nodes.size}`;
+  const g = els('mGpu'); g.textContent = `${gpu.toFixed(0)} MB`;
+  g.className = 'v ' + (gpu > 900 ? 'bad' : gpu > 500 ? 'warn' : 'good');
+  els('mNet').textContent = `${(state.bytes / 1048576).toFixed(1)} MB`;
+  els('mLoad').textContent = state.lastLoadMs ? `${state.lastLoadMs.toFixed(0)} ms` : '—';
+}
+els('modeSeg').addEventListener('click', e => {
+  const b = e.target.closest('button[data-mode]'); if (!b || b.disabled) return;
+  state.mode = b.dataset.mode;
+  for (const x of els('modeSeg').children) x.setAttribute('aria-pressed', String(x === b));
+});
+els('dur').addEventListener('input', e => {
+  state.dur = +e.target.value; els('durV').textContent = `${state.dur} ms`; });
+els('cap').addEventListener('input', e => {
+  state.cacheCap = +e.target.value;
+  els('capV').textContent = `${state.cacheCap} node${state.cacheCap > 1 ? 's' : ''}`;
+  evict(); paintNodes(state.current);
+});
+els('pf').addEventListener('click', e => {
+  state.prefetch = !state.prefetch;
+  e.target.setAttribute('aria-pressed', String(state.prefetch));
+  if (state.prefetch) prefetchFrom(state.current);
+});
+const wrap180 = d => ((d + 180) % 360 + 360) % 360 - 180;
+els('yaw').addEventListener('input', e => setOrient(state.current, { yaw: +e.target.value }));
+document.querySelectorAll('[data-yaw]').forEach(b => b.addEventListener('click', () => {
+  const d = +b.dataset.yaw;
+  setOrient(state.current, { yaw: b.dataset.abs ? d : wrap180(orientOf(state.current).yaw + d) });
+}));
+els('flip').addEventListener('click', () =>
+  setOrient(state.current, { flip: !orientOf(state.current).flip }));
+els('copyOri').addEventListener('click', async e => {
+  // The spike's actual output: the orientation data the renders did not ship with.
+  const out = state.tour.nodes.map(n => ({ id: n.id, ...orientOf(n.id) }));
+  try { await navigator.clipboard.writeText(JSON.stringify(out, null, 2));
+        e.target.textContent = '✓ Copied'; }
+  catch { console.log(JSON.stringify(out, null, 2)); e.target.textContent = '✓ In console'; }
+  setTimeout(() => { e.target.textContent = '⧉ Copy orientations'; }, 1600);
+});
+
+// --- loop -------------------------------------------------------------------
+let frames = 0, fpsT0 = performance.now();
+(function loop() {
+  requestAnimationFrame(loop);
+  updateCamera(); placeHotspots();
+  renderer.render(scene, cam);
+  if (++frames >= 30) {
+    const now = performance.now();
+    els('mFps').textContent = `${(frames * 1000 / (now - fpsT0)).toFixed(0)}`;
+    frames = 0; fpsT0 = now;
+  }
+})();
+
+// --- boot -------------------------------------------------------------------
+(async function init() {
+  try {
+    const res = await fetch(`${TOUR_URL}?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`tour.json ${res.status} — run prep-panos.py first`);
+    state.tour = await res.json();
+    for (const n of state.tour.nodes) state.nodes.set(n.id, n);
+    if (!state.nodes.size) throw new Error('tour.json has no nodes');
+
+    console.info(`spike: ${state.nodes.size} nodes · GPU max texture ${maxTex} · cap ${texCap}`);
+    paintNodes(null); meters();
+    await goTo(state.tour.startNode || state.tour.nodes[0].id, { instant: true });
+  } catch (e) {
+    fail(`${e.message}\n\nServe from plot-map/ (python server.py 8731) and open /spike/`);
+  }
+})();
+</script>
+</body>
+</html>

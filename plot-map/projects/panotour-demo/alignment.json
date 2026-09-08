@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "note": "Build91 plot-map alignment",
+  "savedAt": "2026-09-08T12:55:55.000Z",
+  "transform": {
+    "tx": 0,
+    "ty": 0,
+    "scale": 1,
+    "rotationDeg": 0
+  },
+  "view": {
+    "lonDeg": 0,
+    "latDeg": 0,
+    "fov": 75
+  },
+  "opacity": 1,
+  "brand": {
+    "name": "Panorama Tour Demo",
+    "tagline": "360\u00b0 walkthrough"
+  },
+  "menuConfig": {
+    "tree": [
+      {
+        "id": "node_panotour_demo",
+        "title": "3BHK WALKTHROUGH",
+        "kind": "child",
+        "contentType": "panotour",
+        "content": {
+          "url": "",
+          "fileName": "",
+          "tourId": "t1"
+        }
+      }
+    ]
+  }
+}

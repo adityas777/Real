@@ -6,6 +6,11 @@
 > User-facing feature docs live in [README.md](README.md); this file is agent-facing
 > (architecture, code map, conventions, gotchas, verification, status). Every change
 > is logged in **[CHANGELOG.md](CHANGELOG.md)** as it happens.
+>
+> **Planning docs (live — keep them ticked as work lands):**
+> [ROADMAP.md](ROADMAP.md) (plot-map features F1–F3) ·
+> [VIRTUAL-TOUR.md](VIRTUAL-TOUR.md) (multi-node panoramic tour + WebXR — planning only,
+> nothing built yet; **read it before starting any tour work**).
 
 ## What this is
 
@@ -350,6 +355,35 @@ Top-down, by section header:
   `refreshAmList` (inline edit incl. render-image picker),
   persistence `parseAmenities`/`buildAmenitiesData`/
   `loadAmenitiesFile`/`setAmenities`/`saveAmenitiesAs`.
+- **Virtual tours** (VIRTUAL-TOUR.md Phase 1 — data model + admin Tour tab 2026-09-08;
+  **viewer + hotspot linking + `panotour` menu type added later the same day**):
+  `state.tours` (each `{id,name,startNode,nodes:[{id,name,pano,panoBlob,defaultView{lon,lat,fov}}],
+  links:[{from,to,hotspot{lon,lat},label}]}`), admin `state.tourSel`/`tourNodeSel`, live
+  viewer `state.tourView` (`{tourId,nodeId,title,busy,saved{view,panoMap}}`) +
+  `state.tourHsSel`. `parseTours`/`buildToursData`/`loadToursFile`/`setTours`/
+  `tourNodeBlobFiles`/`saveToursAs` mirror amenities (basename-resolved node images;
+  `parseTours` drops links to deleted nodes + repairs `startNode`). Admin structure:
+  `addTour`/`deleteTour`/`selectTour`/`addTourNodeFromFile` (upload →`resizeImageToBlob`
+  at the pano cap — **unwrap `out.blob`**, see gotchas) / `deleteTourNode` /
+  `refreshTourList` (tour+node list, and — while a tour is open — the per-room hotspot
+  editor). `setAdminTab` is 4-way (align/landmarks/amenities/**tour**).
+  **Viewer (D-11 takeover):** `openClientPanoTour(tourId,title)` hides plots/drape/
+  landmarks/amenities and swaps the *existing* pano sphere's texture (one WebGL context);
+  `closePanoTour` restores the saved view + texture and disposes the tour's textures.
+  `tourGoTo(nodeId,{instant})` crossfades via a second sphere at 0.985× **sharing
+  `three.pano.geometry`** (dispose the material only — never the shared geometry);
+  `tourTween` is the easing helper. Heading is carried across nodes; `defaultView` applies
+  on entry only. **Texture lifecycle:** `tourTex` LRU (`TOUR_CACHE_MAX = 3`) +
+  `tourTouch`/`tourEvict`/`loadTourNodeTex`/`prefetchTourNeighbours` (one hop) —
+  download weight and GPU residency are separate problems (see gotchas).
+  **Hotspots:** `rebuildTourHotspotDOM`/`renderTourHotspots` (projected each frame from
+  `#tourHotspots`, same model as landmarks), `startTourHsDrag`/`onTourHsDragMove`/
+  `endTourHsDrag` (drag-to-place), `addTourHotspot`/`deleteTourHotspot`/
+  `setTourNodeDefaultView`. `refreshTourBar` draws the room strip + exit (`#tourBar`).
+  **Menu launch (D-12):** content type **`panotour`** stores `content.tourId` and
+  dispatches to `openClientPanoTour` — distinct from `tour`, which iframes an *external*
+  3DVista/Kuula URL/file. Wizard: 🧭 card + `renderWizardTourPicker` (warns on a tour with
+  no nodes / no links) + `wizardState.tourId`.
 - **Brochure PDF viewer** — `openClientBrochureModal` (iframe on iOS/desktop; pdf.js
   canvases on Android, which has no inline PDF viewer — see **Conventions & gotchas**),
   `loadPdfJs` (on-demand classic-script load of the vendored UMD build; sets
@@ -489,6 +523,13 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   status/colour), plus an optional full-size **render** image
   (`render.file`, a `sample/…` path — auto-resized `.web.jpg` on import) shown in a
   lightbox. Client reads it view-only; missing file = pin with no thumbnail.
+- **`tour.json`** (added 2026-09-08, VIRTUAL-TOUR Phase 1) — `{ version, tours:[{ id, name,
+  startNode, nodes:[{ id, name, pano{file}, defaultView{lonDeg,latDeg,fov} }],
+  links:[{ from, to, hotspot{lonDeg,latDeg}, label }] }] }`. **Many independent tours per
+  project** (OQ-4); each node's `pano` is a texture-safe `.web.jpg` (basename-resolved, named
+  `tour-<tourId>-<nodeId>.web.jpg` on import). Absent ⇒ no tours. `links` is the hotspot
+  graph (authored in the viewer — next step); today it's written but empty. A menu item will
+  reference a tour by id (`panotour` content type) to launch it.
 - **Images** — the pano (`panoImage.file`) and drape/plan PNG; auto-resized on import to
   texture-safe `.web.jpg`/`.web.png`. No pano ⇒ a generated `fallbackPanoTexture()` (plain
   sky) so the app still runs. The repo `.gitignore` ignores `*.png/*.jpg/*.jpeg`, so
@@ -505,7 +546,8 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
    admin's server-side save (Export / Save…) via `server.py`.
 2. **Working session (IndexedDB `b91-admin`/`session`/`current`)** — admin-only full
    snapshot (geometry + rows + plan blob + pano blob + **brand logo blob** + landmarks +
-   amenities, **both incl. render blobs** + alignment), debounced autosave,
+   amenities, **both incl. render blobs** + **tours incl. node pano blobs** + alignment),
+   debounced autosave,
    **auto-restores on reload** (session > draft > committed file by `savedAt`).
    Discard/Reset clear it.
 3. **localStorage** — lightweight alignment draft (`b91-plot-alignment-draft-v2`), the
@@ -515,6 +557,58 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
 
 ## Conventions & gotchas (learned the hard way)
 
+- **`resizeImageToBlob` returns `{ blob, W, H }`, NOT a Blob.** Storing the wrapper where
+  a Blob is expected does not throw — it serialises to the string `"[object Object]"` and
+  writes a **15-byte file** that looks saved and fails to decode. This destroyed every
+  uploaded tour node pano until 2026-09-08. Always `out.blob`. A save test that only
+  checks a file *appeared* on disk will not catch it — check the byte size.
+- **Tour textures: download weight and GPU residency are different problems.** A node pano
+  is ~2 MB over the wire (fine) but ~179 MB resident as an 8192×4096 RGBA texture with
+  mips, so a 15-node tour would be ~2.7 GB. Hence `TOUR_CACHE_MAX = 3` + one-hop prefetch.
+  **Do not "optimise" by keeping every node loaded** — that is the thing the cap exists to
+  prevent. Walking prefetched links is instant; a *jump* to a distant room is the one
+  navigation that must show it is loading.
+- **The crossfade sphere SHARES `three.pano.geometry`.** Dispose its material only.
+  Disposing the geometry kills the main pano sphere with it.
+- **A tour "takes over" the viewer (D-11), so exit must restore everything it hid** —
+  plot groups, drape, landmark/amenity overlays (via their own `apply*Visibility`, not by
+  setting `.hidden` directly), the saved camera view *and* the previous pano texture.
+  `closePanoTour` keeps that snapshot in `state.tourView.saved`.
+- **Two menu content types both say "tour".** `tour` = an **external** 3DVista/Kuula tour
+  iframed from a URL or uploaded file (`openClientTourModal`). `panotour` = **our** node
+  graph, referenced by `content.tourId` (`openClientPanoTour`). Don't merge them.
+- **Tour hotspots use the STORED lon convention** (`lonLatFromDir`/`dirFromLonLat`), like
+  landmarks and amenities — *not* the camera-yaw convention. See the two-conventions note
+  above `computeHome`. `defaultView`, by contrast, stores a **camera** lon/lat, because it
+  is assigned straight into `state.view`. Mixing them mirrors placement horizontally.
+- **`server.py` recognises a project by `plots.svg` OR `tour.json`.** A tour-only project
+  has no plots; requiring `plots.svg` hid such projects from `/api/projects` and made
+  `do_bundle` 404 them.
+- **`do_bundle` copies every TOP-LEVEL file in the project dir into `data/`.** Raw
+  source masters left beside the runtime `.web.jpg`s ship in every export (343 MB of PNGs
+  made a 392 MB bundle). Keep masters in a **subdirectory** — subdirs are skipped.
+- **An empty `menuConfig.tree` renders NO client menu at all** — and since 2026-09-08 the
+  drawer itself is hidden in that case. The client drawer is **exactly** the authored menu;
+  the old hardcoded `AERIAL VIEW` / `LANDMARKS` rows are gone, re-added as the
+  zero-config content types `aerial` / `landmarks` (see `NO_CONFIG_CONTENT_TYPES`) so a
+  project only shows them if it asked for them. **`landmarks` is the only desktop route to
+  the landmark category picker** — a project with landmarks and no menu has no way into it.
+- **`sw.js` is network-first for project CONFIG, SWR for media.** It used to be
+  stale-while-revalidate for everything under `/projects/`, which served the *previous*
+  `alignment.json` on the first load after an admin save — a freshly published menu item
+  only appeared on the SECOND reload, which reads exactly like "it didn't save". If you
+  change a caching strategy, **bump `VERSION`** (currently `v2`) or an installed worker
+  keeps serving under the old rules. `cache: 'no-store'` in `fetch` does NOT help: the
+  worker intercepts first.
+- **The client nav drawer is HIDDEN in admin.** `wireAdmin` sets
+  `els.catDrawer.hidden = true` because admin has its own sidebar — so a menu item can
+  only ever be seen/tested at `/?project=<id>`, never at `/?admin=1&…`. This looks exactly
+  like "my menu item didn't save"; it isn't.
+- **`cleanNodeForSave` is a WHITELIST — a new content-type field must be added to it or it
+  is dropped on every save.** It rebuilds `content` from `url` + `fileName` (+ `images`
+  for gallery, `tourId` for panotour). A `panotour` item that lost its `tourId` still
+  rendered in the menu and did nothing when clicked, which is why this cost a debugging
+  round. Check this function whenever a content type gains a field.
 - **Google Sheet source is per-project & public-only.** `state.sheet` (from
   `alignment.json`'s `data`) drives **plots only** — landmarks/amenities stay file-based.
   The browser reads the sheet CSV **directly** (no server proxy), so the sheet must be
@@ -1059,6 +1153,15 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   On the client Plot Info Card, **all attached media options** render as distinct action buttons (e.g. `🌐 Walk through this plot →`, `▶ Watch YouTube Video →`, `🖼 View Photo →`).
   `parseMediaType` & `getPlotMediaList` seamlessly handle YouTube embed conversion, image lightboxes, and 3D tour iframe rendering.
 - The user actively publishes real sites via server-side save (their data — don't clobber it).
+- **Panoramic virtual tour (multi-node + hotspot navigation + WebXR)** — planned
+  2026-09-02, **nothing implemented**. A living phase-wise plan lives in
+  **[VIRTUAL-TOUR.md](VIRTUAL-TOUR.md)**: replace 3DVista with our own multi-node tour
+  engine, reusing the landmarks system as the hotspot layer. The panos are **3D renders**,
+  so a render-supplied **depth pass** makes a real parallax "glide" transition feasible
+  (no photogrammetry). Phase 0 is a throwaway validation spike, gated on the 3D team
+  supplying depth + camera transforms (OQ-1). ⚠️ Open tension: eyeballed node placement is
+  incompatible with the glide — see D-1 in that doc. **Read VIRTUAL-TOUR.md before touching
+  anything tour-related, and update it in the same turn as any tour work.**
 - **Client offline layer / PWA** (added 2026-09-02, extended 2026-09-03, see CHANGELOG for
   the full breakdown) — minimal service worker (`sw.js`) + `manifest.webmanifest` + ONE
   combined "Add to Home Screen" + save-for-offline banner (originally two separate
@@ -1093,8 +1196,31 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   `manifest.webmanifest` limitation (static/generic, not per-`?project=`) is intentional —
   see the 2026-09-02 CHANGELOG entry for why it doesn't matter for the actual planned
   rollout (per-project standalone bundle hosting has no multi-project ambiguity).
-- Suggested next: **ROADMAP Feature 3** (enquiry/lead capture) — see [ROADMAP.md](ROADMAP.md).
-  Also outstanding: a client-side **"Load site folder…"** picker (view any exported folder) —
+- **Virtual tour — Phase 1 STARTED (2026-09-08).** Owner signed off the spike and chose
+  crossfade + drag-to-place + separate-tours-from-menu (see VIRTUAL-TOUR.md decisions).
+  **Step 1 done & verified:** `tour.json` data model (many tours/project) + a 4th admin
+  **Tour** tab that creates tours and uploads/manages node panoramas, with full
+  session/export/boot persistence (verified round-trip on a throwaway project: save → disk
+  `tour.json` + node images → session-discarded reload restores).
+  **Steps 2–5 built later the same day** — client crossfade **viewer** (D-11 takeover),
+  **hotspot authoring** (drag-to-place + retarget/relabel/delete, inside the viewer),
+  per-node **start view**, **`panotour` menu type** → `openClientPanoTour(tourId)`, and the
+  **LRU + one-hop prefetch** texture lifecycle. Also fixed a data-destroying bug (every
+  saved node pano was a 15-byte `[object Object]` — see gotchas) and closed the 1.7 bundle
+  gap (`tour.json` + node panos now embedded; `server.py` accepts tour-only projects).
+  ⚠️ **Verified statically only** — `node --check`, `ast.parse`, helper/CSS/id
+  cross-checks, `/api/projects`, and a real exported bundle inspected for embedded tour +
+  9 panos. **The visual behaviour (crossfade, hotspot placement, takeover/restore) has NOT
+  been confirmed in a browser** — no browser tooling was available that session. Treat the
+  user's first run as the real test.
+  **Demo to test against:** `/?project=panotour-demo` (client, menu → *3BHK WALKTHROUGH*)
+  and `/?admin=1&project=panotour-demo` (Tour tab → *Open tour to place hotspots*). Seeded
+  by `spike/seed-demo-tour.py`; its hotspot directions are **evenly spread, not surveyed**
+  — they need dragging onto real doorways. Raw PNG masters live in
+  `projects/panotour-demo/_source/` so they stay out of bundles.
+  **Still open in Phase 1:** info hotspots (1.8). Phase 2 (depth glide) remains deferred.
+- Suggested next (after the tour viewer): **ROADMAP Feature 3** (enquiry/lead capture) — see
+  [ROADMAP.md](ROADMAP.md). Also outstanding: a client-side **"Load site folder…"** picker —
   not built.
 
 ## Documentation discipline

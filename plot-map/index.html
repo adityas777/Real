@@ -141,7 +141,13 @@
       <!-- mobile-only: shown when renderLandmarks caps how many banners render at once
            (too many overlap on a narrow screen) — taps into the Landmarks category picker -->
       <button class="lm-overflow-hint" id="lmOverflowHint" type="button" hidden></button>
+      <!-- virtual-tour navigation hotspots, projected from the 3D scene each frame while a
+           tour has taken over the viewer (VIRTUAL-TOUR.md Phase 1 / D-11) -->
+      <div class="tour-hs-layer" id="tourHotspots" hidden></div>
     </div>
+
+    <!-- tour chrome: title + node strip + exit; only visible during a tour takeover -->
+    <div class="tour-bar" id="tourBar" hidden></div>
 
     <!-- ─── Client Navigation Drawer (Left Panel Overlay) ────────────────────────── -->
     <aside class="cat-drawer" id="catDrawer" aria-label="Client Navigation">
@@ -309,6 +315,8 @@
         aria-selected="false">Landmarks</button>
       <button class="ax-tab-btn" id="axTabBtnAmenities" type="button" role="tab"
         aria-selected="false">Amenities</button>
+      <button class="ax-tab-btn" id="axTabBtnTour" type="button" role="tab"
+        aria-selected="false">Tour</button>
     </div>
     <div class="ax-tab" id="axTabAlign">
       <div class="ax-mode" role="group" aria-label="Drag mode">
@@ -399,6 +407,22 @@
       <p class="ax-lm-empty" id="axAmEmpty">No amenities yet.</p>
       <ul class="ax-lm-list" id="axAmList" aria-label="Amenities"></ul>
     </div><!-- /axTabAmenities -->
+
+    <div class="ax-tab" id="axTabTour" hidden>
+      <p class="ax-lm-intro">Build multi-node 360° <strong>virtual tours</strong>. Add a tour, then upload a
+        panorama for each <strong>node</strong> (room / viewpoint). Placing the hotspots that link one node to the
+        next — and the visitor's crossfade walkthrough — happen in the tour viewer (next build step). A saved tour
+        is launched from a menu item.</p>
+      <button class="btn btn-import" id="axTourAdd" type="button">＋ Add tour</button>
+      <p class="ax-lm-empty" id="axTourEmpty">No tours yet.</p>
+      <div class="ax-tour-list" id="axTourList" aria-label="Tours"></div>
+      <input type="file" id="axTourNodeFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+      <div class="adminbar-actions">
+        <button class="btn btn-ghost" id="axTourLoad" type="button">Load…</button>
+        <input type="file" id="axTourFile" accept="application/json,.json" hidden />
+        <button class="btn btn-primary" id="axTourSaveBtn" type="button">Save tours…</button>
+      </div>
+    </div><!-- /axTabTour -->
 
     <div class="adminbar-actions ax-session">
       <button class="btn btn-ghost" id="axSessionClear" type="button"
@@ -616,6 +640,32 @@
               <span class="wizard-type-icon">🖼️</span>
               <span class="wizard-type-label">Image</span>
             </button>
+            <!-- 360° walkthrough authored in the admin Tour tab; stores a tourId, not a URL -->
+            <button type="button" class="wizard-type-card" data-type="panotour">
+              <span class="wizard-type-icon">🧭</span>
+              <span class="wizard-type-label">360° Tour</span>
+            </button>
+            <!-- Built-in viewer actions. These were once hardcoded rows in the client
+                 drawer; they are now authored like anything else, so a project only shows
+                 them if it wants them. Neither takes any configuration. -->
+            <button type="button" class="wizard-type-card" data-type="landmarks">
+              <span class="wizard-type-icon">📍</span>
+              <span class="wizard-type-label">Landmarks</span>
+            </button>
+            <button type="button" class="wizard-type-card" data-type="aerial">
+              <span class="wizard-type-icon">🗺️</span>
+              <span class="wizard-type-label">Aerial View</span>
+            </button>
+          </div>
+
+          <p class="form-hint" id="wizardNoConfigHint" style="display:none; margin-bottom:14px;"></p>
+
+          <!-- Tour picker: replaces the URL/upload row for the panotour type, because the
+               content is a tour already stored in this project's tour.json. -->
+          <div class="form-group" id="wizardTourGroup" style="display:none; margin-bottom:14px;">
+            <label class="form-label" for="wizardTourSelect">Which tour should this open?</label>
+            <select class="form-input" id="wizardTourSelect"></select>
+            <p class="form-hint" id="wizardTourHint" style="margin-top:6px;"></p>
           </div>
 
           <!-- Upload vs URL Segmented Toggle -->

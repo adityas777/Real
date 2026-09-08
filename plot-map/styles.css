@@ -413,6 +413,22 @@ body {
 .ax-lm-title { font-weight: 600; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ax-lm-del { width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 14px; line-height: 1; }
 .ax-lm-del:hover { color: #e3b341; border-color: #5a4a2a; }
+/* Virtual-tour admin list (Tour tab): tours → nodes. Reuses the landmark-list look. */
+.ax-tour-list { display: flex; flex-direction: column; gap: 7px; margin: 12px 0; }
+.ax-tour-li { border: 1px solid var(--line-soft); border-radius: 9px; background: var(--bg); padding: 8px; cursor: pointer; }
+.ax-tour-li.is-sel { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold-soft); }
+.ax-tour-li .ax-lm-li-head { grid-template-columns: 1fr auto auto; }
+.ax-tour-name { min-width: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12.5px; font-weight: 600; }
+.ax-tour-name:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+.ax-tour-count { font-size: 10.5px; color: var(--text-mute); white-space: nowrap; }
+.ax-tour-edit { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 6px; }
+.ax-tour-hint { margin: 0 0 2px; font-size: 11px; color: var(--text-mute); }
+.ax-tour-node { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px; }
+.ax-tour-nodename { min-width: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font: inherit; font-size: 12px; }
+.ax-tour-nodename:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+.ax-tour-start { width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 13px; line-height: 1; }
+.ax-tour-start.is-on { color: var(--gold); border-color: var(--gold-soft); }
+.ax-tour-addnode { width: 100%; justify-content: center; margin-top: 2px; }
 /* Show-by-default control — a ✓|✕ PAIR, sitting before the delete × and never reading as one.
    Two buttons rather than one state-showing toggle so each click is idempotent: ✓ always means
    show, ✕ always means hide. (A single toggle inverted people's intent — everything starts
@@ -2672,3 +2688,103 @@ body.is-admin .cat-drawer { display: none !important; }
   background: rgba(250, 204, 21, 0.14) !important;
   color: #ffffff !important;
 }
+
+/* ═══ Virtual tour viewer (VIRTUAL-TOUR.md Phase 1) ═══════════════════════════
+   The tour takes over the main pano (D-11), so these sit in the same overlay
+   space landmarks/amenities use and follow the same projection model. */
+
+.tour-hs-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+
+/* A nav hotspot: a ring on the doorway it leads through + a label under it.
+   pointer-events:auto so admin drags work; the client's TAP is routed through
+   pick() instead, because #pano grabs pointer capture (same trap as am-pins). */
+.tour-hs {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  pointer-events: auto; cursor: pointer;
+}
+.tour-hs-ring {
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 2px solid var(--gold); background: rgba(212,175,55,.16);
+  display: grid; place-items: center; color: var(--gold); font-size: 16px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.5); backdrop-filter: blur(3px);
+  transition: transform .16s ease, background .16s ease;
+}
+.tour-hs:hover .tour-hs-ring,
+.tour-hs:focus-visible .tour-hs-ring { transform: scale(1.16); background: rgba(212,175,55,.34); }
+.tour-hs-lbl {
+  font-size: 11px; letter-spacing: .03em; white-space: nowrap; color: #fff;
+  background: rgba(12,12,14,.78); padding: 3px 9px; border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.45);
+}
+.tour-hs.is-sel .tour-hs-ring { box-shadow: 0 0 0 3px var(--gold), 0 2px 10px rgba(0,0,0,.5); }
+body.tour-open.is-admin .tour-hs { cursor: grab; }
+body.tour-open.is-admin .tour-hs:active { cursor: grabbing; }
+
+/* Bottom chrome: tour name, the room strip, and the way out. */
+.tour-bar {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  z-index: 30; max-width: min(94vw, 900px);
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px 8px 16px; border-radius: 999px;
+  background: rgba(14,14,16,.86); border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 10px 34px rgba(0,0,0,.5); backdrop-filter: blur(10px);
+}
+.tour-bar.is-busy { opacity: .75; }
+.tour-bar-title {
+  font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--gold-soft); white-space: nowrap; flex: none;
+}
+.tour-bar-nodes {
+  display: flex; gap: 5px; overflow-x: auto; scrollbar-width: thin;
+  padding: 2px; min-width: 0;
+}
+.tour-bar-nodes::-webkit-scrollbar { height: 4px; }
+.tour-bar-nodes::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 4px; }
+.tour-chip {
+  flex: none; padding: 5px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); background: transparent;
+  color: rgba(255,255,255,.74); font: inherit; font-size: 12px; white-space: nowrap;
+}
+.tour-chip:hover { background: rgba(255,255,255,.08); color: #fff; }
+.tour-chip.is-on { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
+.tour-exit {
+  flex: none; padding: 6px 13px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); background: transparent;
+  color: rgba(255,255,255,.8); font: inherit; font-size: 12px; white-space: nowrap;
+}
+.tour-exit:hover { border-color: #e88; color: #f4b3b3; background: rgba(220,90,90,.14); }
+
+/* While a tour is open the plot-map furniture is meaningless — hide it. The client nav
+   drawer deliberately STAYS: hiding it would trap the visitor inside the tour with only
+   one way out, and switching menu items from in here is a reasonable thing to want. */
+body.tour-open .legend,
+body.tour-open .lm-overflow-hint { display: none !important; }
+
+@media (max-width: 640px) {
+  .tour-bar { left: 10px; right: 10px; bottom: 10px; transform: none; max-width: none;
+    border-radius: 14px; flex-wrap: wrap; padding: 8px 10px; }
+  .tour-bar-title { width: 100%; }
+  .tour-bar-nodes { flex: 1 1 auto; }
+}
+
+/* ── Admin Tour tab: hotspot authoring rows ── */
+.ax-tour-node.is-live { background: var(--gold-dim); border-radius: 6px; }
+.ax-tour-open {
+  flex: none; width: 24px; height: 24px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.16); background: transparent;
+  color: var(--gold); font-size: 11px; line-height: 1;
+}
+.ax-tour-open:hover { background: var(--gold-dim); }
+.ax-tour-hs { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.1); }
+.ax-tour-hs-h { font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  color: rgba(255,255,255,.55); margin-bottom: 7px; }
+.ax-tour-hsrow { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.ax-tour-hsrow.is-sel { outline: 1px solid var(--gold); outline-offset: 2px; border-radius: 6px; }
+.ax-tour-hslabel { flex: 1 1 auto; min-width: 0; }
+.ax-tour-hsarrow { flex: none; color: rgba(255,255,255,.4); font-size: 12px; }
+.ax-tour-hsto { flex: 1 1 auto; min-width: 0; }
+.ax-tour-hsadd { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.ax-tour-hsadd .btn { flex: none; }
+.ax-tour-dv, .ax-tour-openall { width: 100%; margin-top: 7px; }

@@ -15,7 +15,10 @@
 // so the cache is keyed on the stable resource identity instead; requests still go to the
 // network with their original cache-busting query intact.
 
-const VERSION = 'v1';
+// Bump this whenever the caching STRATEGY changes (not just the app code): the old caches
+// are deleted on activate, so an already-installed worker cannot keep serving data under
+// the previous rules. Bumped to v2 when project config moved to network-first.
+const VERSION = 'v2';
 const SHELL_CACHE = `b91-shell-${VERSION}`;
 const DATA_CACHE = `b91-data-${VERSION}`;
 const MEDIA_CACHE = `b91-media-${VERSION}`;
@@ -79,6 +82,28 @@ async function isAdminRequest(event, requestUrl) {
 // Serve from cache immediately if we have it (fast + works offline), and refresh the cache
 // in the background from the network so the next load picks up any admin edit — no manual
 // versioning needed since the page's own cache-busting query already forces a fresh fetch.
+// Network-first, cache as the offline fallback. Used ONLY for the small project CONFIG
+// files (alignment/plots/landmarks/amenities/tour — json, csv, svg).
+//
+// Why these can't be stale-while-revalidate: they are the output of the admin editor, and
+// SWR serves the previous copy on the first load after a save, so a freshly published menu
+// item / tour / landmark simply does not appear until the visitor reloads a SECOND time.
+// That reads as "my change didn't save" and cost a real debugging round. They are a few KB
+// each, so paying a network round-trip for correctness is cheap; images and media (large,
+// and already cache-busted by their own `_ver` token) stay on SWR.
+async function networkFirst(cache, request) {
+  const key = cacheKeyFor(request.url);
+  try {
+    const res = await fetch(request);
+    if (res && res.ok) cache.put(key, res.clone()).catch(() => {});
+    return res;
+  } catch {
+    const cached = await cache.match(key);
+    if (cached) return cached;
+    return new Response('Offline', { status: 503, statusText: 'Offline' });
+  }
+}
+
 async function staleWhileRevalidate(cache, request) {
   const key = cacheKeyFor(request.url);
   const cached = await cache.match(key);
@@ -205,7 +230,13 @@ self.addEventListener('fetch', (event) => {
       return staleWhileRevalidate(await caches.open(SHELL_CACHE), req);
     }
 
-    if (isProjectAsset) return staleWhileRevalidate(await caches.open(DATA_CACHE), req);
+    if (isProjectAsset) {
+      // Config (the admin's output) must be fresh when online; media stays SWR.
+      const cache = await caches.open(DATA_CACHE);
+      return /\.(json|csv|svg)$/i.test(url.pathname)
+        ? networkFirst(cache, req)
+        : staleWhileRevalidate(cache, req);
+    }
 
     try { return await fetch(req); } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
   })());
