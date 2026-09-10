@@ -259,6 +259,173 @@ def read_amenities(project_dir):
     except Exception:
         return {}
 
+def find_ffmpeg():
+    """Locate portable ffmpeg in ./tools or system PATH."""
+    local_bin = os.path.join(ROOT, "tools", "ffmpeg.exe")
+    if os.path.isfile(local_bin):
+        return local_bin
+    import shutil
+    return shutil.which("ffmpeg")
+
+def optimize_video_file(path):
+    """Transcodes an uploaded video file to web-optimized 1080p H.264 + faststart."""
+    ffmpeg_bin = find_ffmpeg()
+    if not ffmpeg_bin:
+        sys.stderr.write("[ffmpeg] ffmpeg binary not found, skipping optimization\n")
+        return None
+    import subprocess
+    ext = os.path.splitext(path)[1].lower()
+    is_video = ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]
+    if not is_video:
+        return None
+
+    tmp_out = path + ".opt.mp4"
+    if os.path.exists(tmp_out):
+        try: os.remove(tmp_out)
+        except Exception: pass
+
+    cmd = [
+        ffmpeg_bin, "-y", "-i", path,
+        "-c:v", "libx264", "-crf", "26", "-preset", "faster",
+        "-pix_fmt", "yuv420p",
+        "-vf", "scale='min(1920,iw)':-2",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        tmp_out
+    ]
+    try:
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode == 0 and os.path.isfile(tmp_out) and os.path.getsize(tmp_out) > 0:
+            orig_size = os.path.getsize(path)
+            new_size = os.path.getsize(tmp_out)
+            os.replace(tmp_out, path)
+            pct = round((1 - (new_size / orig_size)) * 100, 1) if orig_size > 0 else 0
+            sys.stderr.write(f"[ffmpeg] Optimized {os.path.basename(path)}: {orig_size} -> {new_size} bytes ({pct}% reduction)\n")
+            return {
+                "compressed": True,
+                "orig_bytes": orig_size,
+                "new_bytes": new_size,
+                "savings_pct": pct
+            }
+        else:
+            sys.stderr.write(f"[ffmpeg error] {proc.stderr.decode('utf-8', errors='replace')[-300:]}\n")
+    except Exception as e:
+        sys.stderr.write(f"[ffmpeg exception] {e}\n")
+    finally:
+        if os.path.exists(tmp_out):
+            try: os.remove(tmp_out)
+            except Exception: pass
+    return None
+
+def optimize_image_file(path):
+    """
+    Downscales images exceeding 1920px width/height and optimizes them for web.
+    Preserves transparency for RGBA PNGs (logos), optimizes photo/render PNGs.
+    EXEMPTS: 360 panorama images, plot layouts, and site plans so visual map fidelity is untouched.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in [".png", ".jpg", ".jpeg", ".webp", ".bmp"]:
+        return None
+
+    # Never compress background panoramas, plot layouts, or site plans
+    fname = os.path.basename(path).lower()
+    skip_keywords = ["pano", "panorama", "connectivity", "equirectangular", "360", "ground", "layout", "plot", "siteplan", "masterplan"]
+    if any(k in fname for k in skip_keywords):
+        sys.stderr.write(f"[PIL] Skipping pano/layout image: {os.path.basename(path)}\n")
+        return None
+
+    # Check if this image is configured as panoImage or groundImage in alignment.json
+    project_dir = os.path.dirname(path)
+    align_file = os.path.join(project_dir, "alignment.json")
+    if os.path.isfile(align_file):
+        try:
+            with open(align_file, "r", encoding="utf-8") as af:
+                align_data = json.load(af)
+                pano_ref = (align_data.get("panoImage") or {}).get("file", "")
+                ground_ref = (align_data.get("groundImage") or {}).get("file", "")
+                base_name = os.path.basename(path)
+                if base_name in pano_ref or base_name in ground_ref:
+                    sys.stderr.write(f"[PIL] Skipping alignment pano/ground image: {base_name}\n")
+                    return None
+        except Exception:
+            pass
+
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    try:
+        orig_size = os.path.getsize(path)
+        if orig_size < 250 * 1024:
+            return None  # already under 250KB, no optimization needed
+
+        with Image.open(path) as im:
+            orig_w, orig_h = im.size
+
+            # Never compress a 2:1 aspect ratio equirectangular 360 panorama
+            ratio = orig_w / max(1, orig_h)
+            if 1.95 <= ratio <= 2.05:
+                sys.stderr.write(f"[PIL] Skipping 360 equirectangular panorama ({orig_w}x{orig_h}): {os.path.basename(path)}\n")
+                return None
+
+            if orig_w <= 1920 and orig_h <= 1920 and orig_size < 1.5 * 1024 * 1024:
+                return None  # already optimal dimensions and reasonable size
+
+            # Resample down to max 1920px while preserving aspect ratio
+            im.thumbnail((1920, 1920), Image.LANCZOS)
+
+            tmp_out = path + ".opt.img"
+            if os.path.exists(tmp_out):
+                try: os.remove(tmp_out)
+                except Exception: pass
+
+            if ext == ".png":
+                # Check for actual alpha channel
+                has_alpha = False
+                if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+                    try:
+                        alpha = im.convert("RGBA").split()[-1]
+                        if alpha.getextrema()[0] < 255:
+                            has_alpha = True
+                    except Exception:
+                        has_alpha = True
+
+                if has_alpha:
+                    im.save(tmp_out, "PNG", optimize=True)
+                else:
+                    # Photo or 3D render without alpha - save as high-quality web JPEG
+                    rgb = im.convert("RGB")
+                    rgb.save(tmp_out, "JPEG", quality=85, optimize=True)
+            elif ext in [".jpg", ".jpeg"]:
+                im.convert("RGB").save(tmp_out, "JPEG", quality=85, optimize=True)
+            elif ext == ".webp":
+                im.save(tmp_out, "WEBP", quality=85)
+            else:
+                im.save(tmp_out, optimize=True)
+
+            if os.path.isfile(tmp_out) and os.path.getsize(tmp_out) > 0:
+                new_size = os.path.getsize(tmp_out)
+                if new_size < orig_size:
+                    os.replace(tmp_out, path)
+                    pct = round((1 - (new_size / orig_size)) * 100, 1)
+                    sys.stderr.write(f"[PIL] Optimized {os.path.basename(path)}: {orig_size} -> {new_size} bytes ({pct}% reduction)\n")
+                    return {
+                        "compressed": True,
+                        "orig_bytes": orig_size,
+                        "new_bytes": new_size,
+                        "savings_pct": pct
+                    }
+                else:
+                    if os.path.exists(tmp_out):
+                        os.remove(tmp_out)
+    except Exception as e:
+        sys.stderr.write(f"[PIL exception] {e}\n")
+        if os.path.exists(path + ".opt.img"):
+            try: os.remove(path + ".opt.img")
+            except Exception: pass
+    return None
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=ROOT, **kw)
@@ -318,6 +485,13 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         mime     = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        if path.lower().endswith(".png"):
+            try:
+                with open(path, "rb") as fh:
+                    if fh.read(3) == b"\xff\xd8\xff":
+                        mime = "image/jpeg"
+            except Exception:
+                pass
         size     = os.path.getsize(path)
         last_mod = email.utils.formatdate(os.path.getmtime(path), usegmt=True)
 
@@ -593,6 +767,10 @@ class Handler(SimpleHTTPRequestHandler):
                 raw = base64.b64decode(data) if f.get("encoding") == "base64" else str(data).encode("utf-8")
                 with open(path, "wb") as out:
                     out.write(raw)
+                try:
+                    optimize_image_file(path)
+                except Exception:
+                    pass
                 written.append(name)
             except Exception:
                 skipped.append(name)
@@ -644,6 +822,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self._send_json(500, {"ok": False, "error": str(e)})
         return self._send_json(200, {"ok": True, "project": pid, "trash": os.path.relpath(dest, ROOT).replace(os.sep, "/")})
 
+
     def do_upload(self):
         """Raw-binary file upload — POST /api/upload?project=<id>&name=<filename>.
 
@@ -651,7 +830,8 @@ class Handler(SimpleHTTPRequestHandler):
         real MIME type) with no base64 encoding and no JSON wrapper.  This avoids
         the ~500 MB btoa() cap that kills large video uploads in app.js, and means
         the server never holds the whole file in memory — it streams the body in
-        64 KB chunks straight to disk."""
+        64 KB chunks straight to disk. If a video is uploaded, it automatically
+        compresses it via portable ffmpeg for optimal mobile streaming."""
         from urllib.parse import urlparse, parse_qs
         qs   = parse_qs(urlparse(self.path).query)
         pid  = safe_project((qs.get("project") or [""])[0])
@@ -676,11 +856,30 @@ class Handler(SimpleHTTPRequestHandler):
                     remaining -= len(chunk)
         except Exception as e:
             return self._send_json(500, {"ok": False, "error": str(e)})
-        return self._send_json(200, {
+
+        # Automatic media optimization via ffmpeg / PIL
+        opt_info = None
+        ext = os.path.splitext(name)[1].lower()
+        if ext in [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"]:
+            try:
+                opt_info = optimize_video_file(path)
+            except Exception as e:
+                sys.stderr.write(f"[upload optimize video error] {e}\n")
+        elif ext in [".png", ".jpg", ".jpeg", ".webp", ".bmp"]:
+            try:
+                opt_info = optimize_image_file(path)
+            except Exception as e:
+                sys.stderr.write(f"[upload optimize image error] {e}\n")
+
+        resp = {
             "ok": True, "project": pid,
             "dir": os.path.relpath(dest, ROOT).replace(os.sep, "/"),
             "name": name, "written": [name], "skipped": [],
-        })
+        }
+        if opt_info:
+            resp["optimization"] = opt_info
+
+        return self._send_json(200, resp)
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))

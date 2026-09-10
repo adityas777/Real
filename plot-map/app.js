@@ -42,13 +42,14 @@ const TAU = Math.PI * 2;
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 const els = {
-  stage: $('stage'), pano: $('pano'), panoHint: $('panoHint'),
+  stage: $('stage'), pano: $('pano'), panoHint: $('panoHint'), bootCurtain: $('bootCurtain'),
+  bootProgressWrap: $('bootProgressWrap'), bootProgressFill: $('bootProgressFill'), bootProgressPct: $('bootProgressPct'),
   brandMark: $('brandMark'), brandName: $('brandName'), brandTagline: $('brandTagline'),
   proj: $('proj'), projSelect: $('projSelect'), projTools: $('projTools'), projSave: $('projSave'), projSettingsBtn: $('projSettingsBtn'), projSettingsPopover: $('projSettingsPopover'), projSettingsClose: $('projSettingsClose'), projMenuBtn: $('projMenuBtn'), projMenu: $('projMenu'),
   projName: $('projName'), projNameInput: $('projNameInput'), projNameOk: $('projNameOk'), projNameCancel: $('projNameCancel'), projNameHint: $('projNameHint'),
   axBrandName: $('axBrandName'), axBrandTagline: $('axBrandTagline'), axBrandLogo: $('axBrandLogo'), axBrandLogoFile: $('axBrandLogoFile'), axBrandLogoName: $('axBrandLogoName'), axBrandLogoClear: $('axBrandLogoClear'),
   axSheetOn: $('axSheetOn'), axSheetBody: $('axSheetBody'), axSheetUrl: $('axSheetUrl'), axSheetTest: $('axSheetTest'), axSheetMsg: $('axSheetMsg'),
-  legend: $('legend'), syncMeta: $('syncMeta'), refreshBtn: $('refreshBtn'),
+  legend: $('legend'),
   tooltip: $('tooltip'), notice: $('notice'),
   zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'), amenityToggle: $('amenityToggle'),
   zoomStatusGroup: $('zoomStatusGroup'), zoomAvailableBtn: $('zoomAvailableBtn'),
@@ -56,6 +57,7 @@ const els = {
   landmarks: $('landmarks'), amenities: $('amenities'),
   tourLayer: $('tourHotspots'), tourBar: $('tourBar'),
   axAudioPick: $('axAudioPick'), axAudioFile: $('axAudioFile'), axAudioName: $('axAudioName'), axAudioClear: $('axAudioClear'), siteAudio: $('siteAudio'),
+  compass: $('compass'), compassCone: $('compassCone'),
   catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catLevelSubMenu: $('catLevelSubMenu'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'),
   catDrawerBrand: $('catDrawerBrand'), catDrawerLogo: $('catDrawerLogo'), catDrawerName: $('catDrawerName'), catDrawerTagline: $('catDrawerTagline'),
   fsToggle: $('fsToggle'), audioToggle: $('audioToggle'), autoPanToggle: $('autoPanToggle'),
@@ -169,6 +171,8 @@ const state = {
   groundImage: null,                    // { file, opacity } — PNG site-plan draped on the ground (shares the transform)
   planBlob: null, planName: null,       // raw imported plan PNG (kept so the working session survives a reload pre-export)
   panoImage: null,                      // { file } — admin-chosen 360° background pano (exported + referenced in alignment.json)
+  northDeg: 0,   // which STORED lon is true north; drives the compass. 0 until an admin sets it (alignment.json `northDeg`)
+  viewVel: { lon: 0, lat: 0 },   // current camera angular velocity (rad/ms) — decays a drag's flick into coasting inertia
   brand: { name: '', tagline: '', logo: null, logoBlob: null, logoName: null, _url: null, _ver: '' }, // client title-bar branding (in alignment.json)
   audio: { file: null, blob: null, name: null, _url: null, _ver: '' },  // admin-uploaded background music (in alignment.json), played on loop for the client
   panoBlob: null, panoName: null,       // resized texture-safe pano JPEG kept for export / session restore
@@ -396,6 +400,36 @@ function fallbackPanoTexture() {
   const cx = c.getContext('2d'); cx.fillStyle = g; cx.fillRect(0, 0, c.width, c.height);
   return panoTextureFromSource(c);
 }
+// ─── Boot progress bar ─────────────────────────────────────────────────────────
+// Real byte progress of whatever the boot curtain is actually waiting on — usually the
+// pano and/or draped site-plan image, the two big binary downloads, not the tiny JSON/SVG
+// files that load before them. Never regresses (a stalled fetch shouldn't visibly rewind
+// the bar); see hideBootCurtain for where it gets reset/hidden for good after first boot.
+let bootPct = 0;
+function setBootProgress(pct) {
+  bootPct = Math.max(bootPct, Math.min(100, pct));
+  if (els.bootProgressFill) els.bootProgressFill.style.width = bootPct.toFixed(0) + '%';
+  if (els.bootProgressPct) els.bootProgressPct.textContent = bootPct.toFixed(0) + '%';
+}
+// Fetches a URL as a Blob while reporting real bytes-loaded/total via onBytes(loaded,
+// total) — server.py always sends Content-Length for static assets, so `total` is
+// reliable here. Falls back to a plain non-streamed fetch (progress jumps once at the
+// end) if the runtime can't stream a response body.
+async function fetchBlobWithProgress(url, onBytes) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Could not load ${url} (${res.status})`);
+  const total = +res.headers.get('content-length') || 0;
+  if (!res.body?.getReader) { const blob = await res.blob(); onBytes?.(blob.size, total || blob.size); return blob; }
+  const reader = res.body.getReader(); const chunks = []; let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); loaded += value.length;
+    onBytes?.(loaded, total);
+  }
+  return new Blob(chunks);
+}
+
 async function loadPanoTexture(src) {                    // src = URL string OR a Blob/File
   const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
   try {
@@ -955,7 +989,7 @@ let cameraAnimTimer = null;
 // display: the same scene drifted twice as fast on a 120Hz phone as on a 60Hz laptop,
 // and slowed to a crawl whenever the frame rate dipped. Expressed per millisecond
 // instead, preserving the long-standing 60fps feel (0.00035 rad/frame) exactly.
-const AUTOPAN_RATE = 0.00035 / (1000 / 60);   // rad per ms
+const AUTOPAN_RATE = (1.8 * Math.PI / 180) / 1000;   // rad per ms == 1.8 deg/s, the reference tour's idle drift (its sequences run 1.6-2.1)
 let lastFrameTs = 0;
 function renderLoop() {
   requestAnimationFrame(renderLoop);
@@ -968,11 +1002,15 @@ function renderLoop() {
   const dtMs = lastFrameTs ? Math.min(100, nowTs - lastFrameTs) : (1000 / 60);
   lastFrameTs = nowTs;
 
+  // Steered motion (d-pad, and the flick left over from a drag) takes precedence over the
+  // idle drift below — they'd otherwise both write state.view.lon in the same frame.
+  const steering = stepViewMotion(dtMs);
+
   // Slow motion auto-pan when enabled in client view (!state.admin) and user is idle.
   // With no category selected: free 360° spin (unchanged). With a category selected:
   // ping-pong between that category's rightmost and leftmost landmark instead
   // (increasing lon sweeps leftward — the pano is viewed from inside, so it's mirrored).
-  if (state.autoPan && !state.admin && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
+  if (!steering && state.autoPan && !state.admin && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
     const range = state.landmarkPanRange;
     if (range) {
       // Re-express the current lon as the equivalent value nearest the range so the
@@ -995,6 +1033,7 @@ function renderLoop() {
   }
 
   updateCamera();
+  updateCompass();
   three.renderer.render(three.scene, three.camera);
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
   if (els.landmarks && !els.landmarks.hidden) renderLandmarks();  // keep banners/pins/lines glued to the scene
@@ -1002,6 +1041,59 @@ function renderLoop() {
   if (state.tourView) renderTourHotspots();                       // keep tour nav hotspots glued to the scene
   if (els.amCard && els.amCard.classList.contains('open')) placeAmCard(); // keep the amenity card glued to its pin
 }
+// ─── Compass ─────────────────────────────────────────────────────────────
+// The rose turns with the view; the letters counter-turn so they stay upright, which is
+// how the reference tour's compass reads and the only way N/S/E/W stay legible.
+// `state.view.lon` is the camera YAW and runs OPPOSITE a stored lon (see the two-conventions
+// gotcha), so the heading is negated to get a stored-lon bearing before north is removed.
+// Keeps the auto-pan button's icon and wording describing what a press will DO.
+function updateAutoPanToggleUI() {
+  const b = els.autoPanToggle;
+  if (!b) return;
+  b.classList.toggle('is-active', !!state.autoPan);
+  const t = state.autoPan ? 'Stop the camera moving' : 'Let the camera move again';
+  b.title = t;
+  b.setAttribute('aria-label', t);
+  b.setAttribute('aria-pressed', String(!state.autoPan));
+}
+
+function updateCompass() {
+  if (!els.compassCone) return;
+  // Only the cone moves. Its artwork points at 12 o'clock (north), so rotating it by the
+  // heading swings it to whatever the camera faces. `state.view.lon` is the camera YAW and
+  // runs OPPOSITE a stored lon (see the two-conventions gotcha), hence the negation.
+  const headingDeg = -state.view.lon * 180 / Math.PI;
+  const rot = headingDeg - (state.northDeg || 0);
+  els.compassCone.setAttribute('transform', `rotate(${rot.toFixed(2)} 60 60)`);
+}
+// The camera yaw (state.view.lon) that makes the compass point at north — i.e. the exact
+// inverse of updateCompass()'s own heading formula above (rot = -lon*180/PI - northDeg;
+// rot is 0, cone at 12 o'clock/north, when lon = -northDeg in radians). Used by the
+// AERIAL VIEW menu action so "reset to the full site view" also means "face north," not
+// just whatever direction the layout's centroid happens to sit in. Uncalibrated projects
+// (northDeg unset, the compass's own documented default) resolve this to lon 0.
+function northFacingLon() { return -(state.northDeg || 0) * Math.PI / 180; }
+
+// The directional pad was removed 2026-09-10 (client no longer offers it — drag/flick is
+// the only look-around input now). `stepViewMotion`/`viewVel` survive because a drag's
+// flick-to-coast inertia (wireViewControls' pointerup handler) shares the same
+// frame-rate-independent easing the d-pad used to drive with a held-button target; with no
+// target to chase any more, this just decays whatever velocity a flick left behind toward
+// zero, which is exactly what coasting needs.
+const VIEW_EASE_PER_S = 0.0016;            // fraction of the gap left after 1s
+// Integrates viewVel each frame; called from renderLoop so motion is tied to elapsed time
+// rather than to how often a timer happens to fire.
+function stepViewMotion(dtMs) {
+  const v = state.viewVel;
+  const k = 1 - Math.pow(VIEW_EASE_PER_S, dtMs / 1000);       // frame-rate independent easing
+  v.lon += (0 - v.lon) * k;
+  v.lat += (0 - v.lat) * k;
+  if (Math.abs(v.lon) < 1e-7 && Math.abs(v.lat) < 1e-7) { v.lon = 0; v.lat = 0; return false; }
+  state.view.lon += v.lon * dtMs;
+  state.view.lat = clampLat(state.view.lat + v.lat * dtMs);
+  return true;
+}
+
 function updateCamera() {
   const cam = three.camera;
   // Hard limit: while a landmark category is selected in the client, the view can
@@ -1041,7 +1133,7 @@ function setFov(f) { state.view.fov = Math.max(FOV_MIN, Math.min(FOV_MAX, f)); r
 // ─── Look-around + (admin) cluster-move controls ──────────────────────────────
 function wireViewControls() {
   const el = els.pano, pointers = new Map();
-  let panStart = null, didMove = false, pinch = 0, moveMode = false, dragLast = null, downXY = null;
+  let panStart = null, didMove = false, pinch = 0, moveMode = false, dragLast = null, downXY = null, dragFlick = null;
 
   el.addEventListener('wheel', (e) => { e.preventDefault(); setFov(state.view.fov * (e.deltaY > 0 ? 1.06 : 1 / 1.06)); }, { passive: false });
 
@@ -1051,7 +1143,8 @@ function wireViewControls() {
     if (pointers.size === 1) {
       didMove = false;
       if (state.admin && state.adminMode === 'move') { moveMode = true; dragLast = rayToGround(e); downXY = { x: e.clientX, y: e.clientY }; panStart = null; } // drag anywhere → reposition layout
-      else { moveMode = false; panStart = { x: e.clientX, y: e.clientY, lon: state.view.lon, lat: state.view.lat }; }
+      else { moveMode = false; panStart = { x: e.clientX, y: e.clientY, lon: state.view.lon, lat: state.view.lat, t: performance.now() }; }
+      state.viewVel.lon = 0; state.viewVel.lat = 0; dragFlick = null;   // grabbing kills any coast
       el.classList.add('grabbing'); hideHint();
     } else if (pointers.size === 2) pinch = pDist(pointers);
   });
@@ -1081,7 +1174,12 @@ function wireViewControls() {
           if (cameraAnimTimer) { clearInterval(cameraAnimTimer); cameraAnimTimer = null; }
         }
       }
-      state.view.lon = panStart.lon - dx * k; state.view.lat = clampLat(panStart.lat + dy * k); requestRender();
+      const nlon = panStart.lon - dx * k, nlat = clampLat(panStart.lat + dy * k);
+      // Remember the instantaneous speed of the gesture so releasing can coast (below).
+      const now = performance.now(), dt = Math.max(1, now - (panStart.t || now));
+      dragFlick = { lon: (nlon - state.view.lon) / dt, lat: (nlat - state.view.lat) / dt };
+      panStart.t = now;
+      state.view.lon = nlon; state.view.lat = nlat; requestRender();
     } else hover(e);
   });
 
@@ -1091,6 +1189,14 @@ function wireViewControls() {
     if (pointers.size === 0) {
       el.classList.remove('grabbing');
       if (wasClick) pick(e);
+      // Let a flick coast instead of stopping dead the instant the finger lifts — the
+      // single biggest thing that made panning feel rough. stepViewMotion decays it.
+      if (wasDrag && !moveMode && dragFlick) {
+        const cap = 0.004;                       // rad/ms, keeps a hard flick from spinning wildly
+        state.viewVel.lon = Math.max(-cap, Math.min(cap, dragFlick.lon));
+        state.viewVel.lat = Math.max(-cap, Math.min(cap, dragFlick.lat));
+      }
+      dragFlick = null;
       if (wasDrag && state.admin) onAlignmentChanged(); // capture move (transform) OR look-around (view)
       moveMode = false; panStart = null; dragLast = null; downXY = null;
     }
@@ -1169,42 +1275,20 @@ function wireViewControls() {
     if (els.catToggleIco) els.catToggleIco.textContent = collapsed ? '›' : '‹';
   });
 
-  els.catNavL1?.querySelectorAll('.cat-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      touch();
-      const act = btn.dataset.act;
-      if (act === 'landmarks') {
-        if (els.catLevel1) els.catLevel1.hidden = true;
-        if (els.catLevel2) els.catLevel2.hidden = false;
-        state.autoPan = true;
-        applyCategoryFilter('ALL');
-      } else if (act === 'aerial') {
-        state.landmarkPanRange = null;   // leaving Landmarks — release the category arc
-        computeHome();
-        animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
-        state.autoPan = true;
-      } else {
-        const title = btn.textContent.replace('›', '').trim();
-        showNotice(`<strong>${esc(title)}</strong> section selected.`);
-      }
-    });
-  });
-
+  // NOTE: `#catNavL1`'s and `#catNav`'s own `.cat-btn` rows are NOT wired here — both
+  // elements have their innerHTML fully replaced at runtime (renderClientSidebar and
+  // renderLandmarkCategoryNav respectively), so a listener attached to whatever the
+  // static index.html placeholder markup contains at boot would be attached to nodes
+  // that get thrown away before the visitor can ever click them. Wiring lives with each
+  // render call instead (wireClientSidebarButtons / renderLandmarkCategoryNav's own
+  // `.addEventListener` loop) so it can never go stale relative to what's on screen.
   els.catBackBtn?.addEventListener('click', (e) => {
     e.stopPropagation();
     touch();
     applyCategoryFilter('ALL');
     if (els.catLevel2) els.catLevel2.hidden = true;
     if (els.catLevel1) els.catLevel1.hidden = false;
-  });
-
-  els.catNav?.querySelectorAll('.cat-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      touch();
-      applyCategoryFilter(btn.dataset.cat);
-    });
+    updateLegendVisibility();
   });
 
   els.fsToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
@@ -1212,9 +1296,10 @@ function wireViewControls() {
   els.autoPanToggle?.addEventListener('click', (e) => {
     e.stopPropagation();
     state.autoPan = !state.autoPan;
-    els.autoPanToggle?.classList.toggle('is-active', state.autoPan);
+    updateAutoPanToggleUI();
   });
 
+  updateAutoPanToggleUI();
   new ResizeObserver(debounce(onResize, 120)).observe(els.pano);
 }
 
@@ -1248,6 +1333,11 @@ function animateCameraTo(targetLon, targetLat, targetFov = null) {
 function isLandmarkMatchCategory(lm, cat) {
   if (!lm || !cat || cat === 'ALL') return true;
   const c = String(cat).toUpperCase();
+  // An explicit `category` is AUTHORITATIVE and short-circuits everything below. The icon
+  // rules underneath are inference for landmarks that carry no category; letting them also
+  // apply to one that does would file it in two places at once — D Mart is `mall`, which
+  // infers COMMERCIAL, but the project it was imported from files it under LIFESTYLE.
+  if (lm.category) return String(lm.category).toUpperCase() === c;
   const icon = String(lm.icon || '').toLowerCase();
   const label = String(lm.label || lm.name || '').toLowerCase();
 
@@ -1284,6 +1374,59 @@ function isLandmarkShown(lm, cat) {
   return isLandmarkMatchCategory(lm, c);
 }
 
+// The known category names icon/keyword inference can produce (kept in sync with the
+// branches inside isLandmarkMatchCategory). Used to find a landmark's own effective
+// category by testing each candidate through the SAME matcher everything else uses,
+// rather than re-deriving the icon/keyword rules a second time.
+const KNOWN_LANDMARK_CATEGORIES = ['CONNECTIVITY', 'HEALTHCARE', 'EDUCATION', 'COMMERCIAL', 'LIFESTYLE', 'TEMPLE'];
+
+// A landmark's own category, whether it was explicitly set (authoritative) or only
+// implied by its icon/label (today's admin UI has no Category field, so most landmarks
+// only ever get a category this way). Used to group landmarks under a category header —
+// e.g. in the admin's built-in LANDMARKS menu row — even for the ones nobody has
+// explicitly filed yet.
+function effectiveLandmarkCategory(lm) {
+  if (lm && lm.category) return String(lm.category).trim();
+  for (const c of KNOWN_LANDMARK_CATEGORIES) { if (isLandmarkMatchCategory(lm, c)) return c; }
+  return 'UNCATEGORIZED';
+}
+
+// Every category currently present across this project's landmarks, in first-seen
+// order, each with the landmarks filed under it. This is the ONE place both the
+// client's landmark category picker (#catNav) and the admin's built-in LANDMARKS menu
+// row read from — so a landmark the admin adds, or a category they rename, shows up in
+// both without either needing to be told about the other.
+function getLandmarkCategories() {
+  const order = [], byName = new Map();
+  state.landmarks.forEach((lm) => {
+    const name = effectiveLandmarkCategory(lm);
+    if (!byName.has(name)) { byName.set(name, []); order.push(name); }
+    byName.get(name).push(lm);
+  });
+  return order.map((name) => ({ name, landmarks: byName.get(name), count: byName.get(name).length }));
+}
+
+// Renames a category everywhere at once: every landmark currently filed under `oldName`
+// (explicitly or by inference) gets an EXPLICIT `category = newName`, which is what makes
+// the rename stick even for landmarks that only ever had an inferred category before.
+// Confirmed behaviour: renaming "Education" to "School" moves every landmark that was
+// under Education (however it got there) into "School", everywhere the category is used
+// (admin Landmarks tab, the client picker, camera framing) — not a cosmetic label swap.
+function renameLandmarkCategory(oldName, newName) {
+  const clean = String(newName || '').trim();
+  if (!clean || clean === oldName) return;
+  let changed = false;
+  state.landmarks.forEach((lm) => {
+    if (effectiveLandmarkCategory(lm) === oldName) { lm.category = clean; changed = true; }
+  });
+  if (!changed) return;
+  rebuildLandmarkDOM();
+  refreshLmList();
+  renderLandmarks();
+  renderLandmarkCategoryNav();
+  onLandmarksChanged();
+}
+
 // Bounding arc (in state.view.lon's radian convention) of a set of directions,
 // found via the largest-empty-gap method so it's correct even when the landmarks
 // straddle the ±180° seam. Also returns the actual direction vector at each end
@@ -1308,7 +1451,8 @@ const LANDMARK_SWAY_HALF = 3.5 * Math.PI / 180; // idle amplitude when a categor
 // sweep is timed instead of speed-capped: whatever the arc's width, one pass takes this
 // long, which keeps every project's tour equally readable. The gentle sway of a category
 // that DOES fit still uses the ambient rate — it's ambience, not a tour.
-const LANDMARK_SWEEP_MS = 24000;                // one-way traverse time for a swept category
+const LANDMARK_SWEEP_MS = 30000;                // cap: one full left-to-right pass never takes longer than this
+const LANDMARK_SWEEP_MIN_RATE = (2.0 * Math.PI / 180) / 1000;  // rad/ms == 2 deg/s, the reference tour's own drift pace
 
 function computeLandmarkPanRange(dirs) {
   if (!dirs.length) return null;
@@ -1354,10 +1498,85 @@ function computeLandmarkPanRange(dirs) {
   return { fits: false, sweepMin: minLon - LANDMARK_EDGE_PAD, sweepMax: maxLon + LANDMARK_EDGE_PAD, minLon, maxLon, minDir, maxDir };
 }
 
+// ─── Matching the reference tour's landmark framing ──────────────────────────────
+// The project this one is modelled on frames EVERY landmark category at a constant
+// horizontal FOV of 110 and simply points somewhere sensible — it never zooms per category
+// and never sweeps. Two things follow.
+//
+// (1) hfov is HORIZONTAL; three.js `camera.fov` is VERTICAL. A single hard-coded vertical
+//     number cannot match on more than one screen shape: hfov 110 is vfov 77.5 on a 16:9
+//     desktop but 66.8 on a 844x390 landscape phone. So the horizontal value is what's
+//     stored, and the vertical is derived from the live aspect ratio.
+// (2) their camera angles are hand-authored, so no formula reproduces them exactly.
+//     Measured against all five of their categories, aiming at the TIGHTEST CLUSTER of a
+//     category's landmarks averages 12.1 deg of error, versus 20.8 for the bounding-arc
+//     midpoint (which lands 52 deg out on a category with one far-flung outlier) and 18.7
+//     for the plain circular mean. Cluster it is.
+const LANDMARK_HFOV = 110;
+function vfovFromHfov(hfovDeg) {
+  const rect = els.pano ? els.pano.getBoundingClientRect() : null;
+  const aspect = (rect && rect.width > 0 && rect.height > 0) ? rect.width / rect.height
+    : (three && three.camera.aspect ? three.camera.aspect : 16 / 9);
+  const v = 2 * Math.atan(Math.tan(hfovDeg * Math.PI / 360) / aspect) * 180 / Math.PI;
+  return Math.max(FOV_MIN, Math.min(FOV_MAX, v));
+}
+function angDelta(a, b) { let d = a - b; while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU; return d; }
+
+// Centre of the widest-populated window: the frame that holds the most of this category's
+// landmarks, tie-broken toward the tightest one. An outlier on the far side of the sphere
+// is left out of shot rather than dragging the camera to a midpoint that shows neither
+// group — which is exactly the judgement a person makes by hand.
+function landmarkClusterCentre(dirs, windowDeg) {
+  const lons = dirs.map(viewLonFromDir);
+  if (lons.length <= 1) return lons[0] || 0;
+  const half = windowDeg * Math.PI / 360;
+  let best = null;
+  for (const seed of lons) {
+    for (let k = -1; k <= 1; k++) {
+      const centre = seed + k * half;                       // window anchored on, or edged against, each landmark
+      const inside = lons.filter((v) => Math.abs(angDelta(v, centre)) <= half + 1e-9);
+      if (!inside.length) continue;
+      const span = Math.max(...inside.map((v) => Math.abs(angDelta(v, centre))));
+      const key = inside.length * 1000 - span * 180 / Math.PI;
+      if (!best || key > best.key) best = { key, inside };
+    }
+  }
+  const ref0 = best.inside[0];                              // average the winners, so the aim sits on the group
+  return ref0 + best.inside.reduce((t, v) => t + angDelta(v, ref0), 0) / best.inside.length;
+}
+
 function meanDirection(dirs) {
   const mean = new THREE.Vector3();
   dirs.forEach((v) => mean.add(v));
   return mean.divideScalar(dirs.length).normalize();
+}
+
+// Rebuilds the client's Landmarks category picker (#catNav) from the real data every
+// time. It used to be static markup in index.html (a fixed HEALTHCARE/EDUCATION/
+// COMMERCIAL/CONNECTIVITY/LIFESTYLE/TEMPLE list, identical for every project, wired
+// once at boot in wireViewControls) — a project whose landmarks used any other category
+// name simply had no button to reach it. Called from setLandmarks() (boot, file/session
+// load) and onLandmarksChanged() (any admin edit), so it can never drift from what
+// isLandmarkMatchCategory actually groups things into.
+function renderLandmarkCategoryNav() {
+  if (!els.catNav) return;
+  const cats = getLandmarkCategories();
+  let html = '<button class="cat-btn is-active" type="button" data-cat="ALL">ALL LANDMARKS</button>';
+  cats.forEach((c) => { html += `<button class="cat-btn" type="button" data-cat="${esc(c.name)}">${esc(c.name.toUpperCase())}</button>`; });
+  els.catNav.innerHTML = html;
+  els.catNav.querySelectorAll('.cat-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.lastUserTouch = Date.now();
+      applyCategoryFilter(btn.dataset.cat);
+    });
+  });
+  // Keep the active highlight correct across a rebuild mid-selection (e.g. a category
+  // rename while a visitor... never happens client-side, but admin previews/edits can
+  // trigger this while ALL/a category is already selected).
+  els.catNav.querySelectorAll('.cat-btn').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.dataset.cat === (state.selectedCategory || 'ALL'));
+  });
 }
 
 // Opens the drawer straight to the Landmarks category picker — same steps as tapping
@@ -1368,8 +1587,34 @@ function openLandmarksCategoryPicker() {
   if (els.catToggleIco) els.catToggleIco.textContent = '‹';
   if (els.catLevel1) els.catLevel1.hidden = true;
   if (els.catLevel2) els.catLevel2.hidden = false;
+  updateLegendVisibility();
   state.autoPan = true;
   applyCategoryFilter('ALL');
+}
+
+// The synthetic "folder" both openVirtualTourPicker (below) and openClientPanoTour (the
+// takeover itself, so the drawer stays anchored to this section for as long as ANY tour
+// is open — see its own comment) push onto state.menuNavStack: one row per tour, built
+// live from state.tours rather than authored into menuConfig.tree.
+// renderClientSidebar's submenu click handler falls back to searching a pushed parent's
+// own `children` when findNodeInfo can't find a node in the real tree, which is what
+// makes a synthetic (non-authored) parent like this work at all.
+function virtualTourPickerNode() {
+  return {
+    id: '__virtualtour_picker__',
+    title: 'VIRTUAL TOUR',
+    children: state.tours.map((t) => ({ id: `virtualtour-${t.id}`, kind: 'child', contentType: 'panotour', title: t.name || 'Untitled tour', content: { tourId: t.id } }))
+  };
+}
+// The VIRTUAL TOUR built-in's client-side analogue of the landmarks category picker,
+// for whatever tours exist in state.tours (see ensureBuiltinNodes). Reuses the generic
+// Level-2/3 "drilled-in parent" navigation (the same one an authored folder with 2+
+// children uses).
+function openVirtualTourPicker() {
+  els.catDrawer?.classList.remove('is-collapsed');
+  if (els.catToggleIco) els.catToggleIco.textContent = '‹';
+  state.menuNavStack = [virtualTourPickerNode()];
+  renderClientSidebar();
 }
 
 // `moveCamera:false` re-applies only the highlight/dim styling for the current
@@ -1431,15 +1676,24 @@ function applyCategoryFilter(cat, { moveCamera = true } = {}) {
   const targetList = state.selectedCategory === 'ALL' ? state.landmarks.filter(isLandmarkDefaultVisible) : matched;
 
   if (targetList.length > 0 && three) {
-    const validDirs = [];
-    targetList.forEach((l) => {
-      const pos = l.banner || l.hotspot;
-      if (!pos) return;
+    // Aim at the MIDPOINT of each landmark's banner and pin, not at the banner. The banner
+    // floats well above its pin (16 deg apart, matching the reference's banner+leader
+    // graphic), so aiming at banners alone tilts the camera up into empty sky and pushes
+    // the pins off the bottom of the frame. The midpoint is the graphic's centre, which is
+    // exactly what the reference's own category cameras point at (their pitches run -0.3
+    // to -3.2, i.e. level, not up at the labels).
+    const ll = (pos) => {
+      if (!pos) return null;
       const lon = pos.lon != null ? pos.lon : (pos.lonDeg != null ? pos.lonDeg : null);
       const lat = pos.lat != null ? pos.lat : (pos.latDeg != null ? pos.latDeg : null);
-      if (isFinite(lon) && isFinite(lat)) {
-        validDirs.push(dirFromLonLat(lon, lat));
-      }
+      return (isFinite(lon) && isFinite(lat)) ? { lon, lat } : null;
+    };
+    const validDirs = [];
+    targetList.forEach((l) => {
+      const b = ll(l.banner), h = ll(l.hotspot);
+      const a = b || h; if (!a) return;
+      const other = (b && h) ? h : a;
+      validDirs.push(dirFromLonLat(a.lon, (a.lat + other.lat) / 2));
     });
 
     // A specific category (not ALL) constrains the view to that category's own arc
@@ -1447,36 +1701,52 @@ function applyCategoryFilter(cat, { moveCamera = true } = {}) {
     // already fits in one frame, the camera frames the group and holds (gentle sway
     // only) — no sweep. Only a category that genuinely can't fit in one frame sweeps,
     // sized to its real leftmost/rightmost extent.
-    const panInfo = state.selectedCategory !== 'ALL' ? computeLandmarkPanRange(validDirs) : null;
-
-    if (panInfo && panInfo.fits) {
-      // Aim at the midpoint of the ARC, not at the mean of the direction vectors. The
-      // fit decision (and the FOV it picks) is derived from [minLon,maxLon], so centring
-      // on anything else can leave an edge landmark outside the very frame the fit
-      // calculation promised would hold it — real case: a 3-landmark category whose
-      // vector mean sat 12.9 degrees off the arc centre, pushing one landmark out of a
-      // frame wide enough for all three. Latitude still comes from the mean: there's no
-      // seam to straddle vertically, so the average height is the right one to look at.
+    // Constant framing, like the reference: aim at the category's tightest cluster at a
+    // fixed 110 horizontal FOV. No fit-or-sweep any more — that zoomed differently for
+    // every category (55 to 117 vertical) and panned across the wide ones, neither of
+    // which the reference does.
+    if (state.selectedCategory !== 'ALL') {
+      const fovDeg = vfovFromHfov(LANDMARK_HFOV);
       const mean = meanDirection(validDirs);
-      const targetLon = (panInfo.minLon + panInfo.maxLon) / 2;
       const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(mean.y, -1, 1)));
-      state.landmarkPanRange = { sweepMin: targetLon - LANDMARK_SWAY_HALF, sweepMax: targetLon + LANDMARK_SWAY_HALF };
-      animateCameraTo(targetLon, targetLat, panInfo.fovDeg);
+      let targetLon = landmarkClusterCentre(validDirs, LANDMARK_HFOV);
+
+      // The frame is a CONSTANT 110 horizontal (reference parity), so a category wider than
+      // that has landmarks outside it no matter where we aim. Those must stay reachable:
+      // with only the +-3.5 sway below, the updateCamera clamp locks the view to a 7-degree
+      // window and an outlying landmark can never be seen at all (Connectivity spans 136
+      // and had 1 of 4 stranded). So a category that doesn't fit SWEEPS its real extent,
+      // at the same fixed zoom; one that already fits keeps the gentle sway, since there
+      // is nothing to reveal.
+      // EVERY category pans across its own landmarks, leftmost to rightmost — the camera
+      // centre travels from one end landmark to the other, so each in turn comes to the
+      // middle of frame. This deliberately DIVERGES from the reference, which holds a fixed
+      // shot and never sweeps: asked for twice, explicitly. The zoom stays at the
+      // reference's hfov 110; only the motion differs.
+      // Previously this swept only when a category was too wide to fit in one frame, which
+      // left 4 of 6 categories with nothing but a 7-degree sway — imperceptible, and read
+      // as "the camera isn't panning".
+      const arc = computeLandmarkPanRange(validDirs);
+      if (arc && arc.maxLon > arc.minLon) {
+        const lo = arc.minLon - LANDMARK_EDGE_PAD;
+        const hi = arc.maxLon + LANDMARK_EDGE_PAD;
+        // Pace: the reference's ~2 deg/s, but never slower than a full pass in
+        // LANDMARK_SWEEP_MS, so a wide category doesn't crawl for minutes.
+        const width = Math.abs(hi - lo);
+        state.landmarkPanRange = { sweepMin: lo, sweepMax: hi,
+          radPerMs: Math.max(LANDMARK_SWEEP_MIN_RATE, width / LANDMARK_SWEEP_MS) };
+        // Open on the reference-matched framing, then drift; clamped in so the range can't
+        // yank it on the first idle frame.
+        let t = targetLon;
+        const mid = (lo + hi) / 2;
+        while (t - mid > Math.PI) t -= TAU;
+        while (mid - t > Math.PI) t += TAU;
+        targetLon = Math.min(hi, Math.max(lo, t));
+      } else {
+        state.landmarkPanRange = { sweepMin: targetLon - LANDMARK_SWAY_HALF, sweepMax: targetLon + LANDMARK_SWAY_HALF };
+      }
+      animateCameraTo(targetLon, targetLat, fovDeg);
       state.autoPanDir = 1;
-    } else if (panInfo) {
-      // Start at one end of the arc and pan across to the other. Now that the range is
-      // in CAMERA lon (see viewLonFromDir — it used to be built in the mirrored stored-lon
-      // convention), `sweepMin` is the arc's visual LEFT edge and increasing lon pans
-      // rightward, so the tour reads left-to-right. Measured, not assumed: at `sweepMin`
-      // every visible landmark of a real 5-landmark category sat in the left half of the
-      // frame. If you ever flip a lon convention here again, re-measure this — the old
-      // comment claimed the exact opposite and was silently stale.
-      state.landmarkPanRange = { sweepMin: panInfo.sweepMin, sweepMax: panInfo.sweepMax,
-        radPerMs: Math.abs(panInfo.sweepMax - panInfo.sweepMin) / LANDMARK_SWEEP_MS };
-      const targetLon = panInfo.minLon;
-      const targetLat = clampLat(Math.asin(THREE.MathUtils.clamp(panInfo.minDir.y, -1, 1)));
-      animateCameraTo(targetLon, targetLat, LANDMARK_SWEEP_FOV);
-      state.autoPanDir = 1; // left edge → right edge first
     } else if (validDirs.length > 0) {
       state.landmarkPanRange = null;
       const mean = meanDirection(validDirs);
@@ -1503,7 +1773,9 @@ function setAudioMutedPref(m) { try { localStorage.setItem(AUDIO_MUTED_KEY, m ? 
 
 function updateAudioToggleUI() {
   if (!els.audioToggle) return;
-  els.audioToggle.textContent = state.audioPlaying ? '\u{1F50A}' : '\u{1F507}';
+  // The button holds an inline SVG whose on/off halves swap via the is-active class
+  // set below - do NOT write textContent here: that replaces the whole icon with a
+  // character and loses it (which is exactly what happened on the first pass).
   els.audioToggle.classList.toggle('is-active', state.audioPlaying);
   els.audioToggle.title = hasSiteAudio()
     ? (state.audioPlaying ? 'Mute the background music' : 'Play the background music')
@@ -1716,6 +1988,24 @@ function renderLegend(counts) {
   // Landscape's compact stand-in for the header legend (hidden there, see styles.css) —
   // keep all three counts in sync the same way the header chips just were.
   syncZoomStatusButtons(counts);
+}
+
+// The Available/Reserved/Sold legend describes PLOT status and only makes sense while
+// looking at the actual plot map — not while browsing LANDMARKS (a picker over the same
+// pano, but the visitor's attention is on landmark categories, not plot filtering) and
+// not inside a VIRTUAL TOUR (a different pano entirely, with no plots to filter). Hidden
+// there, shown again back on the base aerial view. Checked structurally (tour state +
+// which drawer level is on screen) rather than a separately-tracked flag, so it can never
+// drift out of sync with what the drawer is actually showing.
+function isAerialSectionActive() {
+  return !state.tourView
+    && (!els.catLevel2 || els.catLevel2.hidden !== false)
+    && (state.menuNavStack || []).length === 0;
+}
+function updateLegendVisibility() {
+  const show = isAerialSectionActive();
+  els.legend?.classList.toggle('is-hidden', !show);
+  els.zoomStatusGroup?.classList.toggle('is-hidden', !show);
 }
 
 // The landscape status chips mirror the header legend's state; kept in one place so the
@@ -2048,20 +2338,76 @@ function hideRotateHint() {
 }
 
 function showNotice(msg) { els.notice.innerHTML = `<strong>Heads up:</strong> ${msg}`; els.notice.hidden = false; clearTimeout(showNotice._t); showNotice._t = setTimeout(() => { els.notice.hidden = true; }, 9000); }
-function setSync(src) { const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); els.syncMeta.textContent = `${state.rows.size} plots · ${src} · synced ${t}`; }
-async function refresh() { els.refreshBtn.disabled = true; try { const src = await loadData(); applyData(); setSync(src); } catch (err) { showNotice(err.message); } finally { els.refreshBtn.disabled = false; } }
 
 // ─── Alignment: load / save / admin UI ────────────────────────────────────────
 // An alignment = the overlay transform PLUS the camera view, so the client
 // reproduces exactly what the admin set up (WYSIWYG) instead of re-framing.
 function getMenuTree() {
   state.menuConfig = state.menuConfig || {};
-  if (Array.isArray(state.menuConfig.tree) && state.menuConfig.tree.length > 0) {
-    return state.menuConfig.tree;
+  if (!(Array.isArray(state.menuConfig.tree) && state.menuConfig.tree.length > 0)) {
+    state.menuConfig.tree = migrateLegacyMenuConfig(state.menuConfig);
   }
-  const migrated = migrateLegacyMenuConfig(state.menuConfig);
-  state.menuConfig.tree = migrated;
-  return migrated;
+  return ensureBuiltinNodes();
+}
+
+// AERIAL VIEW and LANDMARKS have been, in order: hardcoded client rows (pre-2026-09-08,
+// every project carried them with no way to turn off) → ordinary authored nodes an admin
+// had to add by hand (a fresh project silently lost them) → a `menuConfig.builtins` side
+// block, fixed always-first, draggable/deletable by nothing (2026-09-09). That third
+// version protected them but couldn't be reordered relative to authored items at all —
+// reported the same day: "even landmark and aerial view should be movable... whoever is
+// on top of the menu will be default even in presence of landmark and aerial view."
+// **Current design: they're ordinary tree nodes, `builtin: 'aerial'|'landmarks'` marking
+// which one, living wherever the admin has dragged them** — so they use every existing
+// node mechanism for free (drag-reorder via the existing dragstart/dragover/drop handlers
+// keyed on `data-node-id`, rename via the existing double-click-to-rename on
+// `.tree-title-text[data-node-id]`, position via plain array order) instead of needing
+// any of their own. Only two things are still special-cased: an `enabled` flag (the
+// ON/OFF switch — content that would need a link/upload has no such flag, but these two
+// have no content to configure, so "off" is a real, meaningful state) and NO delete
+// button (self-healing instead — see ensureBuiltinNodes).
+function builtinNodeExists(list, key) {
+  for (const n of list) {
+    if (n.builtin === key) return true;
+    if (n.kind === 'parent' && Array.isArray(n.children) && builtinNodeExists(n.children, key)) return true;
+  }
+  return false;
+}
+// Guarantees both builtin nodes exist SOMEWHERE in the tree, inserting a default at the
+// top exactly once per project if either is missing — which covers a brand-new project,
+// an older project saved under the previous `menuConfig.builtins` design (migrated using
+// its saved enabled/title so nothing resets), AND the edge case where a builtin node was
+// deleted as a side effect of deleting the folder it had been dragged into: rather than
+// guard every deletion path against that, it's simply allowed to happen and self-heals
+// back in on the next render. Idempotent — `builtinNodeExists` short-circuits once both
+// are present, so this is cheap to call from `getMenuTree()` on every access.
+// `builtin` key -> { contentType, defaultTitle }. The key and the contentType differ for
+// 'tour': the content type 'tour' is already taken (an EXTERNAL 3DVista/Kuula iframe), so
+// this built-in's own content type is 'virtualtour' — auto-discovers whichever tours
+// exist in state.tours, as opposed to an authored 'panotour' item pointing at one by id.
+const BUILTIN_DEFS = {
+  aerial: { contentType: 'aerial', title: 'AERIAL VIEW' },
+  landmarks: { contentType: 'landmarks', title: 'LANDMARKS' },
+  tour: { contentType: 'virtualtour', title: 'VIRTUAL TOUR' }
+};
+function ensureBuiltinNodes() {
+  const tree = state.menuConfig.tree;
+  const legacy = state.menuConfig.builtins || {};
+  Object.keys(BUILTIN_DEFS).forEach((key, i) => {
+    if (builtinNodeExists(tree, key)) return;
+    const def = BUILTIN_DEFS[key];
+    const legacyEntry = legacy[key] || {};
+    tree.splice(i, 0, {
+      id: `builtin-${key}`,
+      kind: 'child',
+      contentType: def.contentType,
+      title: (legacyEntry.title || '').toString().trim() || def.title,
+      builtin: key,
+      enabled: legacyEntry.enabled !== false,
+      content: { url: '', fileName: '' }
+    });
+  });
+  return tree;
 }
 
 function migrateLegacyMenuConfig(mc) {
@@ -2235,6 +2581,10 @@ function cleanNodeForSave(node) {
     if (clean.contentType === 'panotour') {
       clean.content.tourId = c.tourId || '';       // which tour in this project's tour.json
     }
+    if (node.builtin) {
+      clean.builtin = node.builtin;                // 'aerial' | 'landmarks' — see ensureBuiltinNodes
+      clean.enabled = node.enabled !== false;
+    }
   } else if (node.kind === 'contact') {
     const ct = node.contact || {};
     clean.contact = {
@@ -2250,10 +2600,10 @@ function cleanNodeForSave(node) {
 }
 
 function menuConfigData() {
-  const tree = getMenuTree();
-  return {
-    tree: tree.map(cleanNodeForSave).filter(Boolean)
-  };
+  // No separate `builtins` block any more — AERIAL VIEW/LANDMARKS are ordinary tree
+  // nodes now (see ensureBuiltinNodes), so cleanNodeForSave already carries their
+  // `builtin`/`enabled` fields through with everything else.
+  return { tree: getMenuTree().map(cleanNodeForSave).filter(Boolean) };
 }
 
 function parseAlignment(d) {
@@ -2268,10 +2618,11 @@ function parseAlignment(d) {
   const b = d && d.brand;
   const brand = b ? { name: (b.name || '').toString(), tagline: (b.tagline || '').toString(), logo: (b.logo && b.logo.file) ? b.logo.file : null, _ver: savedAt } : null;
   const au = d && d.audio; const audio = (au && au.file) ? { file: au.file, _ver: savedAt } : null;
+  const northDeg = (d && isFinite(+d.northDeg)) ? +d.northDeg : null;   // which stored lon is true north (compass)
   const dc = d && d.data, sh = dc && dc.sheet;                       // plot-data source (Google Sheet | committed file)
   const data = { enabled: !!(dc && dc.source === 'sheet'), url: (sh && sh.url || '').toString(), gid: (sh && sh.gid != null ? String(sh.gid) : '') };
   const menuConfig = d && d.menuConfig ? d.menuConfig : null;
-  return { transform, view, opacity, groundImage, panoImage, brand, audio, data, menuConfig, savedAt };
+  return { transform, view, opacity, groundImage, panoImage, brand, audio, northDeg, data, menuConfig, savedAt };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
   try { const res = await loadProjectFile('alignment.json'); if (!res || !res.ok) return null; return parseAlignment(await res.json()); }
@@ -2287,6 +2638,7 @@ function alignmentData() {
     ...(state.panoImage ? { panoImage: { file: state.panoImage.file } } : {}),
     ...(brandData() ? { brand: brandData() } : {}),
     ...(audioData() ? { audio: audioData() } : {}),
+    ...(state.northDeg ? { northDeg: +(+state.northDeg).toFixed(2) } : {}),
     ...(sheetData() ? { data: sheetData() } : {}),
     ...(menuConfigData() ? { menuConfig: menuConfigData() } : {}) };
 }
@@ -2339,7 +2691,7 @@ function buildSession() {                                // a complete snapshot 
     pano: state.panoBlob ? { name: state.panoName || 'pano.web.jpg', blob: state.panoBlob } : null,
     brandLogo: state.brand.logoBlob ? { name: state.brand.logoName || 'logo.web.png', blob: state.brand.logoBlob } : null,
     siteAudio: state.audio.blob ? { name: state.audio.name || 'audio.mp3', blob: state.audio.blob } : null,
-    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
+    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, category: l.category || null, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
     amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes, render: a.render, renderBlob: a.renderBlob || null, hotspot: { ...a.hotspot } })),
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null, defaultView: { ...n.defaultView } })),
@@ -3438,7 +3790,6 @@ function dxfToPlots(parsed, layer) {
 }
 
 // ─── Static controls ──────────────────────────────────────────────────────────
-els.refreshBtn.addEventListener('click', refresh);
 els.panelClose.addEventListener('click', closePanel);
 els.modalClose.addEventListener('click', closeModal);
 els.modal.querySelector('.modal-backdrop').addEventListener('click', closeModal);
@@ -3591,16 +3942,18 @@ function projectDir(dir, cam, W, H) {
   if (p.z > 1) return null;                               // behind the camera → hide
   return { x: (p.x * 0.5 + 0.5) * W, y: (-p.y * 0.5 + 0.5) * H };
 }
-// On a narrow PORTRAIT screen, showing every matching landmark at once causes heavy label
-// overlap (confirmed via screenshot — a density problem, not the edge-overflow one the
-// clamp below solves). Rather than attempt real collision-avoidance, portrait mobile caps
-// how many render at once: landmarks with a render image (renderSrc) are prioritized (an
-// existing signal for "the admin fleshed this one out"), the rest fill remaining slots in
-// existing order, and #lmOverflowHint (wired once in wireViewControls) surfaces a "+N more"
-// tap into the existing category picker so nothing is silently unreachable — applies on
-// both portrait and landscape phones (confirmed by screenshot: even ~844px-wide landscape
-// still overlaps badly with a dozen labels at full size), never on desktop or in admin.
-const LANDMARK_MOBILE_CAP = 6;
+// Mobile used to cap how many landmarks render at once (a density problem, not the
+// edge-overflow one the clamp below solves), hiding the rest behind a "+N more" tap into
+// the category picker. Removed 2026-09-10 at explicit request — "don't do that, let's
+// make the banner/font size small for mobile instead": every matching landmark now
+// renders on mobile exactly as it does on desktop, and decluttering is handled entirely
+// by the landscape-phone banner shrink in styles.css (kept small enough there specifically
+// because nothing is hidden here any more). `capSet`/`hiddenCount` stay in the code as
+// dead-but-harmless plumbing (the `if (capSet ...)` check below never fires since capSet
+// is always null) rather than restructuring the whole function for a `const CAP = null`
+// that's trivially re-enabled if density ever becomes a problem again at these smaller
+// sizes. #lmOverflowHint (still wired in wireViewControls) simply never shows any more.
+const LANDMARK_MOBILE_CAP = Infinity;
 function renderLandmarks() {
   if (!three || !els.landmarks || els.landmarks.hidden) return;
   const rect = els.pano.getBoundingClientRect(), W = rect.width, H = rect.height, cam = three.camera;
@@ -3669,6 +4022,7 @@ function applyLandmarkVisibility() {
   if (visible) renderLandmarks();
 }
 function onLandmarksChanged() {
+  renderLandmarkCategoryNav();   // category set may have gained/lost a member — keep the picker in sync
   if (state.admin) {
     scheduleSessionSave();
     clearTimeout(onLandmarksChanged._t);
@@ -3767,30 +4121,32 @@ function refreshLmList() {
     const head = document.createElement('div'); head.className = 'ax-lm-li-head';
     const ico = document.createElement('span'); ico.className = 'ax-lm-ico-sel'; ico.textContent = LM_ICONS[lm.icon] || LM_ICONS.place;
     const title = document.createElement('span'); title.className = 'ax-lm-title'; title.textContent = (lm.label || '').trim() || 'New landmark';
-    // TWO buttons, not one toggle. A single button showing the CURRENT state reads as an
-    // action ("tick this one to include it") when every landmark starts ticked, so going
-    // down the list clicking the ones you want silently turns them OFF -- exactly the
-    // inversion reported on 2026-09-04. Separate ✓ / ✕ buttons are idempotent: ✓ always
-    // means show, ✕ always means hide, clicking the active one changes nothing.
-    const grp = document.createElement('div'); grp.className = 'ax-lm-vis-grp'; grp.setAttribute('role', 'group');
-    grp.setAttribute('aria-label', 'Show by default: ' + ((lm.label || '').trim() || 'new landmark'));
-    const mkVis = (want, glyph, cls, tip) => {
-      const b = document.createElement('button'); b.type = 'button';
-      b.className = 'ax-lm-vis ' + cls + ((shown === want) ? ' is-active' : '');
-      b.textContent = glyph; b.title = tip; b.setAttribute('aria-pressed', String(shown === want));
-      b.addEventListener('click', (e) => { e.stopPropagation(); setLandmarkFeatured(lm, want); });
-      return b;
-    };
-    grp.append(
-      mkVis(true, '✓', 'ax-lm-vis-yes', 'SHOW this landmark by default — it appears in the client’s all-landmarks view.\nDoes NOT delete anything.'),
-      mkVis(false, '✕', 'ax-lm-vis-no', 'HIDE this landmark from the default view — it still appears when a visitor picks its category.\nDoes NOT delete anything.'));
-    const vis = grp;
+    // A real ON/OFF switch, not a plain button (2026-09-09, replacing the ✓/✕ button PAIR
+    // this control shipped with). The pair existed because a SINGLE button showing the
+    // current state reads as an action ("tick this one to include it") when every
+    // landmark starts ticked, so going down the list clicking the ones you want silently
+    // turns them OFF — the inversion reported on 2026-09-04. A switch sidesteps that the
+    // same way the pair did (ON always means shown, at a glance, regardless of what was
+    // clicked) without needing two separate buttons — requested explicitly to match the
+    // switch already used for the admin menu builder's built-in rows.
+    const vis = document.createElement('label'); vis.className = 'ui-switch ax-lm-vis-switch';
+    vis.title = shown
+      ? 'Shown by default — appears in the client’s all-landmarks view. Click to hide (still reachable via its category; does NOT delete it).'
+      : 'Hidden from the default view — still appears when a visitor picks its category. Click to show by default.';
+    const visInput = document.createElement('input'); visInput.type = 'checkbox'; visInput.className = 'ui-switch-input';
+    visInput.checked = shown;
+    visInput.setAttribute('aria-label', 'Show by default: ' + ((lm.label || '').trim() || 'new landmark'));
+    visInput.addEventListener('click', (e) => e.stopPropagation());
+    visInput.addEventListener('change', () => setLandmarkFeatured(lm, visInput.checked));
+    const visTrack = document.createElement('span'); visTrack.className = 'ui-switch-track';
+    const visThumb = document.createElement('span'); visThumb.className = 'ui-switch-thumb';
+    visTrack.appendChild(visThumb); vis.append(visInput, visTrack);
     const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×';
-    del.title = 'DELETE this landmark permanently.\nTo only keep it out of the default view, use the ✓ / ✕ button instead.';
+    del.title = 'DELETE this landmark permanently.\nTo only keep it out of the default view, use the switch instead.';
     del.setAttribute('aria-label', 'Delete landmark ' + ((lm.label || '').trim() || 'new landmark'));
     del.addEventListener('click', (e) => { e.stopPropagation(); deleteLandmark(lm.id); });
     head.append(ico, title, vis, del); li.appendChild(head);
-    li.addEventListener('click', (e) => { if (e.target.closest('.ax-lm-edit,.ax-lm-del,.ax-lm-vis-grp')) return; selectLandmark(lm.id === state.lmSel ? null : lm.id); });
+    li.addEventListener('click', (e) => { if (e.target.closest('.ax-lm-edit,.ax-lm-del,.ax-lm-vis-switch')) return; selectLandmark(lm.id === state.lmSel ? null : lm.id); });
     if (lm.id === state.lmSel) {
       const ed = document.createElement('div'); ed.className = 'ax-lm-edit';
       const sync = () => { const d = lmDom.get(lm.id); if (d) d.banner.innerHTML = lmBannerHTML(lm); ico.textContent = LM_ICONS[lm.icon] || LM_ICONS.place; title.textContent = (lm.label || '').trim() || 'New landmark'; onLandmarksChanged(); };
@@ -3843,12 +4199,13 @@ function parseLandmarks(d) {
   const ver = (d && d.savedAt) || '';                    // cache-bust token for committed render images
   return arr.map((l, i) => {
     const render = (l.render && l.render.file) ? l.render.file : (typeof l.render === 'string' ? l.render : null);
-    return { id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', featured: l.featured !== false, render, renderBlob: l.renderBlob || null, _ver: ver, hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot) };
+    return { id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', category: (l.category || '').toString().toUpperCase() || null, featured: l.featured !== false, render, renderBlob: l.renderBlob || null, _ver: ver, hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot) };
   }).filter((l) => l.hotspot && l.banner);
 }
 function buildLandmarksData() {
   return { version: 1, note: 'Build91 landmark hotspots', savedAt: new Date().toISOString(),
     landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, featured: l.featured !== false,
+      ...(l.category ? { category: l.category } : {}),
       ...(l.render ? { render: { file: l.render } } : {}), hotspot: { lonDeg: +l.hotspot.lon.toFixed(2), latDeg: +l.hotspot.lat.toFixed(2) }, banner: { lonDeg: +l.banner.lon.toFixed(2), latDeg: +l.banner.lat.toFixed(2) } })) };
 }
 async function loadLandmarksFile() {
@@ -3858,7 +4215,7 @@ function setLandmarks(list) {
   state.landmarks.forEach((l) => { if (l._url) { try { URL.revokeObjectURL(l._url); } catch {} } });
   state.landmarks = list || []; state.lmSel = null;
   lmSeq = state.landmarks.reduce((m, l) => { const n = parseInt(String(l.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(n) ? n : 0); }, 0);
-  rebuildLandmarkDOM(); refreshLmList(); applyLandmarkVisibility();
+  rebuildLandmarkDOM(); refreshLmList(); applyLandmarkVisibility(); renderLandmarkCategoryNav();
 }
 async function saveLandmarksAs() {
   const files = [['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json'],
@@ -4177,7 +4534,8 @@ function parseTours(d) {
       const dv = n.defaultView || {};
       return { id: (n.id || 'n' + (j + 1)).toString(), name: (n.name || '').toString() || ('Node ' + (j + 1)),
         pano, panoBlob: n.panoBlob || null, _ver: ver, _url: null,
-        defaultView: { lon: +(dv.lonDeg != null ? dv.lonDeg : dv.lon) || 0, lat: +(dv.latDeg != null ? dv.latDeg : dv.lat) || 0, fov: +dv.fov || 75 } };
+        defaultView: { lon: +(dv.lonDeg != null ? dv.lonDeg : dv.lon) || 0, lat: +(dv.latDeg != null ? dv.latDeg : dv.lat) || 0, fov: +dv.fov || 75,
+          facingDir: ['N', 'E', 'S', 'W'].includes(dv.facingDir) ? dv.facingDir : null } };
     }).filter((n) => n.id);
     const nodeIds = new Set(nodes.map((n) => n.id));
     const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot) }))
@@ -4190,7 +4548,8 @@ function buildToursData() {
   return { version: 1, note: 'Build91 virtual tours', savedAt: new Date().toISOString(),
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, ...(n.pano ? { pano: { file: n.pano } } : {}),
-        defaultView: { lonDeg: +(+n.defaultView.lon).toFixed(2), latDeg: +(+n.defaultView.lat).toFixed(2), fov: Math.round(+n.defaultView.fov || 75) } })),
+        defaultView: { lonDeg: +(+n.defaultView.lon).toFixed(2), latDeg: +(+n.defaultView.lat).toFixed(2), fov: Math.round(+n.defaultView.fov || 75),
+          ...(n.defaultView.facingDir ? { facingDir: n.defaultView.facingDir } : {}) } })),
       links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) } })) })) };
 }
 // every node pano blob still in memory (fresh import / session restore), for Export + session
@@ -4235,7 +4594,7 @@ async function addTourNodeFromFile(file) {
   const id = 'n' + (nodeSeqFor(t) + 1);
   const base = (file.name || 'node').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const node = { id, name: base || ('Node ' + (t.nodes.length + 1)), pano: `sample/tour-${t.id}-${id}.web.jpg`, panoBlob: out.blob, _ver: '', _url: null,
-    defaultView: { lon: 0, lat: 0, fov: 75 } };
+    defaultView: { lon: 0, lat: 0, fov: 75, facingDir: null } };
   t.nodes.push(node);
   if (!t.startNode) t.startNode = id;                    // first node is the entry point by default
   state.tourNodeSel = id; refreshTourList(); onToursChanged();
@@ -4341,14 +4700,39 @@ function refreshTourList() {
         }
         box.appendChild(addRow);
 
-        const dv = document.createElement('button'); dv.type = 'button'; dv.className = 'btn btn-ghost ax-tour-dv';
-        dv.textContent = '⌖ Set this view as the room’s start view';
-        dv.title = 'Visitors arriving in this room will face the direction you are looking now';
-        dv.addEventListener('click', (e) => { e.stopPropagation(); setTourNodeDefaultView(); });
+        // Two very differently-weighted actions used to share one identical style (same
+        // class, same ghost outline, both starting with an ambiguous glyph — ⌖ reads as
+        // a generic crosshair and ✕ reads as DELETE everywhere else in this sidebar,
+        // e.g. the node/hotspot × buttons right above it) with nothing to tell them
+        // apart at a glance. Now visually distinct: "set start view" is a gold
+        // save-flavoured action (🏠, this app's confirm colour), "back to plot map" is a
+        // plain, calm exit — a left arrow instead of ✕, so it can't be misread as a
+        // destructive action the way a "×" throughout this same panel already means.
+        // Each room's own pano has its own arbitrary "lon 0" — a direction picked here ties
+        // THAT room's coordinate system to a real-world compass bearing, independent of the
+        // main aerial pano's own (separately-set) northDeg. Saved alongside the start view
+        // itself since both describe "what does facing this way, right now, mean" — see
+        // tourGoTo's per-node state.northDeg calibration, which reads this back on arrival.
+        const dvRow = document.createElement('div'); dvRow.className = 'ax-tour-dvrow';
+        const dirLbl = document.createElement('span'); dirLbl.className = 'ax-tour-dirlbl'; dirLbl.textContent = 'Compass facing:';
+        const dirSel = document.createElement('select'); dirSel.className = 'ax-tour-dirsel';
+        dirSel.title = 'Which real-world direction the camera is facing right now — calibrates the compass for this room';
+        [['', 'Not set'], ['N', 'North'], ['E', 'East'], ['S', 'South'], ['W', 'West']]
+          .forEach(([val, label]) => { const o = document.createElement('option'); o.value = val; o.textContent = label; dirSel.appendChild(o); });
+        dirSel.value = here?.defaultView?.facingDir || '';
+        dirSel.addEventListener('click', (e) => e.stopPropagation());
+        dvRow.append(dirLbl, dirSel);
+        box.appendChild(dvRow);
+
+        const dv = document.createElement('button'); dv.type = 'button'; dv.className = 'btn btn-primary ax-tour-dv';
+        dv.textContent = '🏠 Set as this room’s start view';
+        dv.title = 'Visitors arriving in this room will face the direction you are looking now, with the compass calibrated to the direction picked above';
+        dv.addEventListener('click', (e) => { e.stopPropagation(); setTourNodeDefaultView(dirSel.value); });
         box.appendChild(dv);
 
-        const ex = document.createElement('button'); ex.type = 'button'; ex.className = 'btn btn-ghost ax-tour-dv';
-        ex.textContent = '✕ Close viewer (back to the plot map)';
+        const ex = document.createElement('button'); ex.type = 'button'; ex.className = 'btn btn-ghost ax-tour-exit';
+        ex.textContent = '← Back to the plot map';
+        ex.title = 'Leaves this room and returns to the plot map — the tour itself is unaffected';
         ex.addEventListener('click', (e) => { e.stopPropagation(); closePanoTour(); refreshTourList(); });
         box.appendChild(ex);
 
@@ -4440,10 +4824,20 @@ function openClientPanoTour(tourId, title) {
   }
   if (!tour.nodes.length) { showNotice(`“${tour.name}” has no panoramas yet.`); return; }
   if (!three) return;
+  // Switching from an ALREADY-OPEN tour straight to this one is the one path where the
+  // plot map's own aerial pano would otherwise flash for a moment: closePanoTour (below)
+  // restores it synchronously, but the new tour's first room only loads asynchronously —
+  // the render loop keeps painting the aerial pano for however long that fetch takes.
+  // Reported 2026-09-09 ("small gap in which some aerial view is shown"). The curtain
+  // (also used at boot) hides that gap; it's only shown here, not on a fresh plot-map→
+  // tour entry, since that path has no prior tour texture to flash back to in the first
+  // place.
+  const switchingTours = !!state.tourView;
+  if (switchingTours) showBootCurtain();
   if (state.tourView) closePanoTour({ silent: true });
 
   state.tourView = { tourId, nodeId: null, title: title || tour.name, busy: false,
-    saved: { view: { ...state.view }, panoMap: three.pano.material.map } };
+    saved: { view: { ...state.view }, panoMap: three.pano.material.map, northDeg: state.northDeg } };
 
   // Takeover: everything that belongs to the plot map goes away for the duration.
   state.plots.forEach((p) => { p.group.visible = false; });
@@ -4455,9 +4849,20 @@ function openClientPanoTour(tourId, title) {
   document.body.classList.add('tour-open');
   if (els.tourLayer) els.tourLayer.hidden = false;
   if (els.tourBar) els.tourBar.hidden = false;
+  // While ANY tour is open — freshly entered from the plot map, or switched to from a
+  // different tour — the drawer stays anchored to the VIRTUAL TOUR section (the same
+  // picker list openVirtualTourPicker shows), not reset to the plot map's root menu.
+  // Reopening the drawer mid-tour, or switching from this tour to another, should never
+  // unexpectedly drop the visitor back at the root — only actually EXITING the tour
+  // (closePanoTour) does that. Rebuilt fresh each time (not reused from whatever pushed
+  // it here) so it always reflects the current state.tours, e.g. if a tour was
+  // added/renamed since the last time this list was shown.
+  state.menuNavStack = [virtualTourPickerNode()];
+  renderClientSidebar();
 
   state.view.fov = 75;
-  tourGoTo(tour.startNode || tour.nodes[0].id, { instant: true });
+  const goPromise = tourGoTo(tour.startNode || tour.nodes[0].id, { instant: true });
+  if (switchingTours) goPromise.finally(hideBootCurtain);
 }
 function closePanoTour({ silent = false } = {}) {
   const tv = state.tourView; if (!tv) return;
@@ -4474,10 +4879,17 @@ function closePanoTour({ silent = false } = {}) {
   tourHsDom = [];
   if (tv.saved?.panoMap) { three.pano.material.map = tv.saved.panoMap; three.pano.material.needsUpdate = true; }
   if (tv.saved?.view) Object.assign(state.view, tv.saved.view);
+  if (tv.saved?.northDeg != null) state.northDeg = tv.saved.northDeg;   // restore the aerial's own calibration, not the last room's
   clampView(); requestRender();
   // Drop the tour's textures — the plot map has no use for them and they are the biggest
   // thing in VRAM. The committed background pano is untouched (it is not in this cache).
   tourTex.forEach((tex) => tex.dispose()); tourTex.clear(); tourInflight.clear();
+  // Exiting a tour always lands back on the DEFAULT menu (root), on both the admin and
+  // client "back/exit" buttons — both call this same function — rather than leaving the
+  // drawer wherever it was navigated to before the tour was entered (most commonly the
+  // VIRTUAL TOUR picker that was just used to get here).
+  state.menuNavStack = [];
+  renderClientSidebar();
   if (!silent) setAxStatus('');
 }
 
@@ -4522,6 +4934,15 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
     }
 
     tv.nodeId = node.id;
+    // Compass calibration is a per-ROOM constant (each pano has its own arbitrary "lon 0",
+    // unrelated to the main aerial pano's own northDeg) — set from the direction picked
+    // alongside this node's start view (see setTourNodeDefaultView), independent of the
+    // live camera yaw below, and reapplied on every arrival (walking a tour or jumping in
+    // fresh), not just on an instant entry. Uncalibrated rooms fall back to 0, matching the
+    // project's documented "uncalibrated ⇒ 0" default rather than leaking in whatever
+    // northDeg happened to be set for the aerial view or a previous room.
+    const dirDeg = { N: 0, E: 90, S: 180, W: 270 }[node.defaultView.facingDir];
+    state.northDeg = (dirDeg != null) ? (-(node.defaultView.lon || 0) - dirDeg) : 0;
     // Heading continuity: the visitor's facing direction is CARRIED OVER, not reset — a
     // node's defaultView is only applied on entry (instant), so walking a tour never
     // spins the camera under them. `state.view.lon` is a CAMERA yaw (see the two-lon-
@@ -4627,11 +5048,13 @@ function deleteTourHotspot(idx) {
   if (state.tourHsSel === idx) state.tourHsSel = null;
   rebuildTourHotspotDOM(); refreshTourList(); onToursChanged();
 }
-function setTourNodeDefaultView() {
+function setTourNodeDefaultView(facingDir) {
   const node = curTourNode(); if (!node) return;
-  node.defaultView = { lon: state.view.lon * 180 / Math.PI, lat: state.view.lat * 180 / Math.PI, fov: state.view.fov };
+  node.defaultView = { lon: state.view.lon * 180 / Math.PI, lat: state.view.lat * 180 / Math.PI, fov: state.view.fov,
+    facingDir: facingDir || null };
   onToursChanged(); refreshTourList();
-  setAxStatus(`Start view saved for <strong>${esc(node.name)}</strong> — visitors arrive facing this way.`);
+  const dirNote = facingDir ? ` (compass set to ${{ N: 'North', E: 'East', S: 'South', W: 'West' }[facingDir]})` : '';
+  setAxStatus(`Start view saved for <strong>${esc(node.name)}</strong> — visitors arrive facing this way${dirNote}.`);
 }
 
 // ─── Viewer chrome (node strip + exit) ──────────────────────────────────────
@@ -4841,7 +5264,7 @@ function menuRowOpensSubmenu(node) {
 
 // The single "visitor clicked a menu row" entry point, shared by the root list and the
 // submenu list so the two can't drift apart.
-function activateMenuNode(node, { fromRoot = false } = {}) {
+function activateMenuNode(node, { fromRoot = false, autoOpen = false } = {}) {
   if (!node) return;
   const target = resolveFolderTarget(node);
 
@@ -4860,7 +5283,7 @@ function activateMenuNode(node, { fromRoot = false } = {}) {
   }
   const info = findNodeInfo(target.node.id);
   if (target.action === 'images') openClientFolderImageModal(target.node, info);
-  else openNodeContent(target.node, info);
+  else openNodeContent(target.node, info, { autoOpen });
 }
 
 function renderClientSidebar() {
@@ -4872,31 +5295,35 @@ function renderClientSidebar() {
     if (els.catLevel1) els.catLevel1.hidden = false;
     if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
     if (els.catLevel2) els.catLevel2.hidden = true;
+    updateLegendVisibility();
 
     if (!els.catNavL1) return;
-    // The drawer is EXACTLY the menu the admin built — no built-in rows. "AERIAL VIEW"
-    // and "LANDMARKS" used to be hardcoded here, which meant a project that had authored
-    // no menu still showed two entries, and every project carried them whether or not
-    // they were wanted. Both remain reachable without a menu row: the ⊡ control recenters
-    // on the layout, and 📍 toggles landmarks (with the category picker on the pin/hint).
-    // If a project WANTS them in the drawer, they can be authored as menu items.
-    let html = '';
-    tree.forEach((node) => {
-      const title = (node.title || 'ITEM').trim().toUpperCase();
-      const drills = menuRowOpensSubmenu(node);
-      const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
-      html += `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
-    });
+    // AERIAL VIEW and LANDMARKS are ordinary tree nodes now (`node.builtin`, see
+    // ensureBuiltinNodes) — they render in whatever position the admin has dragged them
+    // to, via the exact same generic path as an authored item (openNodeContent already
+    // dispatches on contentType 'aerial'/'landmarks'). The only thing special about them
+    // here is `enabled` — an authored node has no such flag and is always shown, but a
+    // builtin's ON/OFF switch can hide it from the client without deleting it.
+    const html = tree
+      .filter((node) => node.enabled !== false)
+      .map((node) => {
+        const title = (node.title || 'ITEM').trim().toUpperCase();
+        const drills = menuRowOpensSubmenu(node);
+        const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
+        return `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
+      }).join('');
 
     els.catNavL1.innerHTML = html;
-    // Nothing authored ⇒ no drawer at all, rather than an empty panel over the panorama.
-    if (els.catDrawer && !state.admin) els.catDrawer.hidden = tree.length === 0;
+    // Nothing to show at all (every item disabled, or nothing authored) ⇒ no drawer,
+    // rather than an empty panel over the panorama.
+    if (els.catDrawer && !state.admin) els.catDrawer.hidden = !tree.some((node) => node.enabled !== false);
     wireClientSidebarButtons();
   } else {
     // Level 2 / Level 3: Drilled-in Parent Navigation
     if (els.catLevel1) els.catLevel1.hidden = true;
     if (els.catLevel2) els.catLevel2.hidden = true;
     if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = false;
+    updateLegendVisibility();
 
     const currentParent = stack[stack.length - 1];
     const container = $('catSubMenuNav');
@@ -4923,11 +5350,100 @@ function renderClientSidebar() {
         e.stopPropagation();
         const nodeId = btn.dataset.nodeId;
         const nodeInfo = findNodeInfo(nodeId);
-        if (!nodeInfo) return;
-        activateMenuNode(nodeInfo.node);
+        if (nodeInfo) { activateMenuNode(nodeInfo.node); return; }
+        // Not every pushed "parent" is a real authored folder — the built-in VIRTUAL TOUR
+        // row (see openNodeContent's 'virtualtour' branch) pushes a SYNTHETIC parent
+        // whose children are generated on the fly from state.tours, so they were never
+        // part of menuConfig.tree and findNodeInfo can't find them there. Fall back to
+        // the children array that's actually on screen.
+        const synthetic = children.find((c) => c.id === nodeId);
+        if (synthetic) activateMenuNode(synthetic);
       });
     });
   }
+}
+
+// Whatever renders as the very FIRST ENABLED row of the client menu — a builtin
+// (AERIAL VIEW/LANDMARKS) or an authored item, in whatever order the admin has actually
+// dragged them into, since builtins became ordinary movable tree nodes (2026-09-09) — is
+// the visitor's "default screen": it opens exactly as if they had tapped it. Client-only
+// (admin has its own sidebar and never sees this menu at all).
+//
+// Split into a decide step (this function) and a fire step (fireAutoOpen, below) because
+// firing it required different data depending on the target, and waiting for ALL of it
+// (landmarks + amenities + tours + the project-bar probe) before switching away from the
+// pano's default boot view made the default screen visibly flash the wrong thing first,
+// then jump — reported 2026-09-09. Each of the three fire call sites in init() now runs
+// the instant its OWN prerequisite is ready instead of all waiting for the last one:
+// a plain content item or a folder drill needs nothing but the menu tree (fires before
+// the pano even starts loading), the landmarks picker needs `state.landmarks` (fires
+// right after setLandmarks), and a `panotour` item needs `state.tours` (fires right after
+// setTours). Decided ONCE, early, so the two loading branches (landmarks/tours) know
+// whether they're the one that should act without re-deriving the menu logic each time.
+function computeAutoOpenTarget() {
+  if (state.admin) return null;
+  // A disabled builtin doesn't count as "on top" — the next enabled item does. Authored
+  // nodes have no `enabled` field at all and are always considered.
+  const top = getMenuTree().find((n) => n.enabled !== false);
+  if (!top) return null;
+  const resolved = resolveFolderTarget(top);
+  // AERIAL VIEW has no content of its own to "open" — clicking it resets the camera to a
+  // computed full-site overview. Firing that same reset on every load would FIGHT the
+  // admin's saved WYSIWYG opening shot (a deliberately preserved, heavily-relied-on
+  // contract — see "Client reproduces the saved view" in the architecture notes). The
+  // boot view already IS the intended default screen whenever aerial ends up on top, so
+  // there's nothing extra to do — this is the one content type that stays a permanent
+  // no-op here regardless of position.
+  if (resolved.action === 'open' && resolved.node.contentType === 'aerial') return null;
+  const needsLandmarks = resolved.action === 'open' && resolved.node.contentType === 'landmarks';
+  // Both an authored 'panotour' item and the built-in 'virtualtour' row read state.tours
+  // (the built-in via openVirtualTourPicker/openClientPanoTour, the authored item via
+  // openClientPanoTour directly), so both need to wait for the same fire point.
+  const needsTours = resolved.action === 'open' && (resolved.node.contentType === 'panotour' || resolved.node.contentType === 'virtualtour');
+  return { kind: needsLandmarks ? 'landmarks' : (needsTours ? 'panotour' : 'node'), node: top };
+}
+// Fires a target from computeAutoOpenTarget. `activateMenuNode` already dispatches on
+// contentType via openNodeContent (including 'landmarks' → openLandmarksCategoryPicker),
+// so every non-null target fires through the exact same single path a real tap uses —
+// nothing here can drift from what clicking the row actually does. `target.kind` only
+// ever mattered for WHEN to call this (see the three call sites in init()), not HOW.
+function fireAutoOpen(target) {
+  if (!target) return;
+  // autoOpen:true marks this as the "no real click behind it" case — the one thing that
+  // currently reads it is openClientVideoModal, which starts muted so the browser's
+  // autoplay policy doesn't silently block it (see its own comment).
+  activateMenuNode(target.node, { fromRoot: true, autoOpen: true });
+}
+
+// Reveals the pano/UI behind #bootCurtain (see index.html + styles.css). Idempotent —
+// safe to call more than once (e.g. the end-of-boot safety-net call after a specific
+// target already hid it earlier). Retiming autoOpenTarget's THREE fire points to be as
+// early as each one's own data allowed (2026-09-09) still wasn't enough on its own: the
+// pano itself renders the instant its texture decodes, so between THAT and whichever fire
+// point actually applies, the visitor briefly saw the untouched default view before the
+// switch — reported twice as "aerial shows first, then jumps." The curtain is what
+// actually fixes it: nothing is shown at all until the fire point for the CONFIGURED
+// target has already run, so there is nothing to see "switch" — the first frame the
+// visitor sees is already correct.
+let bootProgressDone = false;
+function hideBootCurtain() {
+  // The progress bar only describes the FIRST boot's loading — scoped off here so a later
+  // showBootCurtain() reuse (tour-to-tour switching) shows just the plain label again,
+  // not a stale "100%" bar sitting inside the reused curtain.
+  if (!bootProgressDone) {
+    bootProgressDone = true;
+    setBootProgress(100);
+    if (els.bootProgressWrap) els.bootProgressWrap.hidden = true;
+  }
+  els.bootCurtain?.classList.add('is-hidden');
+}
+// The same curtain, re-shown — used for more than boot now: switching from one virtual
+// tour straight to another (see openClientPanoTour) briefly restores the plot map's own
+// aerial pano while tearing the first tour down, before the second tour's first room has
+// loaded, which read as "the aerial view flashes for a moment." This hides that gap the
+// same way the curtain hides the equivalent one at boot.
+function showBootCurtain() {
+  els.bootCurtain?.classList.remove('is-hidden');
 }
 
 function wireClientSidebarButtons() {
@@ -4938,30 +5454,18 @@ function wireClientSidebarButtons() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       touch();
-      const act = btn.dataset.act;
       const nodeId = btn.dataset.nodeId;
-
-      if (act === 'landmarks') {
-        if (els.catLevel1) els.catLevel1.hidden = true;
-        if (els.catLevelSubMenu) els.catLevelSubMenu.hidden = true;
-        if (els.catLevel2) els.catLevel2.hidden = false;
-        state.autoPan = true;
-        applyCategoryFilter('ALL');
-      } else if (act === 'aerial') {
-        state.landmarkPanRange = null;   // leaving Landmarks — release the category arc
-        computeHome();
-        animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
-        state.autoPan = true;
-      } else if (nodeId) {
-        const nodeInfo = findNodeInfo(nodeId);
-        if (!nodeInfo) return;
-        activateMenuNode(nodeInfo.node, { fromRoot: true });
-      }
+      if (!nodeId) return;
+      const nodeInfo = findNodeInfo(nodeId);
+      if (!nodeInfo) return;
+      // AERIAL VIEW / LANDMARKS are ordinary nodes now — activateMenuNode's own dispatch
+      // (via openNodeContent) already handles their contentType, same as any other item.
+      activateMenuNode(nodeInfo.node, { fromRoot: true });
     });
   });
 }
 
-function openNodeContent(node, nodeInfo = null) {
+function openNodeContent(node, nodeInfo = null, { autoOpen = false } = {}) {
   if (!node) return;
   if (!nodeInfo) nodeInfo = findNodeInfo(node.id);
   if (node.kind === 'contact') {
@@ -4973,22 +5477,45 @@ function openNodeContent(node, nodeInfo = null) {
     const content = node.content || {};
 
     if (cType === 'video') {
-      openClientVideoModal(node.title || 'Video Player', content);
+      openClientVideoModal(node.title || 'Video Player', content, { autoOpen });
     } else if (cType === 'pdf') {
       openClientBrochureModal(content);
     } else if (cType === 'gallery') {
       openClientGalleryModal(content, 0);
     } else if (cType === 'landmarks') {
+      // Neither this nor 'aerial' below knew anything about a tour being open — clicking
+      // either while touring left the ROOM's pano showing and either force-unhid the
+      // landmark banners on top of it (this branch, via applyLandmarkVisibility inside
+      // openLandmarksCategoryPicker) or panned the camera around inside the room using
+      // plot-map geometry (the 'aerial' branch) — neither ever restored the actual plot
+      // map. closePanoTour() first (only if a tour is actually open) so both act on the
+      // REAL aerial pano, exactly like exiting the tour manually then clicking the same
+      // button would.
+      if (state.tourView) closePanoTour();
       openLandmarksCategoryPicker();          // was the hardcoded LANDMARKS drawer row
     } else if (cType === 'aerial') {
+      if (state.tourView) closePanoTour();
       state.landmarkPanRange = null;          // leaving a category — release its arc
-      computeHome();
-      animateCameraTo(state.home.lon, state.home.lat, FOV_MAX);
+      computeHome();                          // still used for its pitch/FOV (nadir, max zoom out)
+      animateCameraTo(northFacingLon(), state.home.lat, FOV_MAX);   // but face NORTH, not the layout centroid
       state.autoPan = true;
     } else if (cType === 'panotour') {
       // Our own multi-node walkthrough (takes over the viewer). Distinct from 'tour',
-      // which iframes an EXTERNAL tour (3DVista/Kuula) by URL or uploaded file.
+      // which iframes an EXTERNAL tour (3DVista/Kuula) by URL or uploaded file, AND from
+      // 'virtualtour' below (an AUTHORED item always points at one specific tour by id;
+      // the built-in row auto-discovers whichever tours currently exist).
       openClientPanoTour(content.tourId, node.title || 'Virtual Tour');
+    } else if (cType === 'virtualtour') {
+      // Built-in row (see ensureBuiltinNodes) — the client-side analogue of LANDMARKS'
+      // category picker, but for state.tours: no tours ⇒ a plain notice; exactly one ⇒
+      // open it directly (nothing to pick from); two or more ⇒ a picker submenu.
+      if (!state.tours.length) {
+        showNotice('This project has no virtual tours yet. Add one in the admin <strong>Tour</strong> tab.');
+      } else if (state.tours.length === 1) {
+        openClientPanoTour(state.tours[0].id, state.tours[0].name);
+      } else {
+        openVirtualTourPicker();
+      }
     } else if (cType === 'tour') {
       openClientTourModal(node.title || 'Virtual Tour', content);
     } else if (cType === 'image') {
@@ -5016,7 +5543,7 @@ function noteIfExternal(rawSrc, kind) {
   }
 }
 
-function openClientVideoModal(title, config) {
+function openClientVideoModal(title, config, { autoOpen = false } = {}) {
   let rawSrc = config.fileBlob ? URL.createObjectURL(config.fileBlob) : null;
   if (!rawSrc && config.fileName) {
     rawSrc = assetUrl(config.fileName);
@@ -5045,13 +5572,24 @@ function openClientVideoModal(title, config) {
       if (player) { player.style.display = 'none'; player.pause(); player.src = ''; }
       if (iframe) {
         iframe.style.display = 'block';
-        iframe.src = isYt ? getYoutubeEmbedUrl(rawSrc) : (isVim ? getVimeoEmbedUrl(rawSrc) : rawSrc);
+        iframe.src = isYt ? getYoutubeEmbedUrl(rawSrc, autoOpen) : (isVim ? getVimeoEmbedUrl(rawSrc, autoOpen) : rawSrc);
       }
     } else {
       if (iframe) { iframe.style.display = 'none'; iframe.src = 'about:blank'; }
       if (player) {
         player.style.display = 'block';
         player.src = rawSrc;
+        // A real click is itself the "user gesture" browsers require for unmuted
+        // autoplay, so a manually-opened video plays with sound as always. Opening as
+        // the client's DEFAULT SCREEN (autoOpen, fired at boot with no gesture behind
+        // it at all) has none of that — an unmuted play() there is silently rejected by
+        // the browser's autoplay policy and the video just sits paused, which is why a
+        // video-as-default-screen previously never actually autoplayed. Muting is what
+        // autoplay policies exempt, so that's the one case this starts muted; the
+        // player's own `controls` (index.html) let the visitor unmute with one tap.
+        // `muted` is set unconditionally each open — the element is reused, so a later
+        // manual open of a different video must not inherit a stale mute from this one.
+        player.muted = !!autoOpen;
         player.play().catch(() => {});
       }
     }
@@ -5349,26 +5887,27 @@ function openClientBrochureModal(b = {}) {
   els.clientBrochureModal.classList.add('open');
   els.clientBrochureModal.setAttribute('aria-hidden', 'false');
 
-  // Android Chrome has no inline PDF viewer (older builds especially) — it downloads the
-  // file instead of showing it, both in an <iframe> AND on a direct top-level navigation
-  // (verified on a real device: the server sends a correct `application/pdf` with no
-  // attachment header, and the same file previews fine on iOS, so it's purely a missing
-  // browser capability). Nothing done at the URL/markup level can fix that, so Android
-  // renders the pages with pdf.js instead. Everywhere else keeps the native viewer, which
-  // is a better experience (real text selection, pinch-zoom) where it actually works.
+  // All mobile browsers (Android AND iOS) use the pdf.js canvas renderer so PDFs:
+  //   1. Always open INSIDE the app modal — never redirect to a new browser tab
+  //   2. Work fully offline once downloaded (an <iframe src=pdf> would need network)
+  //   3. Are consistent across devices
+  // Android Chrome has no native inline PDF viewer at all (it downloads instead).
+  // iOS Safari CAN show PDFs in an iframe, but in standalone/PWA mode it breaks the
+  // app by opening the PDF in a separate browser tab, and offline it fails entirely.
+  // pdf.js solves both. Desktop keeps the native iframe viewer (real text selection,
+  // pinch-zoom, browser built-in controls) — that tradeoff is only right on a big screen.
   // The `.style.display` toggles below are deliberate rather than `.hidden` — both
   // elements carry an inline `display`, which would beat the `[hidden]` attribute (see
   // Conventions & gotchas).
   const canvasBox = $('clientBrochureCanvas');
-  if (/Android/i.test(navigator.userAgent) && canvasBox) {
+  if ((isMobilePortrait() || isMobileLandscape()) && canvasBox) {
     if (frame) { frame.removeAttribute('src'); frame.style.display = 'none'; }
     canvasBox.style.display = 'block';
     canvasBox.textContent = 'Loading brochure…';
     // A stalled render must never strand the visitor on "Loading brochure…", and a hang
     // isn't a rejection so the catch below can't cover it — hence an explicit deadline.
     // Whichever happens first wins: page 1 painting cancels the deadline; the deadline
-    // firing abandons the render and hands the PDF to the phone's own handling instead
-    // (which on Android means downloading it — not a preview, but never a dead end).
+    // firing falls back to opening the PDF in a new tab (last-resort, never a dead end).
     let abandoned = false;
     const giveUp = () => {
       if (abandoned) return;
@@ -5421,16 +5960,19 @@ function openClientContactModal(c = {}) {
 function isYoutubeUrl(url) {
   return /youtube\.com|youtu\.be/i.test(url || '');
 }
-function getYoutubeEmbedUrl(url) {
+function getYoutubeEmbedUrl(url, muted = false) {
   const m = (url || '').match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|watch\?.+&v=))([\w-]{11})/i);
-  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1` : url;
+  // A boot-time auto-open (see openClientVideoModal) has no user gesture behind it, and
+  // browser autoplay policies only exempt MUTED playback from that requirement — an
+  // unmuted iframe autoplay there would just silently sit paused.
+  return m ? `https://www.youtube.com/embed/${m[1]}?autoplay=1${muted ? '&mute=1' : ''}` : url;
 }
 function isVimeoUrl(url) {
   return /vimeo\.com/i.test(url || '');
 }
-function getVimeoEmbedUrl(url) {
+function getVimeoEmbedUrl(url, muted = false) {
   const m = (url || '').match(/vimeo\.com\/(?:video\/)?(\d+)/i);
-  return m ? `https://player.vimeo.com/video/${m[1]}?autoplay=1` : url;
+  return m ? `https://player.vimeo.com/video/${m[1]}?autoplay=1${muted ? '&muted=1' : ''}` : url;
 }
 
 // ─── Admin Tree View & Unified Node Builder Modal ─────────────────────────────
@@ -5476,6 +6018,85 @@ let wizardState = {
 
 // Collapsed folders set for scannability
 state.collapsedFolders = state.collapsedFolders || new Set();
+// Which built-in rows (aerial/landmarks) currently have their ▾ info panel open.
+state.expandedBuiltins = state.expandedBuiltins || new Set();
+
+// A built-in row (AERIAL VIEW / LANDMARKS) renders through the SAME recursive walk as any
+// authored node (renderNodeRow checks `node.builtin` and delegates here) so it drags and
+// drops with the existing node machinery — position is just array order, nothing special.
+// What IS still special: no delete button (self-healing instead, see ensureBuiltinNodes)
+// and an ON/OFF switch in place of the usual overflow menu (content nodes have no such
+// flag — these two have no content to configure, so "off" is a real, meaningful state).
+// The ▾ arrow expands a plain-language note on what the row does — for LANDMARKS it also
+// unfolds the live category → landmark list read straight from the Landmarks tab data
+// (see getLandmarkCategories), so an admin never has to author menu items to keep it in
+// sync with what's actually been placed.
+const BUILTIN_ICON = { aerial: '🧭', landmarks: '📍', tour: '🌐' };
+const BUILTIN_INFO = {
+  aerial: 'Flies the camera back to the full site aerial view. Needs no link or content of its own — a visitor just taps it to reset their view.',
+  landmarks: 'Opens the landmark category picker. The categories and landmarks listed below are read live from the Landmarks tab — add, remove or recategorize a landmark there and this list updates on its own.',
+  tour: 'Opens the project’s virtual tour(s). The list below is read live from the Tour tab — with exactly one tour it opens straight away; with several, a picker lets the visitor choose which to walk through.'
+};
+function renderBuiltinNodeRow(node, depth) {
+  const key = node.builtin;
+  const isOpen = state.expandedBuiltins.has(key);
+  const indent = (depth - 1) * 20;
+  const enabled = node.enabled !== false;
+  const title = (node.title || '').trim() || (BUILTIN_DEFS[key] ? BUILTIN_DEFS[key].title : key.toUpperCase());
+  return `
+    <div class="tree-node-row is-leaf is-builtin" data-node-id="${esc(node.id)}" data-is-folder="0" draggable="true" style="margin-left:${indent}px; ${depth > 1 ? 'border-left:2px solid rgba(250,204,21,0.35); padding-left:8px;' : 'padding-left:8px;'} display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:nowrap; box-sizing:border-box;">
+      <div style="display:flex; align-items:center; gap:5px; min-width:0; flex:1; overflow:hidden;">
+        <span class="tree-drag-handle">⠿</span>
+        <span class="builtin-expand-arrow ${isOpen ? 'is-open' : ''}" data-builtin-key="${esc(key)}" title="What does this do?">▾</span>
+        <span style="font-size:14px; flex-shrink:0;">${BUILTIN_ICON[key] || '⭐'}</span>
+        <span class="tree-title-text" data-node-id="${esc(node.id)}" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:text;" title="Double-click to rename">${esc(title)}</span>
+        <span class="tree-inline-tag" style="background:rgba(56,189,248,0.15); color:#38bdf8; border:1px solid rgba(56,189,248,0.3);">BUILT-IN</span>
+      </div>
+      <label class="ui-switch" title="${enabled ? 'Shown in the client menu — click to hide' : 'Hidden from the client menu — click to show'}">
+        <input type="checkbox" class="ui-switch-input builtin-node-switch" data-node-id="${esc(node.id)}" ${enabled ? 'checked' : ''}>
+        <span class="ui-switch-track"><span class="ui-switch-thumb"></span></span>
+      </label>
+    </div>
+    <div class="builtin-info-panel" data-builtin-key="${esc(key)}" style="margin-left:${indent + 18}px; ${isOpen ? '' : 'display:none;'}">
+      <p class="builtin-info-text">${esc(BUILTIN_INFO[key] || '')}</p>
+      ${key === 'landmarks' ? renderBuiltinLandmarkCategories() : ''}
+      ${key === 'tour' ? renderBuiltinTourList() : ''}
+    </div>
+  `;
+}
+
+function renderBuiltinLandmarkCategories() {
+  const cats = getLandmarkCategories();
+  if (!cats.length) return `<p class="builtin-cat-empty">No landmarks placed yet — add one on the Landmarks tab and its category appears here.</p>`;
+  return `<div class="builtin-cat-list">${cats.map((c) => `
+    <div class="builtin-cat-row" data-cat-name="${esc(c.name)}">
+      <span class="builtin-cat-title" data-cat-name="${esc(c.name)}" title="Double-click to rename this category — every landmark in it moves with the new name">${esc(c.name)}</span>
+      <span class="tree-inline-tag" style="background:rgba(250,204,21,0.15); color:var(--gold,#facc15); border:1px solid rgba(250,204,21,0.3);">${c.count}</span>
+    </div>
+    <div class="builtin-lm-sublist">${c.landmarks.map((lm) => `
+      <div class="builtin-lm-row" data-lm-id="${esc(lm.id)}" title="Click to open on the Landmarks tab · double-click the name to rename">
+        <span style="font-size:12px; flex-shrink:0;">${esc(LM_ICONS[lm.icon] || LM_ICONS.place)}</span>
+        <span class="builtin-lm-title" data-lm-id="${esc(lm.id)}">${esc((lm.label || '').trim() || 'Untitled')}</span>
+      </div>
+    `).join('')}</div>
+  `).join('')}</div>`;
+}
+
+// Distinct classes from the landmark rows above (not `.builtin-lm-row`/`.builtin-lm-title`)
+// — reusing those would also catch these rows in the LANDMARKS wiring block further down
+// (a blanket querySelectorAll('.builtin-lm-row')), sending a tour click to the Landmarks
+// tab with an undefined landmark id instead of the Tour tab with the right tour selected.
+function renderBuiltinTourList() {
+  const tours = state.tours;
+  if (!tours.length) return `<p class="builtin-cat-empty">No tours placed yet — add one on the Tour tab and it appears here.</p>`;
+  return `<div class="builtin-cat-list">${tours.map((t) => `
+    <div class="builtin-tour-row" data-tour-id="${esc(t.id)}" title="Click to open on the Tour tab · double-click the name to rename">
+      <span style="font-size:12px; flex-shrink:0;">🌐</span>
+      <span class="builtin-tour-title" data-tour-id="${esc(t.id)}">${esc((t.name || '').trim() || 'Untitled tour')}</span>
+      <span class="tree-inline-tag" style="background:rgba(250,204,21,0.15); color:var(--gold,#facc15); border:1px solid rgba(250,204,21,0.3); margin-left:auto;">${t.nodes.length} node${t.nodes.length === 1 ? '' : 's'}</span>
+    </div>
+  `).join('')}</div>`;
+}
 
 function renderAdminMenuTree() {
   const treeEl = $('projMenuBuilderDropdown');
@@ -5495,16 +6116,13 @@ function renderAdminMenuTree() {
     <div style="padding:10px; display:flex; flex-direction:column; gap:4px; max-height:450px; overflow-y:auto;" id="adminMenuTreeContainer">
   `;
 
-  if (!tree.length) {
-    html += `
-      <div style="padding:28px 16px; text-align:center; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.15); border-radius:10px; margin:4px 0;">
-        <div style="font-size:32px; margin-bottom:8px;">📂</div>
-        <p style="font-size:13px; font-weight:700; color:#f8fafc; margin:0 0 4px 0;">No menu items created yet</p>
-        <p style="font-size:11.5px; color:var(--text-mute,#94a3b8); margin:0 0 14px 0;">Click <strong>＋ Add Item</strong> to start building your client sidebar menu</p>
-        <button type="button" class="btn btn-primary" id="adminEmptyStateAddBtn" style="font-size:12px; padding:6px 14px; border-radius:6px;">＋ Create First Item</button>
-      </div>
-    `;
-  } else {
+  // ensureBuiltinNodes (getMenuTree) guarantees the two built-in rows always exist, so
+  // `tree` itself is never truly empty any more — "no menu items yet" now means no
+  // AUTHORED item exists besides them, and is a hint shown ALONGSIDE the built-in rows
+  // (still rendered — they're never hidden from the admin) rather than replacing them.
+  const hasAuthoredItems = tree.some((n) => !n.builtin);
+
+  {
     const kindIcons = {
       parent: '📁',
       contact: '📞',
@@ -5517,6 +6135,7 @@ function renderAdminMenuTree() {
     };
 
     const renderNodeRow = (node, depth, index, totalSiblings, parentId) => {
+      if (node.builtin) return renderBuiltinNodeRow(node, depth);
       let icon = '📄';
       if (node.kind === 'parent') icon = kindIcons.parent;
       else if (node.kind === 'contact') icon = kindIcons.contact;
@@ -5618,6 +6237,17 @@ function renderAdminMenuTree() {
     tree.forEach((rootNode, rIdx) => {
       html += renderNodeRow(rootNode, 1, rIdx, tree.length, 'root');
     });
+
+    if (!hasAuthoredItems) {
+      html += `
+        <div style="padding:28px 16px; text-align:center; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.15); border-radius:10px; margin:4px 0;">
+          <div style="font-size:32px; margin-bottom:8px;">📂</div>
+          <p style="font-size:13px; font-weight:700; color:#f8fafc; margin:0 0 4px 0;">No menu items created yet</p>
+          <p style="font-size:11.5px; color:var(--text-mute,#94a3b8); margin:0 0 14px 0;">Click <strong>＋ Add Item</strong> to start building your client sidebar menu</p>
+          <button type="button" class="btn btn-primary" id="adminEmptyStateAddBtn" style="font-size:12px; padding:6px 14px; border-radius:6px;">＋ Create First Item</button>
+        </div>
+      `;
+    }
   }
 
   html += `</div>`;
@@ -5706,6 +6336,127 @@ function renderAdminMenuTree() {
       e.stopPropagation();
       const nodeId = span.dataset.nodeId;
       if (nodeId) startInlineRename(nodeId);
+    });
+  });
+
+  // Generic swap-to-input rename, shared by a category name and an individual landmark
+  // name — the two renameable things inside the built-in LANDMARKS row's expansion that
+  // AREN'T a plain node title (the built-in row's own title is a real tree node now and
+  // already goes through the generic `.tree-title-text`/startInlineRename wiring just
+  // above). Structurally the same (swap span→input, Enter/blur commits, Escape cancels)
+  // but parameterised over WHAT gets saved, since each writes to a different place (a
+  // landmark's `category`, or its `label`).
+  const startGenericRename = (span, currentValue, onSave) => {
+    if (!span || span.tagName === 'INPUT') return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'tree-title-input';
+    input.value = currentValue;
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+    let finished = false;
+    const finish = (save) => {
+      if (finished) return;
+      finished = true;
+      const val = input.value.trim();
+      if (save && val && val !== currentValue) onSave(val);
+      else renderAdminMenuTree();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      else if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+    input.addEventListener('click', (e) => e.stopPropagation());
+  };
+
+  // Built-in ✓ switch — on/off, shown by default; off hides it from the client menu
+  // without losing anything (matches the featured-landmark switch precedent: never a
+  // delete). Just an ordinary field on the node now (`updateNode`, same path any other
+  // node edit goes through) rather than a separate menuBuiltins() config block.
+  treeEl.querySelectorAll('.builtin-node-switch').forEach((input) => {
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('change', (e) => {
+      e.stopPropagation();
+      updateNode(input.dataset.nodeId, { enabled: input.checked });
+      onAlignmentChanged();
+      renderClientSidebar();
+      renderAdminMenuTree();
+    });
+  });
+
+  // ▾ expand arrow — reveals a plain-language note on what the row does (and, for
+  // LANDMARKS, the live category/landmark list). Admin-only; never shown to the client.
+  treeEl.querySelectorAll('.builtin-expand-arrow').forEach((arrow) => {
+    arrow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = arrow.dataset.builtinKey;
+      if (state.expandedBuiltins.has(key)) state.expandedBuiltins.delete(key);
+      else state.expandedBuiltins.add(key);
+      renderAdminMenuTree();
+    });
+  });
+
+  // Category name inside the expanded LANDMARKS row — double-click to rename. Renaming
+  // moves EVERY landmark currently filed under it (see renameLandmarkCategory) — not a
+  // cosmetic label swap.
+  treeEl.querySelectorAll('.builtin-cat-title').forEach((span) => {
+    span.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const oldName = span.dataset.catName;
+      startGenericRename(span, oldName, (val) => renameLandmarkCategory(oldName, val));
+    });
+  });
+
+  // Individual landmark row inside a category — click jumps to it on the Landmarks tab
+  // (where the full editor already lives: label, distance, icon, render image);
+  // double-clicking the name renames it right here, same as any other menu title.
+  treeEl.querySelectorAll('.builtin-lm-row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const lmId = row.dataset.lmId;
+      treeEl.hidden = true;
+      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
+      setAdminTab('landmarks');
+      selectLandmark(lmId);
+    });
+  });
+  // The name itself stops its click from reaching the row (which jumps to the Landmarks
+  // tab) so double-clicking it to rename doesn't fire that jump on the first click.
+  treeEl.querySelectorAll('.builtin-lm-title').forEach((span) => {
+    span.addEventListener('click', (e) => e.stopPropagation());
+    span.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const lmId = span.dataset.lmId;
+      const lm = state.landmarks.find((l) => l.id === lmId);
+      if (!lm) return;
+      startGenericRename(span, (lm.label || '').trim(), (val) => { lm.label = val; onLandmarksChanged(); renderAdminMenuTree(); });
+    });
+  });
+
+  // Individual tour row inside the expanded VIRTUAL TOUR row — same pattern as a
+  // landmark row above: click jumps to it on the Tour tab (where node upload/hotspot
+  // authoring already live), double-click the name renames it right here.
+  treeEl.querySelectorAll('.builtin-tour-row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tourId = row.dataset.tourId;
+      treeEl.hidden = true;
+      $('projMenuBuilderBtn')?.setAttribute('aria-expanded', 'false');
+      setAdminTab('tour');
+      selectTour(tourId);
+    });
+  });
+  treeEl.querySelectorAll('.builtin-tour-title').forEach((span) => {
+    span.addEventListener('click', (e) => e.stopPropagation());
+    span.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const tourId = span.dataset.tourId;
+      const tour = state.tours.find((t) => t.id === tourId);
+      if (!tour) return;
+      startGenericRename(span, (tour.name || '').trim(), (val) => { tour.name = val; onToursChanged(); renderAdminMenuTree(); });
     });
   });
 
@@ -6859,6 +7610,10 @@ function closeCustomModal(modalEl) {
 }
 
 // ─── Offline support (PWA) — client only ───────────────────────────────────
+// Must match VERSION in sw.js — used to version the offline-banner localStorage keys so
+// bumping the SW version automatically re-shows the banner to users who dismissed it
+// under the old version (they need to re-download into the new cache namespace).
+const SW_VERSION = 'v5';
 // sw.js caches the app shell + project data + on-demand video so the client experience
 // keeps working with no signal once it's been opened at least once online. Never
 // registered on ?admin=1 pages — sw.js's own admin passthrough is a second guard for the
@@ -7028,6 +7783,15 @@ function collectOfflineAssets() {
   };
   walk(state.menuConfig?.tree);
 
+  // Project data files — explicitly downloaded so the app works in airplane mode even if
+  // the user taps "Add" immediately without fully navigating around first.
+  // These are small JSON/CSV/SVG files that define the plots, alignment, landmarks and
+  // amenities. Without them the map can't boot at all offline. They're fetched via
+  // assetUrl so the path resolves correctly (projects/{pid}/...) and de-duped by `seen`.
+  const pid = state.projectId || 'sample';
+  const DATA_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json'];
+  for (const f of DATA_FILES) add(`projects/${pid}/${f}`, 'data');
+
   return items;
 }
 
@@ -7090,7 +7854,7 @@ async function maybeOfferOfflineSave() {
   if (state.admin || !els.offlineSaveBanner || isStandaloneDisplay() || navigator.onLine === false) return;
   const pid = state.projectId || 'default';
   let skip = false;
-  try { skip = localStorage.getItem(`b91-offline-saved-${pid}`) === '1' || localStorage.getItem(`b91-offline-declined-${pid}`) === '1'; } catch {}
+  try { skip = localStorage.getItem(`b91-offline-saved-${SW_VERSION}-${pid}`) === '1' || localStorage.getItem(`b91-offline-declined-${SW_VERSION}-${pid}`) === '1'; } catch {}
   if (skip) return;
 
   const assets = collectOfflineAssets();
@@ -7127,7 +7891,7 @@ async function maybeOfferOfflineSave() {
       els.offlineSaveSkip.removeEventListener('click', onSkip);
       els.offlineSaveGo.removeEventListener('click', onGo);
       els.offlineSaveBanner.hidden = true;
-      try { localStorage.setItem(`b91-offline-declined-${pid}`, '1'); } catch {}
+      try { localStorage.setItem(`b91-offline-declined-${SW_VERSION}-${pid}`, '1'); } catch {}
       resolve();
     };
     const onGo = async () => {
@@ -7253,7 +8017,7 @@ async function runOfflineDownload(items, totalBytes, pid) {
     // partial save the visitor has no way to know about otherwise.
   } else {
     if (els.offlineSaveEta) els.offlineSaveEta.textContent = 'Done';
-    try { localStorage.setItem(`b91-offline-saved-${pid}`, '1'); } catch {}
+    try { localStorage.setItem(`b91-offline-saved-${SW_VERSION}-${pid}`, '1'); } catch {}
   }
   await new Promise((r) => setTimeout(r, missing ? 2600 : 1200));
   if (els.offlineSaveBanner) els.offlineSaveBanner.hidden = true;
@@ -7282,6 +8046,7 @@ function isStandaloneDisplay() {
 (async function init() {
   try {
     await loadGeometry();
+    setBootProgress(3);
     // alignment precedence — client: committed file only. admin: freshest of the full
     // working SESSION (IndexedDB: geometry + plan image + alignment), the lightweight
     // DRAFT (localStorage: alignment only), or the committed file. A freshly saved/
@@ -7303,6 +8068,7 @@ function isStandaloneDisplay() {
     if (chosen?.brand) Object.assign(state.brand, { name: chosen.brand.name, tagline: chosen.brand.tagline, logo: chosen.brand.logo, _ver: chosen.brand._ver });
     if (restored?.brandLogo?.blob) { state.brand.logoBlob = restored.brandLogo.blob; state.brand.logoName = restored.brandLogo.name; if (!state.brand.logo) state.brand.logo = `sample/${restored.brandLogo.name}`; }
     if (chosen?.audio) Object.assign(state.audio, { file: chosen.audio.file, name: baseName(chosen.audio.file), _ver: chosen.audio._ver });
+    if (chosen?.northDeg != null) state.northDeg = chosen.northDeg;
     if (restored?.siteAudio?.blob) { state.audio.blob = restored.siteAudio.blob; state.audio.name = restored.siteAudio.name; if (!state.audio.file) state.audio.file = `sample/${restored.siteAudio.name}`; }
     applyBrand();
     applySiteAudio();
@@ -7311,33 +8077,86 @@ function isStandaloneDisplay() {
     }
     initCustomMenuAdminAndClient();
     renderClientSidebar();
+    // The root menu (just rendered) is clickable from this point — well before landmarks
+    // ever load (setLandmarks(), which normally populates #catNav, doesn't run until
+    // AFTER the pano texture and plot data have both finished loading, much later in this
+    // same async chain). A visitor who taps LANDMARKS in that window saw a genuinely
+    // empty picker — #catNav's static markup was deliberately emptied (2026-09-09,
+    // "populated entirely by renderLandmarkCategoryNav()") on the assumption it would
+    // always be populated before anyone could reach it, which this disproved. Calling it
+    // here too — safe with zero landmarks loaded yet, since it always emits at least an
+    // "ALL LANDMARKS" button — means an early tap sees a real, clickable picker (just with
+    // nothing to show ON the pano yet) instead of a dead panel with no way back in but the
+    // Back button. setLandmarks()'s own call to this function still refreshes it once the
+    // real categories are known.
+    renderLandmarkCategoryNav();
+    // Decided here (menu tree known) rather than at the end of boot — see
+    // computeAutoOpenTarget's comment. A plain content item or folder drill needs
+    // nothing further and fires right away, before the pano itself even starts loading.
+    const autoOpenTarget = computeAutoOpenTarget();
+    if (autoOpenTarget && autoOpenTarget.kind === 'node') fireAutoOpen(autoOpenTarget);
+    setBootProgress(8);
     // background pano: session blob > project's panoImage reference > neutral fallback
     let panoSrc = null;
     if (restored?.pano?.blob) { state.panoBlob = restored.pano.blob; state.panoName = restored.pano.name; state.panoImage = { file: restored.pano.name }; panoSrc = restored.pano.blob; }
     else if (chosen?.panoImage?.file) { state.panoImage = chosen.panoImage; panoSrc = assetUrl(chosen.panoImage.file); }
+    // draped site-plan PNG: session blob (survives reload) > committed alignment reference > none.
+    // Previously only fetched AFTER the pano had already revealed the curtain (loadGroundImage
+    // ran post-initThree, and always did its own from-scratch network fetch) — a large plan
+    // PNG then visibly popped in over an already-settled pano, sometimes seconds later, with
+    // nothing telling the visitor it was still loading. Now pre-fetched as a plain Blob IN
+    // PARALLEL with the pano below (loadGroundImage itself still has to run after initThree,
+    // since it needs the live `three` scene — but by then the slow network part is already
+    // done, leaving only a fast local decode).
+    let planFile = null, planOpacity = 1, groundSrc = null;
+    if (restored?.plan?.blob) { state.planBlob = restored.plan.blob; state.planName = restored.plan.name; groundSrc = restored.plan.blob; planFile = restored.plan.name; planOpacity = restored.plan.opacity ?? 1; }
+    else if (chosen?.groundImage) { groundSrc = assetUrl(chosen.groundImage.file); planFile = chosen.groundImage.file; planOpacity = chosen.groundImage.opacity; }
+
+    const panoNeedsFetch = panoSrc && !(panoSrc instanceof Blob);
+    const groundNeedsFetch = groundSrc && !(groundSrc instanceof Blob);
+    const panoWeight = panoNeedsFetch ? (groundNeedsFetch ? 45 : 90) : 0;
+    const groundWeight = groundNeedsFetch ? (panoNeedsFetch ? 45 : 90) : 0;
+    let panoLoaded = 0, panoTotal = 0, groundLoaded = 0, groundTotal = 0;
+    const reportBootBytes = () => {
+      const panoFrac = panoNeedsFetch ? (panoTotal ? panoLoaded / panoTotal : 0) : 1;
+      const groundFrac = groundNeedsFetch ? (groundTotal ? groundLoaded / groundTotal : 0) : 1;
+      setBootProgress(8 + panoFrac * panoWeight + groundFrac * groundWeight);
+    };
+    const panoBlobPromise = panoNeedsFetch
+      ? fetchBlobWithProgress(panoSrc, (l, t) => { panoLoaded = l; panoTotal = t; reportBootBytes(); }).catch(() => null)
+      : Promise.resolve(panoSrc);
+    const groundBlobPromise = groundNeedsFetch
+      ? fetchBlobWithProgress(groundSrc, (l, t) => { groundLoaded = l; groundTotal = t; reportBootBytes(); }).catch(() => null)
+      : Promise.resolve(groundSrc);
+    const [panoBlobOrSrc, groundBlobOrSrc] = await Promise.all([panoBlobPromise, groundBlobPromise]);
+
     let texture;
-    if (panoSrc) { try { texture = await loadPanoTexture(panoSrc); } catch { texture = fallbackPanoTexture(); } }
+    if (panoBlobOrSrc) { try { texture = await loadPanoTexture(panoBlobOrSrc); } catch { texture = fallbackPanoTexture(); } }
     else texture = fallbackPanoTexture();                 // project has no pano yet → plain sky, app still runs
+    setBootProgress(98);
     initThree(texture);
     wireAdmin();
     updatePanoName();
-    if (restored?.plan?.blob) {                           // imported plan image, recovered from the session blob (survives reload pre-export)
-      state.planBlob = restored.plan.blob; state.planName = restored.plan.name;
-      const url = URL.createObjectURL(restored.plan.blob);
-      await loadGroundImage(url, restored.plan.opacity ?? 1, restored.plan.name);
-      if (state.admin && state.groundImage) { els.axPlanRow.hidden = false; els.axPlanOpacity.value = restored.plan.opacity ?? 1; els.axPlanOpacityVal.textContent = `${Math.round((restored.plan.opacity ?? 1) * 100)}%`; }
-    } else if (chosen?.groundImage) {                     // draped PNG site plan referenced by the alignment file
-      await loadGroundImage(assetUrl(chosen.groundImage.file), chosen.groundImage.opacity, chosen.groundImage.file);
-      if (state.admin && state.groundImage) { els.axPlanRow.hidden = false; els.axPlanOpacity.value = chosen.groundImage.opacity; els.axPlanOpacityVal.textContent = `${Math.round(chosen.groundImage.opacity * 100)}%`; }
+    // A 'node'/no-op target already fired (or has nothing to fire) — the pano is now
+    // showing the correct screen, so reveal it. 'landmarks'/'panotour' targets keep the
+    // curtain up a little longer, until their own fire point further down.
+    if (!autoOpenTarget || autoOpenTarget.kind === 'node') hideBootCurtain();
+    if (groundBlobOrSrc) {
+      const url = (groundBlobOrSrc instanceof Blob) ? URL.createObjectURL(groundBlobOrSrc) : groundBlobOrSrc;
+      await loadGroundImage(url, planOpacity, planFile);
+      if (state.admin && state.groundImage) { els.axPlanRow.hidden = false; els.axPlanOpacity.value = planOpacity; els.axPlanOpacityVal.textContent = `${Math.round(planOpacity * 100)}%`; }
     }
-    const src = await loadData();
+    await loadData();
     if (restored && Array.isArray(restored.rows)) state.rows = indexRows(restored.rows); // session's edited statuses win (canonicalised to the layout ids)
-    applyData(); setSync(src);
+    applyData();
     // landmarks: session (freshest) > committed landmarks.json > none
     let lms = [];
     if (restored?.landmarks?.length) lms = parseLandmarks({ landmarks: restored.landmarks });
     else { const lmFile = await loadLandmarksFile(); if (lmFile) lms = lmFile; }
     setLandmarks(lms);
+    // Fires the instant real landmark data exists — the earliest point the category
+    // picker's "ALL" framing can actually reach the landmarks it needs to aim at.
+    if (autoOpenTarget && autoOpenTarget.kind === 'landmarks') { fireAutoOpen(autoOpenTarget); hideBootCurtain(); }
     // amenities: session (freshest, incl. render blobs) > committed amenities.json > none
     let ams = [];
     if (restored?.amenities?.length) ams = parseAmenities({ amenities: restored.amenities });
@@ -7348,12 +8167,15 @@ function isStandaloneDisplay() {
     if (restored?.tours?.length) trs = parseTours({ tours: restored.tours });
     else { const trFile = await loadToursFile(); if (trFile) trs = trFile; }
     setTours(trs);
+    // A `panotour` top item needs state.tours to resolve which tour to open.
+    if (autoOpenTarget && autoOpenTarget.kind === 'panotour') { fireAutoOpen(autoOpenTarget); hideBootCurtain(); }
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
     initProjectBar();                                    // header project switcher / manage menu
     registerOfflineSupport();                             // client-only PWA offline cache — see definition above
+    hideBootCurtain();                                    // safety net — idempotent, in case no branch above matched
   } catch (err) {
     console.error(err);
-    els.syncMeta.textContent = 'Load error';
+    hideBootCurtain();                                    // never leave the visitor stuck behind it on a boot error
     const webgl = (() => { try { return !!document.createElement('canvas').getContext('webgl'); } catch { return false; } })();
     showNotice(webgl
       ? `${err.message}. If you opened this file directly (file://), run a static server — e.g. <code>python -m http.server</code> — then reload.`

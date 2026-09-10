@@ -5,6 +5,1055 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-10 (boot progress bar; parallelized the pano + site-plan image fetches)
+
+`index.html`, `styles.css`, `app.js`. User report: "the client wont know that something
+is getting loaded... plot layouts with some delay over the background pano, also reduce
+this delay."
+
+- **Root cause found, not guessed:** on the live test project the pano
+  (`Lifestyle.web.jpg`, ~5 MB) loads fine, but the ground-drape site-plan PNG
+  (`groundImage`, the actual "plot layout trace" image draped on the ground — 26 MB in
+  this project's case) was only fetched by `loadGroundImage` **after** `initThree()` had
+  already revealed `#bootCurtain` — i.e. strictly *after* the pano was already visible,
+  with a plain un-trackable `THREE.TextureLoader().loadAsync(url)` and no progress
+  indication at all. That serial ordering, not plot-mesh construction (the test project
+  has exactly one plot), was the actual delay the user was describing.
+- **`app.js`**: added `fetchBlobWithProgress(url, onBytes)` — streams a `fetch` response
+  body via its reader, calling `onBytes(loaded, total)` per chunk (`server.py` always
+  sends `Content-Length` for static assets, confirmed by reading `server.py`, so `total`
+  is reliable); falls back to a single non-streamed read if the runtime can't stream.
+  Boot now pre-fetches the pano AND the ground/plan image **as plain Blobs, in parallel**
+  (`Promise.all`), weighting the combined byte progress into an 8–98% range
+  (`setBootProgress`, monotonic — never regresses on a stalled fetch) — 45/45 split when
+  both need a real fetch, 90/0 (or 0/90) when only one does. `loadGroundImage` itself is
+  unchanged (still needs the live `three` scene from `initThree`, so still runs after it)
+  but now receives an already-downloaded Blob's object URL instead of a bare path, so the
+  only work left at that point is a fast local texture decode, not a multi-second network
+  wait — this is what actually closes the "pops in after the pano" gap, not just hides it
+  behind a spinner. Session-restored blobs (`restored.pano.blob`/`restored.plan.blob`,
+  admin-only) skip the fetch entirely (`instanceof Blob` check), same as before.
+- **`index.html`**: `#bootCurtain` gained a bottom-anchored `#bootProgressWrap`
+  (bar + `%` text) alongside the existing centered "Loading…" label.
+- **`styles.css`**: `.boot-progress-wrap`/`.boot-progress`/`.boot-progress-fill`/
+  `.boot-progress-pct` — thin gold fill bar, `position:absolute; bottom:28px`.
+- **Scoped to first boot only**: `hideBootCurtain()` now sets progress to 100% and
+  permanently hides `#bootProgressWrap` the first time it's called (`bootProgressDone`
+  flag) — `#bootCurtain` is reused later for tour-to-tour switching
+  (`showBootCurtain()`/`hideBootCurtain()` in `openClientPanoTour`), and without this a
+  later reuse would show a stale "100%" bar instead of just the plain label it showed
+  before this change.
+- **Verified**: `node --check` clean; a function-extraction test against the real
+  `setBootProgress`/`fetchBlobWithProgress` source (monotonic clamping, DOM reflect,
+  streamed-chunk byte accounting against a mocked `fetch`, throws on a non-ok response) —
+  9/9 passed. Confirmed live via `curl` against the running server.
+- **Not fixed, flagged instead**: the 26 MB ground-image PNG itself is oversized content
+  (4096×4096 RGBA that compresses poorly under PNG), not a code bug — parallelizing its
+  fetch with the pano's helps a lot but doesn't shrink the file. Left untouched rather
+  than silently re-compressing the admin's uploaded content; recommended re-exporting/
+  re-uploading it through a resize pipeline (like `setPanoFromFile` already does for the
+  pano) if further reduction is wanted.
+
+---
+
+## 2026-09-10 (per-room virtual-tour compass calibration)
+
+`app.js`, `styles.css`. User request: clicking "Set as this room's start view" should
+also offer a direction (N/E/S/W) so the compass points correctly once that room opens in
+the virtual tour.
+
+- **Why per-room, not project-wide**: each tour node's pano has its own arbitrary
+  "lon 0" (whatever the photographer was facing when it was shot), unrelated to the main
+  aerial pano's own (separately-set) `state.northDeg`. A single global calibration can't
+  be correct for every room in a multi-node tour.
+- **Admin (Tour tab)**: a new "Compass facing" `<select>` (Not set / North / East / South
+  / West) sits directly above the existing "🏠 Set as this room's start view" button;
+  its currently-picked value is read at the SAME click that saves the start view, so both
+  are stored together on `node.defaultView.facingDir` (`setTourNodeDefaultView(facingDir)`
+  now takes the picked value). Persisted through `parseTours`/`buildToursData` and through
+  session save (already spread via `{...n.defaultView}`).
+- **Client**: `tourGoTo` now computes `state.northDeg` on every arrival at a node (not
+  gated on `instant` — a room's north/lon relationship is a fixed property of that room,
+  independent of whatever the live carried-over camera yaw is): `northDeg = -(node.
+  defaultView.lon) - {N:0,E:90,S:180,W:270}[facingDir]`, the exact algebraic inverse of
+  `updateCompass()`'s existing `rot = -view.lon*180/PI - northDeg` formula, so at the
+  saved start view the compass cone lands exactly on the picked direction. An uncalibrated
+  room (`facingDir` unset) falls back to `northDeg = 0`, matching the project's documented
+  "uncalibrated ⇒ 0" default rather than leaking in the aerial pano's own calibration or a
+  previous room's. The aerial's own `northDeg` is snapshotted into `state.tourView.saved`
+  on tour entry and restored by `closePanoTour` on exit, same pattern as the saved camera
+  view — so leaving the tour doesn't leave the aerial compass miscalibrated.
+- **Files**: `app.js` (`setTourNodeDefaultView`, the hotspot-box DOM builder, `tourGoTo`,
+  `openClientPanoTour`, `closePanoTour`, `parseTours`, `buildToursData`,
+  `addTourNodeFromFile`), `styles.css` (`.ax-tour-dvrow`/`.ax-tour-dirlbl`/
+  `.ax-tour-dirsel`).
+- **Verified**: `node --check` clean; a standalone math test replicating the calibration
+  formula against `updateCompass`'s real formula — 6/6 passed (all four directions, a
+  relative-rotation sanity check, and the uncalibrated fallback).
+
+---
+
+## 2026-09-10 (removed the top-bar "N plots · project · synced HH:MM:SS" status + Refresh button)
+
+`index.html`, `app.js`, `styles.css`. Explicit request from a screenshot of the sync
+status strip: "remove this frpm both admin and client side."
+
+- Removed the `.sync` div (`#syncMeta` + `#refreshBtn`) from `index.html`'s topbar
+  entirely — it had no `is-admin` scoping, so it showed on both sides.
+- **`app.js`**: deleted `setSync()`/`refresh()` and their three call sites (the button's
+  own click listener, the boot success path's `setSync(src)` call, and the boot error
+  path's `els.syncMeta.textContent = 'Load error'` — the latter was already redundant
+  with the `showNotice(...)` call right after it). The unused `src` binding from
+  `await loadData()` was cleaned up at the same time.
+- **`styles.css`**: removed the now-dead `.sync`/`.sync-meta` rules (base + the
+  narrow-topbar responsive override).
+- **Verified**: `node --check` clean; `grep` for `syncMeta`/`refreshBtn`/`setSync` across
+  all three files and the live server returns zero hits.
+
+---
+
+## 2026-09-10 (Available/Reserved/Sold legend scoped to the aerial view only)
+
+`app.js`, `styles.css`. Clarified (after an AskUserQuestion round-trip — the user's first
+phrasing said "landmark section," corrected to "aerial section") request: the plot-status
+legend should disappear whenever the visitor isn't looking at the base plot map.
+
+- **`app.js`**: `isAerialSectionActive()` — a structural check (`!state.tourView && `
+  `catLevel2 hidden && menuNavStack empty`), not a separately-tracked flag, so it can't
+  drift from what the drawer is actually showing. `updateLegendVisibility()` toggles an
+  `.is-hidden` class on `els.legend`/`els.zoomStatusGroup` (the header chips and their
+  landscape-mobile stand-in). Called from `openLandmarksCategoryPicker`, the LANDMARKS
+  back-button handler, and both branches of `renderClientSidebar` (root-menu render AND
+  the drilled-in-submenu render — the latter is what makes VIRTUAL TOUR and tour entry/
+  exit work for free, since `openClientPanoTour`/`closePanoTour` already call
+  `renderClientSidebar` after setting `state.tourView`/`menuNavStack`).
+- **`styles.css`**: `.legend.is-hidden { display: none; }`,
+  `.zoom-status-group.is-hidden { display: none !important; }` — compound class
+  selectors, deliberately NOT relying on source order or `[hidden]`, to sidestep this
+  project's own recurring `[hidden]`-vs-`display` specificity trap.
+- **Verified**: `node --check` clean; an 8-scenario function-extraction test against the
+  real `isAerialSectionActive`/`updateLegendVisibility` (boot, landmarks open/close,
+  submenu drill in/out, tour enter/exit, and touring-while-anchored-to-the-tour-picker
+  simultaneously) — 8/8 passed.
+
+---
+
+## 2026-09-10 (compass redesign: thinner needle rose, then a frosted-glass look)
+
+`index.html`, `styles.css`. Two rounds: first matched a reference nautical-rose image the
+user resent ("make sure you use this as compass" — the earlier session's compass had
+drifted, apparently lost between turns like this project's own documented "work
+disappears from disk between turns" gotcha), then "make the compass look transparent and
+more aesthetic and visually appealing."
+
+- **Round 1 (match the reference)**: narrowed the main/intercardinal rose points from an
+  8-unit base width to ~5.2 (needle-like instead of chunky triangles), thinned the ring
+  from a 5px solid band + 1.4px inner ring to a single ~2px ring, shrank/relocated the
+  N/E/S/W labels from just outside the ring to inboard near the tips (font-size 16→12),
+  narrowed the red north indicator from a full-width wedge to a thin needle, and
+  contained the heading "cone" shadow's radius inside the ring instead of overshooting it.
+- **Round 2 (glass look)**: `.compass` gained `backdrop-filter: blur(5px) saturate(140%)`
+  (frosted glass over the live pano) + `border-radius:50%` to clip it; `.cp-face` dropped
+  to `rgba(255,255,255,.16)` with a new SVG `<radialGradient id="cpFaceGrad">` highlight
+  layered on top; ring/rose/hub colors moved from flat white/black/gray to translucent
+  `rgba(...)` equivalents; `.cp-ring` gained a soft `drop-shadow` glow; `.cp-n` (north
+  needle) changed to a brighter `#ff3b3b` with its own glow. Labels kept an opaque navy
+  fill + white halo (not made transparent) — they sit over an unpredictable live pano
+  photo, not a plain page, and a translucent label would vanish over a bright sky.
+- **Files**: `index.html` (`#compass` SVG: rose polygon points, label positions, new
+  `<defs><radialGradient>`, cone path), `styles.css` (`.compass`, `.cp-*`).
+- **Verified**: `node --check`/brace-balance N/A (CSS+SVG only); confirmed live via
+  `curl` against the running server after each round (the compass had reverted to a
+  pre-fix state between turns at least once this session — re-verified rather than
+  assumed before reporting it fixed).
+
+---
+
+## 2026-09-10 (removed the directional pad — drag/flick is the only look-around input now)
+
+`index.html`, `app.js`, `styles.css`. Explicit request from a screenshot of the client
+pano showing the ▲◄►▼ overlay: "remove this."
+
+- **`index.html`**: deleted the `#dpad` div and its four buttons entirely.
+- **`app.js`**: removed `els.dpadUp/Down/Left/Right`, `DPAD_SPEED`, `startPush`/`endPush`,
+  `wireDpad()`, and its call site. **Kept `stepViewMotion`/`state.viewVel`** — checked
+  first that they're shared with drag-flick inertia (`wireViewControls`'s pointerup
+  handler seeds `viewVel` from a flick's speed; `renderLoop` calls `stepViewMotion` every
+  frame regardless of what set the velocity), so removing the d-pad could not mean
+  removing those. `stepViewMotion` itself was simplified: it used to ease `viewVel` toward
+  a `state.viewPush` TARGET set while a d-pad button was held; with nothing left to ever
+  set that target, it now just decays whatever velocity a flick left behind toward zero —
+  the actual behaviour was already unaffected for drag-coasting (which never used a
+  nonzero push target), so this is a real simplification, not a functional change.
+  `state.viewPush` removed from `state`'s initial object along with it.
+- **`styles.css`**: removed `.dpad`/`.dpad-btn`/`.dpad-up/-down/-left/-right`, their
+  landscape-phone size overrides, and — since it's now entirely moot —
+  `body.tour-open .dpad` (the bottom-offset fix from two days ago that lifted the d-pad
+  above the tour bar). `body.is-admin .compass, body.is-admin .dpad` lost its now-dead
+  second selector.
+- **Verified:** `node --check` clean, CSS brace count balanced (763/763), no duplicate
+  `id=` in `index.html`, zero remaining references to "dpad" anywhere in the three files.
+  6 assertions against the actual extracted `stepViewMotion` confirm drag-flick coasting
+  still behaves identically post-simplification: residual velocity still moves the view
+  and decays to a clean stop, and zero velocity is immediately reported as "not steering"
+  with no NaN or unexpected movement — the removed `push`-target logic wasn't silently
+  load-bearing for the case that's kept.
+
+---
+
+## 2026-09-10 (mobile: removed the landmark density cap, shrank banners further instead)
+
+`app.js`, `styles.css`. Explicit request after confirming the cap was hiding landmarks
+on mobile: "don't do that, let's make the banner size and font size small for the mobile
+view instead of that."
+
+- **`LANDMARK_MOBILE_CAP` set to `Infinity`** (was 4, lowered from 6 just yesterday) —
+  every landmark now renders on a landscape phone exactly as it does on desktop; nothing
+  is hidden behind a "+N more" tap any more. Left as a one-constant change rather than
+  restructuring `renderLandmarks()` — `capSet`/`hiddenCount` stay in the code as
+  harmless dead plumbing (the count can never exceed `Infinity`), trivially reversible if
+  density ever becomes a problem again at these smaller sizes. `#lmOverflowHint` simply
+  never shows now (its `hiddenCount === 0` check is always true).
+- **Landscape-phone landmark/amenity sizing shrunk further** (in the same
+  `@media (orientation:landscape) and (max-height:500px)` block added yesterday):
+  `.lm-ico` 12px→10px, `.lm-label` 11px→9px, `.lm-sub-bar` 8.5px→7px, `.am-ico` 13px→11px,
+  `.am-label` 10px→8.5px, with tighter padding/gap throughout — since decluttering is now
+  entirely this shrink's job with nothing hidden to fall back on.
+- **Verified visually**: the real `.lm-banner` markup, 6 landmarks positioned close
+  together, screenshotted at the landscape-phone breakpoint — noticeably smaller than the
+  previous pass, text still legible, all 6 rendering simultaneously (none hidden).
+  Some residual overlap for landmarks at very similar bearings is the accepted tradeoff
+  of "show everything, smaller" over "cap the count" — consistent with what was asked
+  for. `node --check` clean, CSS brace count balanced (779/779), confirmed present in
+  the live server's served files.
+
+---
+
+## 2026-09-09 (clicking LANDMARKS early in boot showed a genuinely empty picker panel — root-caused via screenshot, confirmed with a clarifying question first)
+
+`app.js`. Reported via two screenshots — a "‹ BACK" panel with nothing else in it, versus
+the correct root menu — after a general "any problem opening pano/landmarks on mobile"
+discussion. Asked which button led to the empty panel before assuming anything (the
+absence of a title next to "Back" ruled out the VIRTUAL TOUR picker and pointed
+specifically at Landmarks); confirmed: LANDMARKS.
+
+- **Root cause:** the root menu (with LANDMARKS clickable) renders early in
+  boot — synchronously, before the pano texture even starts loading. `#catNav` (the
+  landmark category list) isn't populated until `setLandmarks()` runs, much later in the
+  same async chain, after the pano AND plot data have both finished loading. A visitor
+  who taps LANDMARKS in that window — which a slow connection (a phone, or this session's
+  Cloudflare tunnel, documented elsewhere as slower under load) makes much easier to hit —
+  saw `#catNav` in its raw initial state. That state used to be a a hardcoded fallback
+  category list; earlier today (2026-09-09) it was emptied on the assumption
+  `renderLandmarkCategoryNav()` would always populate it before anyone could reach it —
+  which this disproved, turning "shows the wrong categories briefly" into "shows nothing
+  at all, with no way to tell it's not broken."
+- **Fix:** call `renderLandmarkCategoryNav()` once more, immediately after the root
+  menu's own early render — it's already idempotent and safe with zero landmarks loaded
+  (it always emits at least an "ALL LANDMARKS" button), so an early tap now sees a real,
+  clickable picker instead of a dead panel. `setLandmarks()`'s existing call still
+  refreshes it with the real categories once they're actually known.
+- **Checked the other two built-in rows for the same race, since the same boot-order gap
+  applies to all of them equally:** AERIAL VIEW is safe already — `state.home` defaults to
+  a sane `{lon:0,lat:0,fov:70}`, so an early tap just flies to a reasonable default rather
+  than computing against not-yet-loaded geometry. VIRTUAL TOUR is also already safe — its
+  handler explicitly checks `state.tours.length` and shows a plain, honest notice
+  ("no virtual tours yet") when tapped before `setTours()` has run, rather than assuming
+  data is ready. LANDMARKS was the one exception, since its picker had no such guard and
+  no longer had a non-empty fallback to fall back on.
+- **Verified:** `node --check` clean. 4 assertions against the actual extracted
+  `renderLandmarkCategoryNav`/`getLandmarkCategories`/`effectiveLandmarkCategory` —
+  calling it with zero landmarks loaded produces the "ALL LANDMARKS" button and nothing
+  else (not blank, not the wrong categories), and calling it again once real landmark
+  data exists correctly refreshes to the real category list. Confirmed present in the
+  live server's served `app.js`.
+
+---
+
+## 2026-09-09 (mobile landmark clutter: the existing size-reduction rule targeted a mode phones never actually reach)
+
+`app.js`, `styles.css`. Reported as overlapping, cluttered landmark banners on mobile.
+Discussed before building: a size-reduction rule for landmark/amenity labels already
+existed (`@media (max-width:720px) and (orientation:portrait)`), but the user pointed out
+there's no portrait mode for mobile — correct: `#rotateHint` blocks all interaction until
+a phone is turned to landscape, so that rule has **never applied to a real phone visitor
+in practice**. Every mobile visitor has been seeing full desktop-size banners the whole
+time, cap or no cap.
+
+- **New landscape-scoped shrink**, added to the existing `@media (orientation:landscape)
+  and (max-height:500px)` block (the one already used for the compass/d-pad/topbar/zoom-
+  controls landscape-phone overrides, kept together rather than opening a new breakpoint):
+  `.lm-ico`/`.lm-label`/`.lm-sub-bar` and `.am-chip`/`.am-ico`/`.am-label` all get smaller
+  font sizes and tighter padding, scoped `body:not(.is-admin)` to match every other rule
+  in that block (admin's own editing view is unaffected on any orientation).
+- **`LANDMARK_MOBILE_CAP` lowered 6 → 4** — the cap alone wasn't enough on its own once it
+  became clear the accompanying font shrink had never actually been reaching a real
+  phone; fewer, now-smaller banners compete for the same space.
+- **Verified visually**, not just reasoned about: the real `.lm-banner` markup rendered in
+  an isolated page and screenshotted at a plain desktop-sized viewport vs. the
+  landscape+short one that triggers the new rule — visibly smaller icon blocks and text
+  in the landscape case, same markup and positions in both. `node --check` clean, CSS
+  brace count balanced (779/779), confirmed both changes present in the live server's
+  served files.
+
+---
+
+## 2026-09-09 (drawer stays anchored to the VIRTUAL TOUR section for as long as any tour is open)
+
+`app.js`. Reported: switching rooms, or switching from one tour to another (e.g. "Room"
+to "Tour 2"), should keep the drawer's menu inside the virtual tour section rather than
+resetting to the plot map's root menu. This directly revises the entry-side half of
+2026-09-09's earlier "exit tour → default menu" fix: that fix reset
+`state.menuNavStack = []` on BOTH entering and exiting a tour — correct for exiting, but
+wrong for entering/switching, which is what's being corrected here.
+
+- **`virtualTourPickerNode()`** (new): the synthetic "folder" object (one row per tour,
+  built live from `state.tours`) factored out of `openVirtualTourPicker()` so it can be
+  reused — both the picker AND the tour takeover itself now push the same node.
+- **`openClientPanoTour`**: instead of resetting `state.menuNavStack = []`, it now sets
+  `state.menuNavStack = [virtualTourPickerNode()]` — for BOTH a fresh plot-map→tour entry
+  and a tour-to-tour switch. Reopening the drawer at any point while a tour is active
+  shows the live list of tours (ready to switch again), never the root menu. Rebuilt
+  fresh on every entry/switch rather than left as whatever pushed it, so it can't go
+  stale if a tour was added/renamed since it was last shown.
+- **`closePanoTour`'s exit-to-root reset is UNCHANGED** — only actually leaving the tour
+  (not switching within/between tours) drops the drawer back to the plot map's default
+  menu, per the explicit earlier request that this behaviour stay that way.
+- Room-to-room switching (`tourGoTo`) still never touches `menuNavStack` at all, so it
+  was already consistent with "stay inside the tour" before this fix and needed no change.
+- **Verified:** `node --check` clean. 6 assertions against the actual extracted
+  `openClientPanoTour`/`closePanoTour`/`virtualTourPickerNode` — a fresh entry anchors the
+  menu to the tour section (listing every tour, confirming quick-switch is actually
+  possible from there, not just theoretically), switching from tour "Room" to "Tour 2"
+  keeps that same anchor rather than resetting, and exiting still drops all the way to a
+  genuinely empty root stack.
+
+---
+
+## 2026-09-09 (tour bar stayed visible after exiting a tour — the classic `[hidden]`-vs-`display` specificity trap, again)
+
+`styles.css`. Reported via screenshot right after the previous fix: LANDMARKS correctly
+exited the tour and showed the real aerial pano with landmark banners — but the room-strip
+bar ("ROOM · 4._Living_Room · ... · ✕ Exit tour") stayed sitting on screen underneath it.
+
+- **Root cause**: `.tour-bar { display: flex; ... }` sets its own `display` unconditionally
+  and has no `[hidden]` counterpart, so at equal CSS specificity the author rule (always
+  later in the cascade than the browser's own `[hidden]{display:none}`) wins regardless of
+  the `hidden` DOM attribute — `els.tourBar.hidden = true` (set correctly by
+  `closePanoTour`, confirmed by reading the code) had **zero visual effect**. This is the
+  exact same class of bug this file has hit twice before (the install banner, an admin
+  modal) — `CLAUDE.md` already documents it as a recurring trap, and this makes three.
+- **Fix**: added `.tour-bar[hidden] { display: none; }`. Checked whether the tour's other
+  toggled element (`#tourLayer`, the hotspot overlay) has the same issue — it doesn't; it
+  carries no `display` override of its own, so the native `[hidden]` behavior already
+  applies there untouched.
+- **Verified visually**, not just reasoned about: an isolated page with two `.tour-bar`
+  elements (one plain, one `hidden`) screenshotted in headless Chrome — before this fix
+  both would render; after, only the non-hidden one does. CSS brace count balanced
+  (773/773), confirmed present in the live server's served `styles.css`.
+
+---
+
+## 2026-09-09 (AERIAL VIEW / LANDMARKS now exit an active virtual tour first, instead of acting on the room's own pano)
+
+`app.js`. Reported: clicking AERIAL VIEW or LANDMARKS while inside a virtual tour should
+return to the real default view / landmark picker, not do something to the tour room
+itself; room-to-room switching within a tour should be unaffected. Confirmed the exact
+mechanism with the user before building (see the "let's first analyze" exchange).
+
+- **Root cause, for both:** neither `openNodeContent` branch knew a tour could be open.
+  **AERIAL VIEW** computed a camera angle from the plot layout's own geometry and
+  animated the camera there — but the PANO TEXTURE was still whatever tour room was
+  loaded, so the move just re-aimed within the room's own 360° image at a meaningless
+  angle; the real aerial pano was never touched. **LANDMARKS** called
+  `openLandmarksCategoryPicker()` → `applyCategoryFilter('ALL')` →
+  `applyLandmarkVisibility()`, which unconditionally does `els.landmarks.hidden =
+  !state.showLandmarks` — force-UN-hiding the landmark banners/pins that the tour
+  takeover had explicitly hidden, rendering them on top of the room's pano — plus aiming
+  the camera at a landmark cluster computed against plot-map geometry, again while the
+  wrong pano was showing.
+- **Fix:** both branches now check `if (state.tourView) closePanoTour();` first —
+  synchronously exits the tour (restores the real pano/plots/ground/landmarks-per-their-
+  own-rules) — before doing their normal action, so "face north" and "open the landmark
+  picker" both run against the actual, restored plot map. When no tour is open, this is a
+  pure no-op (the `if` simply doesn't fire) — verified NOT to change existing behaviour
+  for the already-correct non-touring case.
+- **Room-to-room switching needed no change** — `tourGoTo` (used by the tour bar's room
+  chips and hotspots) never touched the drawer or `state.tourView` in a way that could
+  exit the tour, so staying "inside the tour" while moving between rooms was already
+  correct; confirmed by inspection, not just assumed.
+- **Verified:** `node --check` clean. 10 assertions against the actual extracted
+  `openNodeContent` — with no tour open, `closePanoTour` is never called and both actions
+  behave exactly as before; with a tour open, `closePanoTour` fires and is confirmed to
+  run BEFORE the camera move / picker open (not after, which would still show the wrong
+  pano for one frame), and `state.tourView` is confirmed actually cleared in both cases.
+
+---
+
+## 2026-09-09 (re-applied the d-pad/tour-bar overlap fix + tour-transition curtain — reverted between turns)
+
+`app.js`, `styles.css`. The previous entry's three fixes (d-pad/tour-bar overlap,
+exit-resets-menu, tour-switch loading curtain) were reported still broken via a
+screenshot identical to the one that triggered them. Checked the live server directly
+(`curl .../styles.css`, `curl .../app.js`) before assuming anything about the browser:
+`body.tour-open .dpad`, `showBootCurtain`, and `switchingTours` were **entirely absent**
+from both the served files AND the on-disk source — the whole previous turn's app.js and
+styles.css changes had reverted, while the turn before that (the Tour tab grid fixes) was
+still intact. This matches this file's own documented "verified work can disappear from
+disk between turns for reasons outside normal editing" gotcha exactly — re-applied
+without further forensics, per that entry's own advice, and added a note at the fix's
+own location flagging that this specific one has already vanished once, so a next
+occurrence isn't mistaken for a fresh regression.
+
+- Re-applied verbatim: `body.tour-open .dpad { bottom: 78px; }` (+ its landscape-media
+  counterpart, `body.tour-open:not(.is-admin) .dpad { bottom: 56px; }`, placed after the
+  existing landscape block so it wins on the specificity tie), `showBootCurtain()`, and
+  the `switchingTours`/`menuNavStack` reset logic in `openClientPanoTour`/`closePanoTour`.
+- **Verified twice this time**: 10 assertions against the actual extracted functions (same
+  suite as before — recreated after discovering the scratchpad copy of the test script had
+  *also* disappeared, a session-local casualty of the same event, not a project file), AND
+  a direct `curl` of the LIVE server's served `styles.css`/`app.js` confirming the fix is
+  actually reaching a browser this time, not just present in the editor's view of the
+  source. `node --check` clean, no duplicate `id=` in `index.html`.
+
+---
+
+## 2026-09-09 (admin Tour tab: fixed the orphaned delete "×" and truncated target dropdowns; clarified the two viewer-exit buttons)
+
+`app.js`, `styles.css`. From a screenshot of the admin Tour tab. Two real layout bugs and
+one clarity request.
+
+- **Every node row's delete `×` was rendering on its own line below the row, instead of
+  inline at the end** — root cause: `.ax-tour-node` declared a 3-column CSS grid
+  (`grid-template-columns: auto 1fr auto`) but the row actually appends FOUR children
+  (star, ▶ open, name, ×); the 4th had no column to land in and CSS grid's default
+  auto-placement dropped it onto an implicit new row. Fixed: `auto auto 1fr auto`.
+- **The hotspot target `<select>` showed truncated text** ("3._Washroom" as "3._Was") in
+  both the existing-hotspot row and the "add a hotspot" row — both squeezed a label
+  input, an arrow, a select, and (for the first) a delete button onto one `display:flex`
+  line in a ~240px-wide sidebar, and the select lost the fight for room. Reflowed
+  `.ax-tour-hsrow` into a 2-row grid (label + delete on top, arrow + full-width select
+  underneath) and `.ax-tour-hsadd` into a stacked column (select above the button) — the
+  same "give it its own line instead of forcing it to share" fix already used earlier
+  today for the Align/Landmarks/Amenities/Tour tab strip.
+- **The two viewer-exit buttons ("set start view" / "close viewer") were visually
+  identical** (same class, same ghost outline) with nothing to tell them apart at a
+  glance, and the close button's `✕` icon is the SAME glyph `.ax-lm-del`/the hotspot
+  delete buttons use for actual deletion just above it in the same panel — a benign
+  navigation action wearing a destructive-looking icon. Now: "🏠 Set as this room's start
+  view" is a gold `btn-primary` (this app's confirm/save colour), "← Back to the plot map"
+  is a plain ghost button with a left-arrow instead of `✕` and its own tooltip ("Leaves
+  this room and returns to the plot map — the tour itself is unaffected") — the previous
+  version had no tooltip on this one at all.
+- **Verified visually**, not just reasoned about: reproduced the exact real markup/CSS in
+  an isolated page and screenshotted it in headless Chrome (the same technique used for
+  the compass restyle and the earlier tab-strip fix today) — confirmed every delete `×`
+  now sits inline, both dropdowns show full node names, and the two exit buttons read as
+  clearly different actions. `node --check` clean, CSS brace count balanced (767/767).
+
+---
+
+## 2026-09-09 (VIRTUAL TOUR becomes a third built-in menu row, matching LANDMARKS exactly)
+
+`app.js`, `styles.css`. Request: "same as landmarks, things that are added in the tour
+section should automatically come as virtual tour in the menu and set this also as a
+built in and everything like toggle info that other builtin have i.e aerial view and
+landmarks should be in virtual tour as well." Fully parallels the LANDMARKS builtin —
+same movable/draggable node design (2026-09-09, earlier today), same ON/OFF switch, same
+▾ info arrow, same live-data-in-the-expansion pattern, same click-to-jump +
+double-click-to-rename on each item inside it.
+
+- **`BUILTIN_DEFS`** (new, `{ aerial, landmarks, tour }` → `{contentType, title}`) replaces
+  the two hardcoded strings `ensureBuiltinNodes()` used to loop over — the `tour` builtin's
+  own content type is **`'virtualtour'`**, deliberately NOT `'tour'`, since that name is
+  already taken by the EXTERNAL 3DVista/Kuula iframe content type; conflating them would
+  have broken `openNodeContent`'s existing dispatch for one or the other.
+- **Client behaviour (`openNodeContent`'s new `'virtualtour'` branch)** — the exact
+  analogue of LANDMARKS' "show whatever exists" pattern, but for `state.tours`: zero tours
+  → a plain notice pointing at the admin Tour tab; exactly one → opens it directly (no
+  point picking from a list of one, same reasoning `openClientPanoTour`'s own
+  single-tour-forgiving fallback already uses); two or more → **`openVirtualTourPicker()`**
+  (new), which pushes a SYNTHETIC parent node (children generated live from `state.tours`,
+  one row per tour) onto `state.menuNavStack` and reuses the EXISTING generic Level-2/3
+  drilled-in submenu UI — the same one an authored folder with 2+ children already uses.
+  Since these synthetic children were never authored into `menuConfig.tree`,
+  `renderClientSidebar`'s submenu click handler gained a fallback: try `findNodeInfo`
+  first (real tree), and if that comes back empty, look the id up in the pushed parent's
+  own `children` array instead — this is what lets a fully generic navigation level serve
+  both real folders and this one synthetic case with no special-casing at the render layer.
+- **Admin menu builder**: `renderBuiltinNodeRow` generalised from two builtins to three
+  (`BUILTIN_ICON`/`BUILTIN_INFO` maps, keyed by `node.builtin`) — the 🌐 icon and its own
+  info text. **`renderBuiltinTourList()`** (new) is `renderBuiltinLandmarkCategories()`'s
+  counterpart: a flat list (tours aren't grouped, unlike landmarks-by-category) of every
+  tour with its node count, in the ▾ expansion. **Uses its own CSS classes
+  (`.builtin-tour-row`/`.builtin-tour-title`), not the landmark ones** — sharing
+  `.builtin-lm-row`/`.builtin-lm-title` would have also caught these rows in the
+  LANDMARKS wiring block (a blanket `querySelectorAll('.builtin-lm-row')`), sending a
+  tour-row click to the Landmarks tab with an undefined landmark id instead of the Tour
+  tab with the right tour selected — wired identically otherwise (click → `setAdminTab
+  ('tour')` + `selectTour(id)`; double-click the name → rename via `tour.name` +
+  `onToursChanged()`).
+- **`computeAutoOpenTarget`**: a builtin `virtualtour` row on top shares the exact same
+  fire-timing lane as an authored `panotour` item (`kind: 'panotour'`), since both need
+  `state.tours` populated before they can act — no new boot-sequencing needed, the
+  existing "fire right after `setTours()`" call site already covers it.
+- **`anandman` data cleanup**: the project already had an empty, manually-authored
+  "VIRTUAL TOUR" folder anticipating this feature — removed, since the new builtin now
+  covers that exact role automatically and the two would otherwise sit side by side as a
+  confusing duplicate. `anandman` genuinely has 3 real tours in its `tour.json` (t2: 4
+  nodes, t6: 1 node, t8: 4 nodes), so this is a real multi-tour picker test case once
+  loaded, not just a synthetic one.
+- **Verified** via the same real-function-extraction method used throughout this
+  project: 11 assertions against the actual extracted `ensureBuiltinNodes`/
+  `BUILTIN_DEFS`/`computeAutoOpenTarget` plus a faithful reimplementation of the
+  `openNodeContent`/`openVirtualTourPicker` dispatch — three builtins inject in the
+  right order with the right content types, the tour builtin's `contentType` is
+  confirmed `'virtualtour'` (not colliding with the external `'tour'` type), zero/one/2+
+  tours each produce the right behaviour, a synthetic picker child is confirmed NOT
+  findable via `findNodeInfo` (proving the fallback path is actually exercised, not
+  accidentally bypassed), activating it opens the right specific tour, the tour builtin
+  correctly shares the `panotour` timing lane when it's on top, a fully-disabled set of
+  builtins falls through to null, and repeated `getMenuTree()` calls never duplicate the
+  tour builtin. `node --check` clean, CSS brace count balanced (765/765), no duplicate
+  `id=` in `index.html`.
+  ⚠️ Not yet confirmed with a real click-through — dragging the row, watching the switch/
+  arrow/expansion render inline, and the actual picker submenu appearing in the drawer are
+  all owed a real browser check; this project's headless tooling can't reliably exercise
+  either admin drag-and-drop or the client drawer's navigation stack live.
+
+---
+
+## 2026-09-09 (admin Align/Landmarks/Amenities/Tour tab row: fixed the clipped "Tour" label)
+
+`styles.css`. From a screenshot of the admin sidebar header. Root-caused by reproducing
+the exact markup+CSS in an isolated page and screenshotting it directly (this project's
+live-app headless boot is unreliable, but a static CSS reproduction with no app logic
+behind it isn't — same technique used for the compass restyle earlier today): `.ax-tabs`
+was `display:flex` with all four tab buttons at `flex:1`, splitting the sidebar's ~240px
+usable width four ways (~55px each). "Landmarks"/"Amenities"/"Tour" don't fit in that,
+and the rightmost one — "Tour" — was being clipped at the sidebar's edge, rendering as
+"Tou" with the last letter cut off entirely. Confirmed with a before/after screenshot of
+the isolated reproduction: before shows the clipped "Tou"; after shows all four labels
+intact.
+
+- **`.ax-tabs`**: `display:flex` → `display:grid; grid-template-columns: 1fr 1fr` — a 2x2
+  grid instead of a 4-across row. Each tab now gets roughly double the horizontal room,
+  comfortably fitting every current label on one line, and the layout now echoes the
+  Look-around/Move-layout toggle immediately below it (`.ax-mode`, already the same
+  `1fr 1fr` grid) instead of mixing two different row patterns in the same panel.
+- **`.ax-tab-btn`**: dropped the now-irrelevant `flex: 1` (grid columns handle sizing),
+  added `white-space: nowrap` (belt-and-braces against any future longer tab name
+  wrapping instead of just getting tight) and an explicit `text-align: center`.
+- **Verified**: CSS brace count balanced (765/765), and — since this project's headless
+  tooling can't reliably boot the live admin page (see CLAUDE.md's gotchas) — an isolated
+  static reproduction of the exact markup/CSS was screenshotted in headless Chrome both
+  before and after the fix, showing the clipped "Tour" label and its correction directly,
+  not just reasoned about from the CSS.
+
+---
+
+## 2026-09-09 (AERIAL VIEW now faces north — the compass points straight up, not wherever the layout's centroid sits)
+
+`app.js`, `index.html`. Request: "when clicked aerial view the camera should pan to
+north, that is compass should pan to north." Previously the AERIAL VIEW action called
+`computeHome()` and used its `lon` directly — which is the mean direction of the site
+layout's own geometry (a "look at the middle of the plots from above" framing), something
+that has no relationship to true north at all; the compass would land wherever that
+centroid happened to sit.
+
+- **`northFacingLon()`** (new, right next to `updateCompass()`): the exact algebraic
+  inverse of `updateCompass()`'s own heading formula (`rot = -view.lon*180/PI - northDeg`;
+  `rot` is 0 — cone at 12 o'clock, i.e. pointing north — when `view.lon = -northDeg` in
+  radians). An uncalibrated project (`northDeg` unset, the compass's documented default)
+  resolves this to lon 0.
+- **AERIAL VIEW's handler** (`openNodeContent`'s `'aerial'` branch — the one live code
+  path, used by both a real click and the auto-open-as-default-screen case) still calls
+  `computeHome()` for its pitch/FOV (nadir, max zoom out — unchanged, still a sensible
+  "full site overview" framing) but now flies to `northFacingLon()` instead of
+  `state.home.lon` for the direction. The ⊡ recenter icon and the admin reset button,
+  which also use `computeHome()`, were deliberately left untouched — the request was
+  specifically about the AERIAL VIEW menu action, and changing an established, separate
+  control wasn't asked for.
+- **Removed now-genuinely-dead code found while touching this area**: a one-time
+  `wireViewControls` block wired `.cat-btn` clicks on `#catNavL1`/`#catNav`'s ORIGINAL
+  static placeholder markup, at boot, before `renderClientSidebar()`/
+  `renderLandmarkCategoryNav()` ever replace that markup's `innerHTML` — so those
+  listeners were attached to DOM nodes thrown away before a visitor could ever click them,
+  and the block's own copy of the aerial handler was a second, now-stale place the
+  centroid-vs-north bug could have been "fixed" without anyone noticing the live code path
+  was untouched. `#catBackBtn`'s wiring (a stable element, never replaced) was kept.
+  `index.html`'s static placeholder buttons inside `#catNavL1`/`#catNav` (referencing
+  content-type names and category names that no longer even match the current builtin-
+  node/live-category-data design) were emptied out to match — both navs are populated
+  entirely by their respective render functions.
+- **Verified:** `node --check` clean, no duplicate `id=` in `index.html` (258, unchanged
+  count — only inner button markup was removed, no ids). 7 assertions against the actual
+  extracted `updateCompass`/`northFacingLon` — facing north always reads as rot≈0 on the
+  compass across the default and five different calibrated `northDeg` values, and a
+  genuinely off-north view is correctly NOT read as zero — confirming the two formulas
+  are true inverses of each other, not just "close."
+  ⚠️ Not yet confirmed with a live click in a real browser — this project's headless
+  tooling can't reliably exercise the animated camera fly-to itself (see CLAUDE.md's
+  gotchas on why), so this is verified at the math level, not watched happening on screen.
+
+---
+
+## 2026-09-09 (compass restyled to a classic nautical rose, matching a supplied reference image)
+
+`index.html`, `styles.css`. The user supplied a reference image (a standard nautical
+compass rose: white/black split 8-point star, solid red north spike, gray ring, bold navy
+N/E/S/W outside it) and asked to use it as the compass. The existing compass already had
+the right STRUCTURE (an 8-point rose split light/dark, a separate red north overlay, two
+ring circles, N/E/S/W labels) from its 2026-09-07 redesign — this was a palette swap, not
+a rebuild, and the fixed-rose/rotating-cone BEHAVIOR (north stays at the top, a shaded
+cone sweeps to show heading) is unchanged, since the reference is a static rose image and
+says nothing about how a live heading indicator should move.
+
+- `.cp-dk`/`.cp-sm-dk` (the star's dark halves): blue-gray → solid near-black (`#14161a`).
+- `.cp-ring`: translucent white → solid gray (`#9aa0a8`), thicker (2px → 5px) to read as
+  the reference's donut band. `.cp-ring-2`: a second, thinner light-gray ring.
+- `.cp-face`: switched from a radial gradient (`url(#cpFace)`, now-unused `<defs>` removed
+  from `index.html`) to a flat translucent white, closer to the reference's plain white
+  face while staying an HUD overlay rather than a fully opaque disc.
+  `.cp-n` (the north spike) keeps its existing solid red — already correct.
+- `.cp-lbl`: white-with-dark-outline → bold navy (`#1b2a6b`) with a white outline instead
+  of removing the outline entirely — a flat navy label with no halo would vanish over a
+  dark patch of the pano photo, which the reference's plain-white background never has to
+  contend with. `.cp-lbl-n`'s separate reddish N styling was removed (the reference shows
+  all four letters in the same navy; only the spike is red) — N now shares `.cp-lbl` with
+  the others.
+- **Verified visually** (not just code-reasoned): built an isolated standalone HTML page
+  with the exact compass markup/CSS and screenshotted it in headless Chrome (this project's
+  documented live-app headless limitations — async boot timing, WebGL — don't apply to a
+  static SVG+CSS page with no app logic behind it) — gray ring, white/black star, red
+  north spike, navy labels with a legible halo, and the rotating cone all render as
+  intended, closely matching the supplied reference. `node --check` clean, CSS brace count
+  balanced (765/765), no duplicate `id=` in `index.html`, no leftover reference to the
+  removed gradient/class anywhere in the codebase.
+
+---
+
+## 2026-09-09 (a video default screen now actually autoplays)
+
+`app.js`. Request: "the video should auto play if its on top of the menu as its acting as
+a default screen." A video menu item auto-opened by `autoOpenTarget` already went through
+`openClientVideoModal` — the exact same function a real click uses, which already calls
+`player.play()` / appends YouTube-Vimeo `autoplay=1` — so on paper this should already
+have worked. It didn't, for a browser reason specific to firing with no click behind it:
+**a real click IS the "user gesture" browser autoplay policies require for unmuted
+playback; an automatic boot-time `play()` call has none, so the browser silently rejects
+it and the video just sits paused** — invisible in code (the rejection is swallowed by
+`.catch(() => {})`) and easy to miss without watching it happen. Autoplay policies exempt
+MUTED playback from the gesture requirement, so that's the fix.
+
+- **`autoOpen` threaded through the click path**: `fireAutoOpen` → `activateMenuNode(node,
+  {fromRoot, autoOpen: true})` → `openNodeContent(node, info, {autoOpen})` →
+  `openClientVideoModal(title, content, {autoOpen})`. A REAL click never sets it (stays
+  `false` by default at every level), so manual playback is byte-for-byte unchanged —
+  this only ever fires differently for the no-gesture auto-open path.
+- **Direct `<video>` (mp4/webm/etc.):** `player.muted = !!autoOpen` set unconditionally
+  right before `.play()` — unconditionally because the player element is reused across
+  opens, so a later MANUAL open of a different video must not inherit a stale mute left
+  over from an earlier auto-opened one. `controls` (already on `#clientVideoPlayer` in
+  `index.html`) gives the visitor a one-tap unmute.
+- **YouTube/Vimeo:** `getYoutubeEmbedUrl(url, muted)`/`getVimeoEmbedUrl(url, muted)` gained
+  a second parameter appending `&mute=1` / `&muted=1` (their respective real param names)
+  only when true — the manual-click call sites simply don't pass it, so their output is
+  identical to before.
+- **Verified:** `node --check` clean; 5 assertions against the actual extracted
+  `getYoutubeEmbedUrl`/`getVimeoEmbedUrl` confirming the no-argument and `false` cases
+  produce byte-identical output to before the change (manual click unaffected) and the
+  `true` case adds exactly the right mute param for each platform.
+  ⚠️ Owed a real check: does the target browser actually honor `muted` set via JS on an
+  autoplay-attributed `<video>` fired with zero gesture, and do YouTube/Vimeo's players
+  accept mute this way from an iframe `src` set with no gesture either — this is standard,
+  well-documented autoplay-policy behavior, but "should work per spec" and "confirmed
+  working in this exact modal" are different claims, and only the first is established
+  here.
+
+---
+
+## 2026-09-09 (AERIAL VIEW / LANDMARKS become ordinary, draggable menu items)
+
+`app.js`, `styles.css`. Request: "even landmark and aerial view should be movable in the
+menu section in the admin and whoever is on top of the menu will be default even in
+presence of landmark and aerial view." The previous design (`menuConfig.builtins`, two
+entries up) deliberately made these two rows fixed-first and non-draggable, to protect
+them from being lost — the right call at the time, wrong once "should be movable" became
+the actual requirement.
+
+**Redesigned: AERIAL VIEW and LANDMARKS are now ordinary tree nodes**, marked
+`builtin: 'aerial'|'landmarks'`, living wherever the admin has dragged them — mixed in
+with authored items in the same array, in the same `menuConfig.tree`. This gets every
+existing node mechanism for free instead of needing its own: the existing
+`dragstart`/`dragover`/`drop` handlers (keyed on `data-node-id`) reorder them exactly like
+any authored item; the existing double-click-to-rename (`.tree-title-text[data-node-id]`
+→ `updateNode`) renames them; `activateMenuNode`/`openNodeContent` already dispatched on
+`contentType === 'aerial'|'landmarks'` from an earlier design and needed no changes at all.
+Only two things stay special-cased: an `enabled` flag (the ON/OFF switch — an authored
+node has no such concept, but these two have no content to configure, so "off" is a real,
+meaningful state) and no delete button.
+
+- **`ensureBuiltinNodes()`/`builtinNodeExists()`** (new, replacing `menuBuiltins()`/
+  `setBuiltinEnabled()`/`renameBuiltin()`, all removed): guarantees both builtin nodes
+  exist SOMEWHERE in the tree (searched recursively, so one dragged into a folder isn't
+  duplicated), injecting a default at the top exactly once if either is missing. Covers a
+  brand-new project, migrates an older project's `menuConfig.builtins` values onto the
+  newly-injected node (enabled/title carried over, nothing resets), and **self-heals** if
+  a builtin is ever lost as a side effect of deleting a folder it had been dragged into —
+  rather than guard every deletion path against that, it's simply allowed to happen and
+  reappears at the top on the next render. Called from `getMenuTree()`, the existing
+  single chokepoint already used everywhere.
+- **`cleanNodeForSave`** (the save whitelist) now carries `builtin`/`enabled` through —
+  the standing gotcha here (a new field not added to this whitelist is silently dropped on
+  every save) applied immediately, since these two fields didn't exist when the whitelist
+  was last touched.
+- **`renderAdminMenuTree`**: the separate `renderBuiltinMenuRows()` prepend is gone;
+  `renderNodeRow` now checks `node.builtin` and delegates to `renderBuiltinNodeRow(node,
+  depth)` inline, wherever the node falls in the normal recursive walk — so it renders at
+  the right depth/indent whether at root or dragged into a folder, and drags/drops via the
+  exact same generic code path with zero node-type-specific handling needed. The row keeps
+  its ✓-switch and ▾ info-arrow (unfolding the live landmark category → landmark list for
+  LANDMARKS, unchanged from before) instead of the usual overflow (rename/delete) menu —
+  rename still works via the ordinary double-click, and there's deliberately no delete
+  button. "No menu items created yet" now means no AUTHORED item exists besides the two
+  builtins (which always render, never hidden from the admin) rather than an empty tree,
+  since the tree is never truly empty any more.
+- **`renderClientSidebar`**: the special builtin-prepend + `data-act="aerial"/"landmarks"`
+  buttons are gone — the root-level loop just renders every tree node (skipping any with
+  `enabled === false`) via the same `data-node-id` buttons as always.
+  **`wireClientSidebarButtons`**'s dead `data-act` branches were removed with it —
+  `activateMenuNode` already handles everything generically.
+- **`computeAutoOpenTarget`** simplified to match: picks `getMenuTree().find(n => n.enabled
+  !== false)` — the first item that isn't a switched-off builtin — resolves it once via
+  `resolveFolderTarget`, and returns `null` only for the aerial-specific WYSIWYG-preserving
+  case (unchanged reasoning: aerial has no content of its own, and firing its camera-reset
+  action on every load would fight the admin's saved opening shot). Every other content
+  type, including `landmarks` now, fires through the single generic `activateMenuNode`
+  path — `fireAutoOpen` no longer special-cases `'landmarks'` separately, since
+  `openNodeContent` already calls `openLandmarksCategoryPicker()` for that contentType.
+- **Verified** via the same real-function-extraction method used throughout this project:
+  14 assertions against the actual extracted `ensureBuiltinNodes`/`builtinNodeExists`/
+  `getMenuTree`/`computeAutoOpenTarget`/`fireAutoOpen` — fresh-project injection (aerial
+  then landmarks, both enabled), aerial-on-top stays a no-op, an authored item DRAGGED to
+  position 0 becomes the target and fires directly (no aerial flash), landmarks dragged
+  above aerial becomes the target, a disabled top item is skipped in favour of the next
+  one, both builtins disabled falls through to an authored item, repeated `getMenuTree()`
+  calls never duplicate an existing builtin, an old project's `menuConfig.builtins`
+  enabled/title values migrate onto the newly-injected node, admin mode always decides
+  null, and a builtin nested inside a folder is found (not duplicated) by the recursive
+  existence check. `node --check` clean, CSS brace count balanced (766/766), no duplicate
+  `id=` in `index.html`.
+- ⚠️ Not yet confirmed in a live browser — dragging a builtin row by its handle, watching
+  the switch/rename/expand-arrow render and behave correctly inline (rather than at the
+  old fixed top position), and the real timing behaviour end-to-end are all owed a real
+  click-through; this project's headless tooling can't reliably exercise admin drag-and-
+  drop or boot timing (see CLAUDE.md's gotchas).
+
+---
+
+## 2026-09-09 (boot curtain: the default-screen switch is never visible happening any more)
+
+`index.html`, `styles.css`, `app.js`. The previous fix (retiming `autoOpenTopMenuItem`'s
+three fire points — below) turned out not to be enough: reported again, same symptom,
+same wording. Root cause: retiming made each target fire as early as ITS data allowed, but
+the pano itself starts rendering the instant its texture decodes — well before any of the
+three fire points, even the earliest one. So there was always a window, however short,
+where the pano was visibly showing its untouched boot state before the switch happened.
+Retiming could shrink that window; it couldn't close it, because the pano and the decision
+were on two different clocks.
+
+**The actual fix: don't let the pano be visible until the decision has already been
+applied.** A solid full-viewport `#bootCurtain` (new, `index.html`/`styles.css`, `z-index:
+999999` — above modals too, so an auto-opened video/PDF doesn't flash into view early
+either) covers everything from first paint. `hideBootCurtain()` (app.js, idempotent) is
+called at exactly the point each target's fire call already happens:
+
+- No target (aerial on top) or a `'node'` target (already fired pre-pano): revealed right
+  after `initThree()` — the earliest point there's anything correct to show.
+- A `'landmarks'` target: revealed in the same `if` block as its `fireAutoOpen` call,
+  right after `setLandmarks()`.
+- A `'panotour'` target: revealed alongside its `fireAutoOpen` call, right after
+  `setTours()`.
+- An unconditional safety-net call at the very end of the success path, and one in the
+  `catch` block — both idempotent — so a gap in the kind-matching logic, or a boot error,
+  can never leave a visitor staring at a black screen forever.
+
+The retiming from the previous entry is still there and still correct (each target
+firing at its own earliest-possible point rather than waiting for everything) — the
+curtain is what turns "as early as possible" into "the visitor never sees anything else,"
+which is what "make sure it directly switched" actually required.
+
+- **Verified:** `node --check app.js` clean, CSS brace count balanced (766/766), no
+  duplicate `id=` in `index.html`, and the live server confirmed serving `#bootCurtain`'s
+  markup and all 5 `hideBootCurtain()` call sites (+ its definition = 6 occurrences) in
+  the delivered `app.js`. ⚠️ Still owed: an actual timed browser load to see the curtain
+  behavior with a real eye — this project's headless tooling can't reliably exercise
+  boot timing (see CLAUDE.md's gotchas), so the fix is verified as logically sound and
+  correctly ordered, not yet watched.
+
+---
+
+## 2026-09-09 (default-screen switch now fires as early as its own data allows, not after everything loads)
+
+`app.js`. Reported: "still the aerial view comes for few seconds as a default screen then
+it switches to whats so ever is on top of the menu" — the previous implementation
+(`autoOpenTopMenuItem`, below) fired exactly once, at the very end of boot, after data,
+landmarks, amenities, tours, AND the project-bar probe had all finished loading in
+sequence. The pano was already rendering in its normal boot state the whole time (the
+render loop starts as soon as the pano texture decodes, long before that point), so the
+visitor saw the default view first and only then watched it jump — a real, visible delay,
+not the "direct switch" the feature was supposed to be.
+
+- **Split the single function into a decide step and a fire step.**
+  `computeAutoOpenTarget()` runs immediately after `renderClientSidebar()` — as soon as
+  the menu tree and built-in config are known, well BEFORE the pano even starts loading —
+  and returns `null` (aerial-on-top, unchanged reasoning) or `{kind, node?}` where kind is
+  `'landmarks'`, `'panotour'`, or plain `'node'`. Resolving whether the top item is a
+  `panotour` reuses `resolveFolderTarget` (the same folder-skipping logic a real click
+  goes through), so a folder wrapping a single panotour child is still detected correctly.
+  `fireAutoOpen(target)` is the actual action — unchanged from before
+  (`openLandmarksCategoryPicker()` / `activateMenuNode(node, {fromRoot:true})`).
+- **Three fire call sites, each as early as its target's data allows** — replacing the one
+  end-of-boot call:
+  1. Right after `renderClientSidebar()` — a plain content item (video/pdf/gallery/
+     contact/link/external tour) or a folder drill fires HERE, before the pano has even
+     started loading, since none of that needs landmarks/tours/amenities/anything.
+  2. Right after `setLandmarks(lms)` — a `landmarks` target fires here: the earliest point
+     `state.landmarks` actually has data for the "ALL" framing to aim at (and the earliest
+     point `three`/the camera exist at all, both prerequisites for `applyCategoryFilter`'s
+     camera move).
+  3. Right after `setTours(trs)` — a `panotour` target fires here, the earliest point
+     `state.tours` (which `openClientPanoTour` reads directly) is populated.
+  All three skip waiting for amenities, the project-bar `/api/projects` probe, and offline
+  registration, none of which any auto-open target actually needs.
+- **Verified** via the same real-function-extraction method: 9 assertions against the
+  actual extracted `resolveFolderTarget`/`computeAutoOpenTarget`/`fireAutoOpen` — aerial-
+  on-top still decides `null`, a landmarks target is decided before any landmark data
+  exists (proving the decide/fire split), a plain video node fires immediately with
+  `fromRoot:true`, a `panotour` node (direct AND behind a single-child folder skip) is
+  detected as needing tours without touching `state.tours`, a real multi-child folder
+  decides a plain `'node'` drill rather than treating it as data-dependent, and admin mode
+  always decides `null`. `node --check` clean.
+  ⚠️ The actual TIMING improvement (how much sooner the switch now appears) still needs a
+  real browser load-and-watch to confirm — this fix is verified logically correct
+  (the right thing fires at the right, earlier point) but the visible "few seconds" the
+  user described was measured by eye, not by an instrumented clock, so the exact
+  before/after delta is not independently confirmed here.
+
+---
+
+## 2026-09-09 (the client's default screen is whatever menu item is on top)
+
+`app.js`. Request: "whatsoever menu is on top of the menu will be set as the default screen
+for the client" — confirmed via a follow-up question that this means the top item should
+**auto-open on load**, not just render pre-highlighted.
+
+- **`autoOpenTopMenuItem()`** (new, called once at the very end of boot's success path,
+  right after `registerOfflineSupport()`, gated `!state.admin`): finds whatever renders as
+  the literal first row of the client menu — a built-in row if enabled, else the first
+  authored item — and fires the exact same action a real tap on it would
+  (`openLandmarksCategoryPicker()` for LANDMARKS, `activateMenuNode(top, {fromRoot:true})`
+  for an authored item, which itself dispatches to `openNodeContent` and handles a folder,
+  a gallery-of-images, a contact card, or empty-folder identically to a click — see
+  `resolveFolderTarget`). Reruns on every fresh load, since a "default screen" is what
+  greets the visitor before any interaction, not a one-time flag.
+  **AERIAL VIEW is the one deliberate exception:** it has no content of its own to open —
+  clicking it resets the camera to a computed full-site overview, which is a DIFFERENT
+  view from the admin's saved WYSIWYG opening shot. Since AERIAL VIEW is enabled by
+  default on every project, auto-firing that reset on every load would have silently
+  broken the "client reproduces the saved view" contract for every existing project the
+  moment this shipped. When AERIAL VIEW is on top, `autoOpenTopMenuItem()` does nothing —
+  the boot view already **is** the correct default screen in that case. In practice this
+  means the feature is dormant for most projects today (aerial ships enabled and first)
+  and only activates once an admin turns AERIAL VIEW off or otherwise changes what's on
+  top — which is exactly the condition the request describes.
+- **Verified** via the same real-function-extraction method used throughout this project:
+  5 assertions against the actual extracted `autoOpenTopMenuItem` — aerial-on-top is a
+  no-op (preserves WYSIWYG), aerial-off/landmarks-on opens the category picker,
+  both-off activates the first authored node with `fromRoot:true`, an empty tree no-ops
+  without throwing, and admin mode is always a no-op regardless of config. `node --check`
+  clean. ⚠️ Not yet confirmed in a live browser — the WYSIWYG-preservation reasoning and
+  the click-parity (reusing `activateMenuNode`/`openLandmarksCategoryPicker` rather than
+  new logic) are the safety net, but a real load-and-watch check is still owed, especially
+  for how a video/PDF/tour item behaves when it auto-opens the instant the page loads
+  (autoplay policies may still block sound/playback even though the modal itself opens).
+
+---
+
+## 2026-09-09 (removed the Landmarks tab's intro/legend text and bulk Show-all/Hide-all controls)
+
+`index.html`, `styles.css`. Follow-up to the switch change above, from a screenshot of the
+Landmarks tab: the intro paragraph, the ✓/✕/× legend box (which now described a control
+that no longer exists — it explained the old button PAIR, not the switch it was just
+replaced with), and the `#axLmCount`/`✓ Show all`/`✕ Hide all` bulk row were all removed
+per explicit confirmation of the full scope ("remove everything in the screenshot").
+
+- `index.html`: `#axTabLandmarks` now goes straight from the tab header to
+  **＋ Add landmark** and the list — no `.ax-lm-intro` paragraph, no `.ax-lm-legend` box,
+  no `.ax-lm-bulk` row.
+- No `app.js` changes needed — every reference to the removed elements (`els.axLmCount`,
+  `els.axLmShowAll`, `els.axLmHideAll`) was already null-safe (`?.` / an `if` guard in
+  `refreshLmList`), so `setAllLandmarksFeatured` simply becomes unreachable from the UI
+  rather than erroring; the per-row switch (previous entry) is now the only way to change
+  a landmark's default-visibility from the admin.
+- `styles.css`: removed the now-fully-orphaned `.ax-lm-bulk`, `.ax-lm-count`, `.ax-lm-legend`
+  (+ its `.ax-lm-key*` sub-selectors) rules. Kept `.ax-lm-li.is-hidden-default` — the dashed
+  outline on a not-shown-by-default landmark's row — since that's unrelated per-row styling,
+  not part of what was asked to go, and `.ax-lm-intro` itself (still used by the Amenities
+  and Tour tabs' own intro paragraphs).
+- **Verified:** `node --check app.js` clean, CSS brace count balanced (763/763), no
+  duplicate `id=` in `index.html` (258 total, same structural integrity check as every
+  merge/edit this session).
+
+---
+
+## 2026-09-09 (per-landmark show-by-default control switched from a ✓/✕ pair to an ON/OFF switch)
+
+`app.js`, `styles.css`. Follow-up request, from a screenshot of the admin Landmarks tab
+list: "add toggle button here also but keep that x for removing the landmark" — i.e. match
+the ON/OFF switch just built for the admin menu builder's built-in rows, replacing the ✓/✕
+button pair, while leaving the separate × delete button untouched.
+
+- **Generalised the switch CSS** — renamed `.builtin-switch*` to `.ui-switch*` (kept
+  `.builtin-switch-input` as a second class on the same element so the menu builder's
+  existing wiring selector needed no change) so the same control now serves both the menu
+  builder's built-in rows and this per-landmark toggle without duplicating the styling.
+- **`refreshLmList()`**: the `grp`/`mkVis` two-button block is gone, replaced by one
+  `<label class="ui-switch ax-lm-vis-switch">` bound to `lm.featured` via the existing
+  `setLandmarkFeatured(lm, on)` (unchanged — still idempotent, still fires
+  `refreshLmList`/`renderLandmarks`/`onLandmarksChanged`). The delete `×` button is
+  untouched, same position, same `deleteLandmark(lm.id)` call.
+  **Why this doesn't reopen the 2026-09-04 bug the ✓/✕ pair was built to fix:** that bug
+  was a single button whose only signal was "pressed = active," so clicking down a list of
+  already-active items looked identical to clicking a list of items you wanted to activate
+  — the same gesture, opposite of what happened. A real switch has an unambiguous ON/OFF
+  position (thumb side + colour) that reads correctly regardless of prior state, which is
+  the same property that made the ✓/✕ pair safe — just expressed as one control instead of
+  two. This mirrors the reasoning already used for the menu builder's switch two entries up.
+- Removed the now-dead `.ax-lm-vis-grp`/`.ax-lm-vis`/`.ax-lm-vis-yes`/`.ax-lm-vis-no` CSS
+  (nothing in the DOM uses them any more).
+- **Verified:** `node --check app.js` clean, CSS brace count balanced (770/770),
+  `setLandmarkFeatured`'s own idempotency guard is untouched and — since a real checkbox's
+  `change` event only fires on an actual state flip — cannot even be called with a
+  no-op value from this control the way a repeated button click could.
+  ⚠️ Same caveat as the built-in-row switch: the visual on/off rendering itself is
+  code-reasoned, not confirmed in a live browser click-through yet.
+
+---
+
+## 2026-09-09 (AERIAL VIEW / LANDMARKS become built-in, togglable admin menu rows; the landmark category picker becomes live data)
+
+`app.js`, `styles.css`. The Virtual Tours merge (below) had exposed that AERIAL VIEW and
+LANDMARKS aren't hardcoded client rows any more — a project's admin has to author them as
+menu items, or they're simply absent (this is exactly what happened to `anandman`, reported
+as "the aerial view and the landmark menu is been removed"). The immediate fix was a
+one-off hand-edit of that project's `alignment.json`; this is the real feature: the boss's
+follow-up request was to make both rows **built-in** to the admin's menu builder (present
+by default, toggle-off rather than delete) and to make the LANDMARKS row's contents track
+the actual Landmarks tab data instead of anything authored.
+
+**A discovery that shaped the design:** the client's landmark category picker (`#catNav`,
+the HEALTHCARE/EDUCATION/COMMERCIAL/CONNECTIVITY/LIFESTYLE/TEMPLE buttons) turned out to be
+static markup in `index.html`, identical across every project, wired ONCE at boot
+(`wireViewControls`) and never rebuilt. A landmark whose category wasn't one of those six
+names had no button to reach it at all, in every project, silently. Fixing the admin side
+properly meant fixing this first, since both now read from the same source.
+
+- **`menuConfig.builtins`** (new, in `alignment.json`, read via `menuBuiltins()`): a config
+  block SEPARATE from the authored `tree`, `{ aerial: {enabled, title}, landmarks: {enabled,
+  title} }`. Missing on any project ⇒ both default to `enabled:true` with their original
+  titles, so nothing changes for a project that never touches this. Deliberately not just
+  two more tree nodes — the whole point is they can't be dragged, deleted, or reparented,
+  only toggled and renamed. `setBuiltinEnabled`/`renameBuiltin` are the two mutators, both
+  idempotent (no-op if the value wouldn't change, same discipline as `setLandmarkFeatured`).
+- **`effectiveLandmarkCategory(lm)` / `getLandmarkCategories()`** (new): the single place
+  that now decides what category a landmark belongs to — an explicit `category` field if
+  set, otherwise the same icon/keyword inference `isLandmarkMatchCategory` already used
+  (re-run against each known category name rather than re-deriving the rules), falling back
+  to `UNCATEGORIZED` rather than silently dropping a landmark nobody's filed yet.
+  `getLandmarkCategories()` groups `state.landmarks` by it, first-seen order. Both the
+  client's `#catNav` and the admin's built-in LANDMARKS row read from this one function, so
+  they cannot drift apart the way the old static markup already had.
+- **`renderLandmarkCategoryNav()`** (new) rebuilds `#catNav` from `getLandmarkCategories()`
+  — called from `setLandmarks()` (boot, file/session load) and `onLandmarksChanged()` (any
+  admin edit), so the picker a client sees always matches what's actually on the Landmarks
+  tab, for every project, not just the ones with the six original category names.
+- **`renameLandmarkCategory(oldName, newName)`** (new): renames a category everywhere at
+  once — every landmark currently filed under `oldName` (explicit OR inferred) gets an
+  EXPLICIT `category = newName`. Confirmed with the user before building: this is a real
+  bulk data change, not a cosmetic label swap, and it's what makes a rename "stick" even
+  for a landmark that only ever had an inferred category before.
+- **Admin menu builder** (`renderAdminMenuTree`) now renders AERIAL VIEW and LANDMARKS as
+  the first two rows, always, via `renderBuiltinMenuRows()`: each has a ✓-styled ON/OFF
+  switch (green = shown to the client, matching the request that a "crossed" item simply
+  stops appearing — chosen as a real switch rather than the ✓/✕ button PAIR used for
+  landmark `featured`, at the user's explicit preference for this control) and a ▾ arrow
+  that expands a plain-language note on what the row does. The title of each row is
+  double-click-to-rename, exactly like an authored menu item's title.
+  **LANDMARKS' expansion additionally lists the live category → landmark tree**
+  (`renderBuiltinLandmarkCategories()`): each category name is double-click-to-rename
+  (→ `renameLandmarkCategory`, confirmed to bulk-update), and each landmark under it is
+  both clickable (jumps to it on the Landmarks tab, where the full editor already lives)
+  and double-click-to-rename (writes `lm.label` directly, same as the Landmarks tab's own
+  edit panel). The landmark name's `click` handler stops its own propagation so a
+  double-click doesn't fire the "jump to tab" action on its first click.
+- One pre-existing drag-and-drop guard needed a one-line fix: `dragover` on a `.tree-node-row`
+  now bails out early when the row has no `data-node-id` (a built-in row), so hovering a
+  dragged authored item over AERIAL VIEW/LANDMARKS no longer shows a misleading drop
+  highlight (the actual drop already safely no-opped via the existing `!targetId` guard —
+  this only fixes the cosmetic false affordance).
+- **Verified via the same real-function-extraction method used throughout this project**
+  (headless browser automation can't reliably exercise admin UI here — see CLAUDE.md
+  gotchas): 19 assertions running the actual `effectiveLandmarkCategory`,
+  `getLandmarkCategories`, `renameLandmarkCategory`, `menuBuiltins`, `setBuiltinEnabled`,
+  and `renameBuiltin` (brace-matched out of `app.js`, not retyped) against constructed
+  state — explicit-category grouping, icon-inferred grouping, uncategorized fallback,
+  bulk rename across both explicit and inferred landmarks, no-op safety on an
+  empty/unchanged/missing category, builtins' defaults, and idempotency of both setters —
+  all passed. `node --check app.js` clean; CSS brace count balanced (776/776); no
+  duplicate `id=` introduced (the new UI is all class/data-attribute driven, no new ids).
+  ⚠️ The interactive parts specifically — the switch's visual on/off state, the ▾ expand
+  animation, and double-click-rename swapping the span for an input — are code-reasoned
+  and unit-tested at the logic layer only; a real browser click-through is still owed,
+  same caveat as every other admin-UI change this project's gotchas describe.
+
+---
+
+## 2026-09-09 (merged the "Virtual Tours" branch commit dd197ed into this session's work)
+
+The Tour feature (previous entries below) landed on `origin/feature/plot-map-admin-updates`
+via a separate push while this session had its own uncommitted changes (settle-and-hold
+camera, compass/d-pad, SVG footer icons, audio-extension caching) sitting in the same 7
+files. Merged via `git stash push -u` → `git merge --ff-only` → `git stash pop` rather than
+a merge commit, since the local branch had no commits of its own yet — only working-tree
+edits.
+
+- **Auto-merged cleanly** (no conflict, textually): `app.js`, `index.html`, `server.py`,
+  `styles.css`, `CLAUDE.md`.
+- **Manually resolved:**
+  - `sw.js` — both sides bumped `VERSION` (boss's `v2` for the network-first project-config
+    change, this session's `v5` for widening `isRangedMediaPath` to cover audio
+    extensions). Kept `v5` (higher, so both cache-invalidation reasons are covered by one
+    bump) and folded both change notes into one comment.
+  - `CHANGELOG.md` — both sides prepended entries at the top; reordered so the boss's
+    2026-09-08 tour entries sit above this session's 2026-09-07 entries, preserving strict
+    newest-first order.
+- **Verified, not just trusted to text-merge cleanly:** `node --check app.js` / `sw.js`,
+  `ast.parse` on `server.py`, brace-balance count on `styles.css` (752/752), no duplicate
+  `id=` attributes in `index.html`, every `$('id')` lookup in `app.js` resolves against
+  `index.html` (the handful that don't — `axSave`, `nodeChildFields`, `panoHint`, etc. —
+  were confirmed pre-existing via `git show` against this session's own last commit, not
+  something the merge introduced), and this session's own UI ids (compass/d-pad/audio/
+  fullscreen/auto-pan) plus the boss's new tour ids (`tourBar`, `tourHotspots`) both
+  present. Server boot-tested: `/api/projects` lists the boss's new `pano-testamit`/
+  `panotour-demo`/`test12` alongside this session's `anandman`/`eleganza`; both a plain
+  project's `plots.csv` and a tour-only project's `tour.json` serve `200`.
+- Not yet committed — the merge is complete in the working tree/index, staged, but left as
+  a pending commit pending explicit confirmation.
+
+---
+
 ## 2026-09-08 (virtual tour Phase 1, step 1: tour.json data model + admin Tour tab)
 
 First code for the virtual tour. `app.js`, `index.html`, `styles.css`. Ships the data
@@ -54,6 +1103,339 @@ and answered every open question. Recorded in `VIRTUAL-TOUR.md`:
 
 Next: implement Phase 1 in the order data model → Tour tab → hotspot authoring → client
 crossfade viewer → menu launch. See `VIRTUAL-TOUR.md` Phase 1.
+
+---
+
+## 2026-09-07 (landmark categories SETTLE and hold, matching the reference exactly)
+
+Reversed the continuous sweep added earlier this session, at the user's explicit request
+after comparing both behaviours against the reference tour and preferring its
+settle-and-stop: "can we do that with our website, it looks more appealing".
+
+**Root-caused the reference's actual behaviour first, rather than guessing.** Read
+`tdvplayer.js`'s own sequence-playback code (not the exported tour data, the PLAYER
+runtime) and found the exact mechanism: a sequence's `repeat` property defaults to **1**
+when unset —
+```js
+var f = this.Xb.get("repeat", 1);
+this.PM.length > 0 && (f == 0 || this.Uja < f) ? this.f4(0) : (/* fire done, stop */)
+```
+`repeat: 0` would loop forever; anything else plays the movement list that many times and
+stops. **None of Eleganza's category sequences set `repeat`**, so all of them play their
+one movement (a 12.8–25.6° drift) once and hold still — confirmed, not inferred. Only
+its aerial/default view (360°, one lap) and Temples (1800°, five laps) genuinely spin, and
+even those stop after that single pass — there is no perpetual loop anywhere in the tour.
+
+**Change:** a landmark category now flies to its settled shot (unchanged: tightest-cluster
+aim, fixed hfov 110 → per-aspect vertical FOV) and then holds — no ping-pong, no sweep, no
+idle drift. The ALL/aerial free 360° idle spin is untouched, since it's a separate,
+longer-standing feature this conversation never targeted.
+**Trade-off, stated plainly:** the two widest categories (Connectivity 140°, Commercial
+144°) can't fit every landmark in one 110° frame, so an outlier will sit outside the
+automatic shot. That is not a regression — it's the reference's own trade-off (its
+hand-picked shots don't guarantee full coverage either) — and the outlier stays reachable
+by a manual drag, which still releases the arc exactly as before.
+
+**Removed as genuinely dead code**, not just disabled: `computeLandmarkPanRange()` and its
+four supporting constants (`LANDMARK_EDGE_PAD`, `LANDMARK_FIT_FOV_CAP`,
+`LANDMARK_FIT_FOV_FLOOR`, `LANDMARK_SWEEP_FOV`, `LANDMARK_SWEEP_MS`,
+`LANDMARK_SWEEP_MIN_RATE`) and `state.autoPanDir`, all confirmed via grep to have no other
+callers before deletion. `LANDMARK_SWAY_HALF` survives with a new, accurate comment — it's
+now just the half-width of the arc a manual drag releases from.
+
+**Verification, and an honest correction mid-session.** A live-browser timing test first
+appeared to confirm the fix (0.000° drift over 6s on a category); a second test of the
+UNCHANGED ALL-view free-spin also showed 0.00° movement, which shouldn't happen — that
+contradiction is what caught it. Instrumenting `requestAnimationFrame` directly showed
+**only 3 real frames total, then the render loop stopped calling it** — the same headless
+`--virtual-time-budget` limitation documented elsewhere in this file, so BOTH timing
+results were artifacts of nothing rendering, not evidence either way. Discarded, and
+replaced with the reliable method already used successfully elsewhere in this project:
+extract the real idle-autopan conditional from `app.js` (brace-matched, not copy-pasted)
+and execute it directly in Node against both states. Result:
+`landmarkPanRange` truthy → `state.view.lon` provably unchanged; `landmarkPanRange` null
+→ the free-spin line still runs and moves it — both PASS, deterministically, independent
+of any browser. `node --check` clean; the menu-skip and `featured`-flag regression suites
+both still green.
+
+---
+
+## 2026-09-07 (auto-pan button says what it DOES)
+
+The auto-pan toggle was a `🔄` emoji, which says "something rotates" but not what pressing
+it will do. Replaced with an SVG that shows the **action**: pause bars while the camera is
+drifting (press = stop), a play triangle once stopped (press = resume), wrapped in two arcs
+so it reads as *camera motion* rather than a media control for the audio button beside it.
+Title and `aria-label` follow — "Stop the camera moving" / "Let the camera move again" — and
+`aria-pressed` reports the stopped state. `updateAutoPanToggleUI()` owns both, and is called
+at boot so the button matches `state.autoPan` from the first frame instead of relying on a
+hardcoded `is-active` in the markup.
+
+Two sizing findings, from rendering the candidates standalone at 4× rather than guessing:
+arrowheads on the arcs collapse into ~2px blobs at the 19px this actually renders at and
+merge with the centre glyph, so they were dropped; and arcs spanning 100° read as plain
+parentheses — widened to 140° they read as a broken ring. Iterating on the standalone
+render is also the practical way to do this: the bundle export is 1.3GB and ~40s a round.
+
+**Verified:** clicking flips `is-active` true→false, `.pan-stop` display block→none and
+`.pan-go` none→block, and the title changes to match.
+
+---
+
+## 2026-09-07 (compass redesign, SVG icons, smooth camera motion)
+
+- **Compass rebuilt: the rose is FIXED, a shaded cone sweeps.** The first version rotated
+  the whole rose and counter-rotated each letter to keep it upright — which works, but the
+  reference does the opposite and it reads far better: north stays at the top and a
+  translucent cone swings round to show where the camera is pointing. Only `#compassCone`
+  is transformed now, so the letters need no counter-rotation at all. Face, 8-point
+  split-shading rose, ring and red north needle restyled to match.
+- **Footer icons are SVG, not emoji** — corner-bracket fullscreen and a speaker whose
+  on/off halves swap on the button's `is-active` class. ⚠️ `updateAudioToggleUI` was still
+  assigning `textContent`, which **replaced the whole inline SVG with a character**; the
+  fullscreen icon looked right while the speaker silently reverted to an emoji. That line
+  is gone and the swap is pure CSS.
+- **Smooth motion (the "it feels like dragging" fix).** The d-pad was jumping a fixed 1.4°
+  every 45ms — about 22 visible lurches a second, independent of frame rate. Replaced with
+  a velocity model: a press sets a TARGET speed (~34°/s) and `stepViewMotion()` eases the
+  real velocity toward it each frame, then back to zero on release, so the camera
+  accelerates and coasts to a stop. Easing is frame-rate independent
+  (`1 - VIEW_EASE_PER_S^(dt/1000)`).
+- **Drag inertia.** A pan used to stop dead the instant the pointer lifted. The gesture's
+  instantaneous speed is now carried into `viewVel` (capped, so a hard flick can't spin the
+  view wildly) and decays through the same easing — the single biggest contributor to
+  panning feeling rough. Grabbing again cancels any coast.
+- Steered motion is gated ahead of the idle auto-pan so the two can't both write
+  `state.view.lon` in one frame.
+
+**Verified:** `pushWhileHeld=true` / `pushCleared=true` on press and release, the cone
+carries a rotate() while the rose does not, and the speaker button holds an SVG with empty
+textContent (the emoji regression is gone). Screenshots confirm both icons and the compass.
+The *feel* of the easing still needs a real browser — headless stops the rAF loop, so no
+motion can be observed there.
+
+---
+
+## 2026-09-07 (compass + directional pad)
+
+Added the two client controls the reference tour has and we didn't, both working.
+
+- **Compass** (top-right, client only): the ROSE rotates with the view while the N/S/E/W
+  letters counter-rotate so they stay upright — each label needs BOTH transforms (carried
+  round by the rose, then spun back on itself), which one transform can't express. Driven
+  from `renderLoop` via `updateCompass()`. `state.view.lon` is the camera YAW and runs
+  opposite a stored lon, so the heading is negated before north is subtracted — the
+  two-conventions trap again.
+- **Directional pad** (bottom-centre): four outlined arrows, tap to nudge and hold to keep
+  moving. A press releases a selected category's arc clamp exactly as a drag does,
+  otherwise `updateCamera` would fight every press and the buttons would feel dead inside
+  a category; it also stamps `lastUserTouch` so the idle drift doesn't shove back. Speed
+  tuned from measurement: 2.2°/40ms held came out at ~57°/s, too fast, now 1.4°/45ms
+  (~31°/s).
+- **`northDeg`** added to `alignment.json` (optional, default 0) — which stored lon is true
+  north. ⚠️ **Uncalibrated:** the reference's compass is a 3DVista component that exports no
+  north value, and the tour data carries none, so this could not be derived. The compass
+  turns correctly with the view; its absolute bearing is only right once someone sets this
+  one number.
+- Fullscreen and mute already existed and are unchanged (`fsToggle`/`audioToggle` in the
+  drawer footer); their styling was NOT altered, since a banner restyle had just been
+  reverted at the user's request.
+
+**Verified:** compass transform tracks the view and labels carry the counter-rotation
+(`rotate(-339.28 60 60)` + per-label inverse). D-pad confirmed by reading state directly —
+a 500ms right-hold moved lon −28.60°, an up-hold moved lat +28.60°, and
+`landmarkPanRange` was cleared. That indirection was necessary: headless stops the rAF loop,
+so nothing repaints and on-screen motion cannot be observed there (see the gotcha).
+Screenshot confirms both render in place.
+
+---
+
+## 2026-09-07 (landmark parity with the Eleganza reference tour)
+
+The `anandman` project is meant to reproduce `demo.build91.in/Eleganza`, whose panorama is
+the same aerial shot. That tour is a **3DVista** export, so its data was read directly
+(`script_general.js`) rather than guessed at.
+
+**What the reference actually does.** Six *separate panoramas* — one per landmark category
+— all sharing byte-identical cube faces (verified by md5: only the overlay sets differ).
+Each category button runs
+`setPanoramaCameraWithSpot(playlist, item, yaw, pitch, 110)` + `setPlayListSelectedIndex`.
+The `hfov` is **110 for every category**: it never zooms per category and never sweeps, and
+its pitch is level (−0.3° to −3.2°). Its idle motion is a slow yaw drift, 1.6–2.1°/s with
+cubic ease in/out.
+
+**Calibration — the one thing that had to be measured, not assumed.** Their cubemap was
+reprojected to an equirect and cross-correlated against our `Connectivity.web.jpg`:
+**0.986 correlation at a 0.00° shift, no mirroring** — the same image in the same
+orientation. Our `dir()` and `dirFromLonLat()` share a formula, so our stored lon IS the
+image longitude (0 at the left edge), while their yaw 0 is the front face at the image
+centre. Hence:
+
+    our stored lon = reference yaw + 180        our stored lat = reference pitch
+
+The sign was confirmed independently: fitted against all 24 shared landmarks that mapping
+leaves a residual spread of ±9.4°, versus ±51.5° for the flipped sign — a 5× separation.
+A crop of our panorama at each converted position lands exactly on the horizon, confirming
+the pitch half.
+**Two LOD traps cost a detour and are worth knowing:** their tile pyramid numbers level
+**2 as the single-tile, lowest-res level** (0 and 1 are the tiled high-res ones), so
+fetching `/0/0_0.webp` returns one corner tile — which for a side face is pure sky, and
+made the first correlation meaningless.
+
+**❌ REVERTED (same day, at the user's request) — landmark banners restyled after the
+reference.** Both files are back to the centred, original banner: `styles.css` restored by
+hand, and `app.js` had already lost its half independently (found on disk with the original
+`halfW` centred placement and none of `rotatedBounds` / `is-left` / `leftLimit`, mtime later
+than the edits — see the "work can disappear from disk" gotcha in CLAUDE.md, though here the
+user was reverting in parallel so that is the likelier explanation). The CSS had to go too:
+on its own it anchored the banner at a corner while the JS positioned it as if centred.
+**The findings below are kept because they cost real measurement and would otherwise be
+re-derived:**
+Reported as "why don't ours look as organised and spacious", plus a request for the same
+styling and for labels to flip sides rather than always extending right.
+
+- **Style:** skewed navy-gradient sign (rotate −4°) with a teal distance bar under it and
+  the icon in a lighter inset block, matching the reference's signage. ⚠️ **The font cannot
+  be matched exactly** — the reference's labels are baked into overlay IMAGES, so no face
+  is recoverable from the tour data; the stack is the closest widely-available match to
+  their rounded geometric sans.
+- **End-anchored, not centred.** Previously `translate(-50%,-50%)` put the leader line
+  through the middle of the label. It now hangs off one END, the line meeting its bottom
+  corner, with the icon on that same side — exactly the reference's arrangement.
+- **Automatic left/right flip.** Each banner has two candidate boxes; it prefers the right
+  (the reference's default) and flips left when the right would leave the viewport or
+  collide with a banner already placed that frame. Confirmed firing: 0 flips at 1900px,
+  1 at 1280px and at 1000px.
+- **The drawer is a no-go zone.** One landmark was being drawn *behind* the category panel
+  and was simply invisible; the open drawer's right edge is now the left bound.
+- **Tilt-aware collision.** The first pass tested the untilted layout box, but a rotated
+  rectangle's footprint is taller — ~14px more on a 200×48 banner — so neighbours grazed
+  while the maths said they were clear. `rotatedBounds()` derives the real axis-aligned box
+  from the four rotated corners. `LM_BANNER_TILT` must track the stylesheet's rotate().
+- **Vertical lift for same-bearing landmarks.** Flipping can't separate two landmarks at
+  nearly the same bearing (RITEE College and Kanger Valley are **0.2°** apart), so a box
+  that still grazes is lifted until clear, up to 90px; the leader line just grows, as the
+  reference's do. That closed the last two overlaps, both grazes of 6–7px on a 65px banner.
+
+**Measured:** overlapping banner pairs 2 → **0** at 1900px and 1 → **0** at 1280px, with the
+flip still engaging where space is tight. Screenshot-confirmed.
+
+**Fourth correction — EVERY category sweeps now, not just the wide ones.** Reported twice as
+"the camera is not panning from leftmost to rightmost of a category". The third correction
+only restored the sweep for categories too wide to fit the 110° frame, which was just
+Connectivity and Commercial; the other four kept a ±3.5° sway that is imperceptible — so
+from the outside nothing had changed. Now the camera centre always travels the category's
+own extent (`minLon-pad .. maxLon+pad`), bringing each end landmark to the middle of frame
+in turn. Pace is the reference's ~2°/s, floored so a full pass never exceeds
+`LANDMARK_SWEEP_MS` (30s): Healthcare/Temple 2.0°/s over 24s, Education 3.4, Lifestyle 4.0,
+Connectivity 5.2, Commercial 5.3, all 30s. **This deliberately diverges from the reference**,
+which holds a fixed shot and never sweeps — requested explicitly. Zoom stays at the
+reference's hfov 110; only the motion differs.
+
+⚠️ **Not verified in a browser, and the reason is worth recording:** headless Chrome stops
+the rAF loop after ~5 frames under `--virtual-time-budget` (instrumented and confirmed:
+`frames=5->5` while `three=true`), so idle auto-pan cannot be observed there at all. An
+earlier "banner frozen at x=278 for 18s" reading was that harness limitation, not evidence
+of a bug — don't repeat that inference. The pan ranges and rates above are computed from the
+real functions; the motion itself needs a real browser.
+
+**Third correction — the sweep had to come back.** Matching the reference's fixed framing
+meant dropping the fit-or-sweep decision entirely, which was wrong: the frame is now a
+CONSTANT 110 horizontal, so any category wider than that has landmarks outside it wherever
+the camera aims, and with only the ±3.5° sway the `updateCamera` clamp locked the view to a
+7° window — an outlying landmark could never be seen at all. Connectivity (140° span) had 1
+of 4 stranded, Commercial (144°) likewise. Restored, but reconciled with parity: **the zoom
+stays fixed at hfov 110** and a category that already fits keeps the gentle sway; only one
+that doesn't fit sweeps, and it sweeps just far enough to bring each end into frame
+(`minLon + hfov/2` to `maxLon - hfov/2`) rather than ranging over the landmark lons
+themselves, which would overshoot by half a frame at each end and spend the pass staring at
+empty sky. The opening shot is clamped into that range so the reference-matched framing
+isn't yanked away on the first idle frame.
+Measured: Healthcare 31°, Temple 32°, Education 86° and Lifestyle 104° all fit (sway only);
+Connectivity sweeps 46° over 24s (1.9°/s) and Commercial 50° (2.1°/s), matching the
+reference's own 1.6–2.1°/s drift. **Every landmark in every category is now reachable**
+(6/6 categories, verified by walking each range and checking each landmark enters frame).
+
+**Second correction — landmarks are placed TWICE in the reference, and we were using the
+wrong copy for the default view.** Reported as "why does ours look so cluttered when both
+sites have the same landmarks". Measured, and the cause was exact: the author hand-places
+each landmark once on its **category** panorama (where only 3–7 labels compete) and again on
+the **main** panorama, spread out for the crowded all-landmarks view. Using the category
+placement everywhere put **NIT Raipur and Suyash Hospital 0.9° apart** in our default view —
+on the main panorama the author had moved Suyash from 150.53 to 168.29 precisely to avoid
+that collision.
+
+| position set | min gap between the 9 | pairs under 12° |
+|---|---|---|
+| reference's MAIN pano (its all-view) | 11.0° | 2 |
+| category panos (what we shipped first) | **0.9°** | 4 |
+
+Fix: the nine landmarks that exist on the main panorama now use ITS placement; the other
+sixteen, which only ever appear inside a category, keep their category placement. Those nine
+are exactly the project's featured (default-view) set, so the two never conflict. **Costs the
+category views nothing** — measured min gaps per category are unchanged or marginally better
+(Education 0.2° → 1.9°, Commercial 36.1° → 35.2°, the rest identical). Radiant Way School is
+un-featured to match: the reference shows it only under Education. Default view is now
+**9 landmarks at 11.0° minimum spacing, identical to the reference**, screenshot-confirmed
+with no overlapping labels.
+**The general lesson:** when a reference tool renders the same entity in several contexts,
+check whether it stores a separate placement per context before copying one of them
+everywhere.
+
+**Correction, same day — the overlay pitch is the graphic's CENTRE, not the label.** The first
+pass put our `banner` at the reference's overlay pitch, which sat every label on the horizon
+with a stub connector, while the reference shows labels floating high with long leaders. Each
+overlay carries a `vfov` (6.1–20.3°, mean 16.3) — the angular height of the whole banner+leader
+graphic — and its pitch is that graphic's centre. Corrected:
+
+    banner  lat = pitch + vfov/2      (the label)
+    hotspot lat = pitch - vfov/2      (the leader's tip)
+
+and `applyCategoryFilter` now aims at the **midpoint of banner and hotspot** rather than the
+banner, since aiming at raised labels would tilt the camera up into empty sky; the midpoint is
+the graphic centre, which is what the reference's own category cameras point at (their pitches
+run −0.3 to −3.2, i.e. level). Result: banner lat now spans −9.9..+12.2, hotspot −17.4..−5.0,
+16.6° apart on average. **A second trap:** the same landmark exists on several panoramas with
+slightly different hand placements (Suyash is 168.29 on 'Highest' but 150.53 on the Healthcare
+pano), so a whole-file search for a label silently mixes them — the extraction must be scoped
+to each category panorama's own overlay list.
+
+**Imported:** all 25 landmarks with the reference's exact positions AND its category
+assignment — every one of our 24 matched (the six "misses" were spelling variants: AIIMS/
+AIMS, Brahmavid/Brahamavid, Tatibandh/Tatiband, Cricket Ground/Criclet Stadium, Gurudwara/
+Gururdwara), plus **Radiant Way School**, which the reference has and we didn't. Their
+overlay position is the LABEL, so it became our `banner`; the `hotspot` pin sits 9° below it
+to keep our pin + connector look. The previous file is backed up beside it as
+`landmarks.pre-eleganza-<stamp>.json`. Amenities were deliberately NOT imported (the 11
+in-layout positions are extractable the same way if wanted later).
+
+**Code:**
+- `landmarks.json` gains **`category`**, and `isLandmarkMatchCategory` now treats an
+  explicit category as **authoritative, short-circuiting the icon rules**. Without that,
+  D Mart (icon `mall`, which infers COMMERCIAL) would appear under COMMERCIAL as well as
+  its real LIFESTYLE home. The icon rules remain as inference for landmarks with no
+  category.
+- **`LANDMARK_HFOV = 110` + `vfovFromHfov()`.** Their hfov is HORIZONTAL and three.js'
+  `camera.fov` is VERTICAL, so one hard-coded vertical number cannot match on two screen
+  shapes: 110 hfov is 77.6° vertical on 16:9 but 66.8° on a 844×390 phone and 93.9° on
+  4:3. The horizontal value is stored and the vertical derived from the live aspect.
+- **`landmarkClusterCentre()`** replaces the fit-or-sweep decision. Their angles are
+  hand-authored and follow no rule (Education sits on NIT Raipur, Connectivity on the
+  Railway Station, but Healthcare sits near its arc midpoint), so no formula reproduces
+  them exactly. Measured against all five: aiming at the tightest cluster averages 12.1°
+  of error, versus 20.8° for the bounding-arc midpoint (which lands **52°** out on
+  Connectivity, whose Highway outlier drags the midpoint into empty sky) and 18.7° for the
+  circular mean.
+- Idle drift `AUTOPAN_RATE` 1.2 → **1.8°/s**, the middle of the reference's range.
+
+**Result, measured end to end against the reference's own angles:** mean **14.3°**, worst
+23.9° (Education and Lifestyle, the two widest categories); Healthcare 6.8°, Connectivity
+6.4°, Temple 10.8°. Zoom now matches exactly. 21 of 23 landmarks in the five categories
+fall inside the 110° frame. Screenshot-confirmed: Education frames six of its seven
+landmarks along a level horizon.
+**Still open if tighter aim is wanted:** letting the admin mark one "focus" landmark per
+category would land within ~4–5°, since that is effectively what the reference author did
+by hand — and it stays admin *data*, not hard-coded angles in code.
 
 ---
 

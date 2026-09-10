@@ -27,6 +27,19 @@
 </head>
 
 <body>
+  <!-- Boot curtain: hides the pano until it's actually showing the right thing — see
+       hideBootCurtain()'s comment in app.js. Solid, not transparent, so the raw unstyled
+       DOM and the pano's own default boot camera position are never visible even for a
+       frame; JS reveals it once boot has settled on the client's real starting screen. -->
+  <div id="bootCurtain">
+    <span class="boot-curtain-label">Loading…</span>
+    <div class="boot-progress-wrap" id="bootProgressWrap">
+      <div class="boot-progress" role="progressbar" aria-label="Loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="boot-progress-fill" id="bootProgressFill"></div>
+      </div>
+      <span class="boot-progress-pct" id="bootProgressPct">0%</span>
+    </div>
+  </div>
   <!-- ─── Top bar ─────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <div class="brand">
@@ -121,13 +134,6 @@
     <div class="legend" id="legend" role="group" aria-label="Status legend and filters">
       <!-- legend / filter chips injected by app.js -->
     </div>
-
-    <div class="sync">
-      <span class="sync-meta" id="syncMeta" aria-live="polite">Loading…</span>
-      <button class="btn btn-ghost" id="refreshBtn" type="button" title="Re-load plot data">
-        <span class="ico" aria-hidden="true">⟳</span> Refresh
-      </button>
-    </div>
   </header>
 
   <!-- ─── Map stage (360° panorama viewer) ──────────────────────────────────── -->
@@ -164,34 +170,23 @@
           <strong class="cat-drawer-name" id="catDrawerName"></strong>
           <span class="cat-drawer-tagline" id="catDrawerTagline"></span>
         </div>
-        <!-- Level 1: Main Menu -->
+        <!-- Level 1: Main Menu. Populated entirely by renderClientSidebar() (app.js) —
+             left empty here on purpose, since anything placed in this markup would only
+             ever flash for a frame before being overwritten (and, worse, would need to
+             be kept in sync by hand with the built-in/authored items it can never
+             actually match). -->
         <div class="cat-menu-level" id="catLevel1">
-          <nav class="cat-nav" id="catNavL1" aria-label="Main Menu">
-            <button class="cat-btn" type="button" data-act="aerial">AERIAL VIEW</button>
-            <button class="cat-btn cat-btn-sub" type="button" data-act="landmarks">LANDMARKS <span class="cat-btn-arrow">›</span></button>
-            <button class="cat-btn" type="button" data-act="location_intel">LOCATION INTELLIGENCE</button>
-            <button class="cat-btn" type="button" data-act="walkthrough_video">WALKTHROUGH VIDEO</button>
-            <button class="cat-btn" type="button" data-act="virtual_tour">VIRTUAL TOUR</button>
-            <button class="cat-btn" type="button" data-act="gallery">GALLERY</button>
-            <button class="cat-btn" type="button" data-act="brochure">BROCHURE</button>
-            <button class="cat-btn" type="button" data-act="contact_us">CONTACT US</button>
-          </nav>
+          <nav class="cat-nav" id="catNavL1" aria-label="Main Menu"></nav>
         </div>
 
-        <!-- Level 2: Landmarks Sub-Menu -->
+        <!-- Level 2: Landmarks Sub-Menu. #catNav's rows are populated entirely by
+             renderLandmarkCategoryNav() (app.js) from the project's real landmark
+             categories — same reasoning as #catNavL1 above. -->
         <div class="cat-menu-level" id="catLevel2" hidden>
           <div class="cat-drawer-head">
             <button class="cat-back-btn" id="catBackBtn" type="button">‹ BACK</button>
           </div>
-          <nav class="cat-nav" id="catNav" aria-label="Landmark Categories">
-            <button class="cat-btn is-active" type="button" data-cat="ALL">ALL LANDMARKS</button>
-            <button class="cat-btn" type="button" data-cat="HEALTHCARE">HEALTHCARE</button>
-            <button class="cat-btn" type="button" data-cat="EDUCATION">EDUCATION</button>
-            <button class="cat-btn" type="button" data-cat="COMMERCIAL">COMMERCIAL</button>
-            <button class="cat-btn" type="button" data-cat="CONNECTIVITY">CONNECTIVITY</button>
-            <button class="cat-btn" type="button" data-cat="LIFESTYLE">LIFESTYLE</button>
-            <button class="cat-btn" type="button" data-cat="TEMPLE">TEMPLE</button>
-          </nav>
+          <nav class="cat-nav" id="catNav" aria-label="Landmark Categories"></nav>
         </div>
 
         <!-- Level 2 & 3: Custom Feature Sub-Menu (Videos, Tours, Brochures, Location Intel) -->
@@ -206,14 +201,83 @@
         </div>
 
         <div class="cat-drawer-foot">
-          <button class="btn btn-icon cat-foot-btn" id="fsToggle" type="button" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">⤢</button>
-          <button class="btn btn-icon cat-foot-btn" id="audioToggle" type="button" title="Toggle Sound" aria-label="Toggle Sound">🔇</button>
-          <button class="btn btn-icon cat-foot-btn is-active" id="autoPanToggle" type="button" title="Toggle Slow Motion Pan" aria-label="Toggle Slow Motion Pan">🔄</button>
+          <button class="btn btn-icon cat-foot-btn" id="fsToggle" type="button" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
+            <svg class="ftr-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5" />
+              <rect x="8" y="8" width="8" height="8" rx="1" />
+            </svg>
+          </button>
+          <button class="btn btn-icon cat-foot-btn" id="audioToggle" type="button" title="Toggle Sound" aria-label="Toggle Sound">
+            <svg class="ftr-ico ftr-ico-audio" viewBox="0 0 24 24" aria-hidden="true">
+              <polygon class="spk-body" points="4,9 8,9 13,5 13,19 8,15 4,15" />
+              <g class="spk-on"><path d="M16 9.2a4 4 0 0 1 0 5.6M18.6 6.6a7.6 7.6 0 0 1 0 10.8" /></g>
+              <g class="spk-off"><path d="M17 9.5l4.5 5M21.5 9.5l-4.5 5" /></g>
+            </svg>
+          </button>
+          <!-- Auto-pan. Shows the ACTION, not the state: pause bars while the camera is
+               drifting (press = stop), a play triangle once stopped (press = resume). The
+               orbit arcs around them say WHAT is being paused, so it doesn't read as a
+               media control for the background audio sitting next to it. -->
+          <button class="btn btn-icon cat-foot-btn is-active" id="autoPanToggle" type="button"
+            title="Stop the camera moving" aria-label="Stop the camera moving">
+            <svg class="ftr-ico ftr-ico-pan" viewBox="0 0 24 24" aria-hidden="true">
+              <!-- Two opposing arcs read as "rotating" without arrowheads: at the 19px this
+                   renders at, arrowheads collapse into ~2px blobs and merge with the glyph.
+                   Each arc spans 140 degrees so the pair reads as a broken RING; at 100 they
+                   read as plain parentheses (compared side by side at 4x). -->
+              <g class="pan-orbit">
+                <path d="M15.28 2.98 A9.6 9.6 0 0 1 15.28 21.02" />
+                <path d="M8.72 21.02 A9.6 9.6 0 0 1 8.72 2.98" />
+              </g>
+              <g class="pan-stop"><rect x="9.7" y="9" width="1.7" height="6" rx=".5" /><rect x="12.6" y="9" width="1.7" height="6" rx=".5" /></g>
+              <g class="pan-go"><polygon points="10.2,8.9 15.1,12 10.2,15.1" /></g>
+            </svg>
+          </button>
         </div>
       </div>
     </aside>
 
     <!-- look-around / zoom controls -->
+    <!-- Compass (client). The ROSE IS FIXED — north stays at the top, which is what makes
+         it readable at a glance — and the shaded CONE sweeps round to show which way the
+         camera is looking, exactly as the reference tour's compass behaves. Rotating the
+         whole rose instead (the first attempt) forces the letters to counter-rotate and
+         still leaves the viewer working out which way is up. -->
+    <div class="compass" id="compass" aria-hidden="true">
+      <svg viewBox="0 0 120 120" class="compass-svg">
+        <circle cx="60" cy="60" r="47" class="cp-face" />
+        <!-- the view cone: rotated each frame to the current heading -->
+        <defs>
+          <radialGradient id="cpFaceGrad" cx="50%" cy="42%" r="65%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity=".38" />
+            <stop offset="70%" stop-color="#ffffff" stop-opacity=".14" />
+            <stop offset="100%" stop-color="#ffffff" stop-opacity=".05" />
+          </radialGradient>
+        </defs>
+        <circle cx="60" cy="60" r="47" fill="url(#cpFaceGrad)" />
+        <g id="compassCone"><path class="cp-cone" d="M60 60 L39.9 19.7 A45 45 0 0 1 80.1 19.7 Z" /></g>
+        <circle cx="60" cy="60" r="47" class="cp-ring" />
+        <circle cx="60" cy="60" r="39" class="cp-ring cp-ring-2" />
+        <!-- 8-point rose, each point split white/black for the classic nautical look -->
+        <g class="cp-rose">
+          <polygon points="60,14 62.6,58 60,60" class="cp-lt" /><polygon points="60,14 57.4,58 60,60" class="cp-dk" />
+          <polygon points="60,106 62.6,62 60,60" class="cp-dk" /><polygon points="60,106 57.4,62 60,60" class="cp-lt" />
+          <polygon points="14,60 58,57.4 60,60" class="cp-lt" /><polygon points="14,60 58,62.6 60,60" class="cp-dk" />
+          <polygon points="106,60 62,57.4 60,60" class="cp-dk" /><polygon points="106,60 62,62.6 60,60" class="cp-lt" />
+          <polygon points="31,31 59.3,57.9 60,60" class="cp-sm-lt" /><polygon points="31,31 57.9,59.3 60,60" class="cp-sm-dk" />
+          <polygon points="89,89 60.7,62.1 60,60" class="cp-sm-lt" /><polygon points="89,89 62.1,60.7 60,60" class="cp-sm-dk" />
+          <polygon points="89,31 62.1,59.3 60,60" class="cp-sm-dk" /><polygon points="89,31 60.7,57.9 60,60" class="cp-sm-lt" />
+          <polygon points="31,89 57.9,60.7 60,60" class="cp-sm-dk" /><polygon points="31,89 59.3,62.1 60,60" class="cp-sm-lt" />
+        </g>
+        <polygon points="60,14 61.3,58 60,60 58.7,58" class="cp-n" />
+        <circle cx="60" cy="60" r="3" class="cp-hub" />
+        <text x="60" y="27" class="cp-lbl">N</text>
+        <text x="60" y="99" class="cp-lbl">S</text>
+        <text x="25" y="65" class="cp-lbl">W</text>
+        <text x="95" y="65" class="cp-lbl">E</text>
+      </svg>
+    </div>
+
     <div class="zoom-controls" role="group" aria-label="View controls">
       <!-- landscape-only: the topbar's Available/Reserved/Sold legend is hidden in
            landscape (see styles.css) to free up vertical space on a short screen; this
@@ -371,28 +435,6 @@
     </div><!-- /axTabAlign -->
 
     <div class="ax-tab" id="axTabLandmarks" hidden>
-      <p class="ax-lm-intro">Add points of interest on the horizon — a banner (label, distance &amp; drive time)
-        connected by a line to a pin you place in the scene. Drag the <strong>pin</strong> onto a spot and drag the
-        <strong>banner</strong> to position it.
-      </p>
-      <div class="ax-lm-intro ax-lm-legend">
-        <div>Every row has a <strong>✓ ✕</strong> pair (which landmarks show up-front) and, separately, a
-          <strong>×</strong> (delete). The highlighted half of the pair is the landmark's current state:</div>
-        <div><span class="ax-lm-key ax-lm-key-on">✓</span><strong>Show by default</strong> — it appears straight away in
-          the visitor's all-landmarks view.</div>
-        <div><span class="ax-lm-key">✕</span><strong>Hide from the default view</strong> — keeps the view uncluttered.
-          It still appears in full whenever the visitor picks its <strong>category</strong>. Nothing is deleted.</div>
-        <div><span class="ax-lm-key ax-lm-key-del">×</span><strong>Delete</strong> — removes the landmark from the
-          project for good.</div>
-        <div>Quickest way to curate a long list: <strong>✕ Hide all</strong>, then ✓ the handful you want up-front.</div>
-        <div>While this tab is open you always see every landmark in the scene; the hidden ones are outlined with a dashed
-          border so you can still drag them.</div>
-      </div>
-      <div class="ax-lm-bulk">
-        <span class="ax-lm-count" id="axLmCount"></span>
-        <button class="btn btn-ghost" id="axLmShowAll" type="button" title="Show every landmark in the default view">✓ Show all</button>
-        <button class="btn btn-ghost" id="axLmHideAll" type="button" title="Hide every landmark from the default view (they still appear under their category). Does not delete anything.">✕ Hide all</button>
-      </div>
       <button class="btn btn-import" id="axLmAdd" type="button">＋ Add landmark</button>
       <p class="ax-lm-empty" id="axLmEmpty">No landmarks yet.</p>
       <ul class="ax-lm-list" id="axLmList" aria-label="Landmarks"></ul>

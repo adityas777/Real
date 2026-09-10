@@ -17,8 +17,11 @@
 
 // Bump this whenever the caching STRATEGY changes (not just the app code): the old caches
 // are deleted on activate, so an already-installed worker cannot keep serving data under
-// the previous rules. Bumped to v2 when project config moved to network-first.
-const VERSION = 'v2';
+// the previous rules. v2: project config moved to network-first. v3-v4: reserved by the
+// Virtual Tours branch. v5: isRangedMediaPath widened to cover audio extensions, since an
+// <audio> element makes the same byte-range requests as <video> and needs the same
+// respondVideo/sliceRange treatment.
+const VERSION = 'v5';
 const SHELL_CACHE = `b91-shell-${VERSION}`;
 const DATA_CACHE = `b91-data-${VERSION}`;
 const MEDIA_CACHE = `b91-media-${VERSION}`;
@@ -57,7 +60,16 @@ self.addEventListener('activate', (event) => {
 
 function cacheKeyFor(url) {
   const u = new URL(url, self.location.origin);
+  // Preserve ?project= so each project gets its own navigation + data cache entry.
+  // Without this, a second visit to /?project=anandman overwrites the cached
+  // /?project=eleganza shell (both keyed as bare "/"), so tapping the home-screen
+  // icon for eleganza would launch anandman — or fall back to "sample" if the wrong
+  // shell happened to be cached.
+  // All other query params (cache-busters like ?t= and ?v= added by app.js) are
+  // stripped so the cache key stays stable across reloads.
+  const project = u.searchParams.get('project');
   u.search = '';
+  if (project) u.searchParams.set('project', project);
   return u.toString();
 }
 
@@ -127,6 +139,8 @@ async function staleWhileRevalidate(cache, request) {
 // a COMPLETE (status 200) copy — sliced manually to build a proper 206 reply — and is
 // otherwise passed straight to the network, with a separate unranged fetch kicked off in
 // the background to prime the full-file cache for next time (including offline playback).
+const VIDEO_BLOB_CACHE = new Map();
+
 async function respondVideo(cache, request) {
   const key = cacheKeyFor(request.url);
   const full = await cache.match(key);
@@ -134,7 +148,16 @@ async function respondVideo(cache, request) {
 
   if (full) {
     if (!range) return full.clone();
-    return sliceRange(await full.clone().blob(), range, full.headers.get('Content-Type') || 'video/mp4');
+    let blob = VIDEO_BLOB_CACHE.get(key);
+    if (!blob) {
+      blob = await full.blob();
+      VIDEO_BLOB_CACHE.set(key, blob);
+      if (VIDEO_BLOB_CACHE.size > 5) {
+        const oldestKey = VIDEO_BLOB_CACHE.keys().next().value;
+        VIDEO_BLOB_CACHE.delete(oldestKey);
+      }
+    }
+    return sliceRange(blob, range, full.headers.get('Content-Type') || 'video/mp4');
   }
 
   if (!range) {
@@ -145,9 +168,6 @@ async function respondVideo(cache, request) {
     } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
   }
 
-  fetch(key, { cache: 'no-store' }).then((res) => {
-    if (res && res.ok && res.status === 200) cache.put(key, res.clone()).catch(() => {});
-  }).catch(() => {});
   try { return await fetch(request); } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
 }
 
@@ -206,17 +226,16 @@ self.addEventListener('fetch', (event) => {
         try { return await network; }
         catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
       }
-      // We already hold a usable copy. Give the network a brief head start so an online
-      // visit still picks up the latest, but never let a weak signal hold the launch
-      // hostage: fully offline fails instantly, but one bar can hang for many seconds,
-      // which for an app whose whole promise is "opens instantly" is the worse outcome.
-      // The network attempt keeps running either way and refreshes the cache for next time.
-      try {
-        return await Promise.race([
-          network,
-          new Promise((_, reject) => setTimeout(() => reject(new Error('slow-network')), 2500)),
-        ]);
-      } catch { return cached; }
+      // True stale-while-revalidate: serve the cached copy INSTANTLY so the app opens
+      // with zero delay regardless of signal strength, and let the network fetch run in
+      // the background to refresh the cache for the NEXT visit. The old 2500ms race was
+      // well-intentioned (always serve the freshest copy when online) but caused a
+      // noticeable blank/spinner every open on a weak signal — unacceptable for an app
+      // that was downloaded specifically to avoid that. A hard-offline visit gets the
+      // cached copy just as fast; an online visit gets it equally fast and picks up any
+      // updates on the following open instead of this one.
+      network.catch(() => {}); // background refresh — failure is fine, cache still valid
+      return cached;
     })());
     return;
   }

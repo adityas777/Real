@@ -53,6 +53,57 @@ html, body {
   overflow: hidden;
 }
 
+/* Boot curtain — solid, above absolutely everything (modals included), so the pano's
+   default boot camera position (and any auto-opened content briefly appearing behind it)
+   is never visible until hideBootCurtain() (app.js) decides boot has actually settled on
+   the client's real starting screen. See app.js's boot comment for why this exists: a
+   visible "shows the wrong default, then jumps" was reported when the switch only
+   happened well after the pano was already rendering. */
+#bootCurtain {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  transition: opacity 0.25s ease;
+}
+#bootCurtain.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+.boot-curtain-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
+/* Bottom-anchored loading bar — real byte progress of the pano + site-plan image fetches
+   (the two big downloads boot actually waits on), see setBootProgress/fetchBlobWithProgress
+   in app.js. Scoped to the FIRST boot only: hideBootCurtain hides this wrap permanently
+   after boot so a later tour-switch reuse of the same curtain (showBootCurtain) shows just
+   the plain label, not a stale "100%" bar. */
+.boot-progress-wrap {
+  position: absolute;
+  left: 24px; right: 24px; bottom: 28px;
+  display: flex; align-items: center; gap: 10px;
+}
+.boot-progress {
+  flex: 1 1 auto; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,.12); overflow: hidden;
+}
+.boot-progress-fill {
+  height: 100%; width: 0%; border-radius: 2px;
+  background: var(--gold, #d4af37);
+  transition: width .15s ease;
+}
+.boot-progress-pct {
+  font-size: 11px; color: var(--text-mute); min-width: 32px; text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 body {
   display: grid;
   grid-template-rows: auto 1fr;   /* header sizes to content (never clips wrapped chips) */
@@ -186,6 +237,9 @@ body {
 .proj-name-hint .is-bad { color: var(--reserved); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 auto; justify-content: center; }
+/* Available/Reserved/Sold describes PLOT status — hidden while the visitor is looking at
+   LANDMARKS or a VIRTUAL TOUR instead of the plot map itself; see updateLegendVisibility. */
+.legend.is-hidden { display: none; }
 .chip {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 12.5px; font-weight: 600;
@@ -219,6 +273,7 @@ body {
    Hidden by default — the landscape media query is the only place they appear, since that's
    where the header legend they stand in for is hidden. */
 .zoom-status-group { display: none; flex-direction: column; gap: 6px; align-items: flex-end; }
+.zoom-status-group.is-hidden { display: none !important; }
 .zoom-status-btn {
   display: inline-flex;
   align-items: center; gap: 7px;
@@ -287,9 +342,6 @@ body {
   .rotate-hint-phone { animation: none; transform: rotate(-90deg); }
   .rotate-hint { animation: none; }
 }
-
-.sync { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
-.sync-meta { font-size: 11.5px; color: var(--text-mute); white-space: nowrap; }
 
 /* ─── Map stage ───────────────────────────────────────────────────────────── */
 .stage {
@@ -396,8 +448,17 @@ body {
 .adminbar-sess.is-saved { color: var(--gold-soft); }
 
 /* ─── Admin tabs (Align / Landmarks) ───────────────────────────────────────── */
-.ax-tabs { display: flex; gap: 6px; margin: 4px 0 12px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
-.ax-tab-btn { flex: 1; padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-dim); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+/* A 2x2 grid, not a 4-across flex row: at the sidebar's 268px width, four labels
+   including "Landmarks"/"Amenities" squeezed into equal 1/4-width flex slots (~55px
+   each) were tight enough to wrap onto a second line on some of them but not others,
+   which is what actually read as "misaligned" — one tab taller than its neighbours,
+   text not vertically centred against them. Two columns give each label roughly double
+   the room, comfortably fits every current tab name on one line, and echoes the
+   Look-around/Move-layout toggle directly below it (.ax-mode, same 1fr 1fr grid) for a
+   visually consistent pair of controls instead of two different layout patterns stacked
+   on top of each other. */
+.ax-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0 12px; padding: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; }
+.ax-tab-btn { padding: 7px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text-dim); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; text-align: center; }
 .ax-tab-btn.is-on { background: var(--gold-dim); color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold-soft); }
 .ax-tab-btn:not(.is-on):hover { color: var(--text); }
 .ax-tab[hidden] { display: none; }
@@ -423,33 +484,24 @@ body {
 .ax-tour-count { font-size: 10.5px; color: var(--text-mute); white-space: nowrap; }
 .ax-tour-edit { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 6px; }
 .ax-tour-hint { margin: 0 0 2px; font-size: 11px; color: var(--text-mute); }
-.ax-tour-node { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 6px; }
+/* Four children (star, ▶ open, name, ×) but only THREE columns declared — the 4th
+   (delete) had nowhere to go and fell to an implicit new row underneath, rendering as an
+   orphaned × sitting alone below every node instead of inline at the row's end. */
+.ax-tour-node { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 6px; }
 .ax-tour-nodename { min-width: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font: inherit; font-size: 12px; }
 .ax-tour-nodename:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
 .ax-tour-start { width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 13px; line-height: 1; }
 .ax-tour-start.is-on { color: var(--gold); border-color: var(--gold-soft); }
 .ax-tour-addnode { width: 100%; justify-content: center; margin-top: 2px; }
-/* Show-by-default control — a ✓|✕ PAIR, sitting before the delete × and never reading as one.
-   Two buttons rather than one state-showing toggle so each click is idempotent: ✓ always means
-   show, ✕ always means hide. (A single toggle inverted people's intent — everything starts
-   ticked, so clicking the ones you wanted turned them off. 2026-09-04.) The active half is
-   filled; the inactive half stays faint so the current state is readable at a glance. */
-.ax-lm-vis-grp { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-.ax-lm-vis { width: 24px; height: 24px; border: 0; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 13px; line-height: 1; font-weight: 700; opacity: .45; }
-.ax-lm-vis + .ax-lm-vis { border-left: 1px solid var(--line); }
-.ax-lm-vis:hover { opacity: 1; filter: brightness(1.3); }
-.ax-lm-vis.is-active { opacity: 1; cursor: default; }
-.ax-lm-vis-yes.is-active { color: #3fb950; background: rgba(63, 185, 80, .18); box-shadow: inset 0 0 0 1px #2c5f38; }
-.ax-lm-vis-no.is-active { color: var(--text); background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
-.ax-lm-bulk { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
-.ax-lm-bulk .btn { padding: 4px 8px; font-size: 11.5px; }
-.ax-lm-count { flex: 1; font-size: 11px; color: var(--text-mute); }
+/* Show-by-default control — a `.ui-switch` (see its definition further down), sitting
+   before the delete ×. Shipped 2026-09-04 as a ✓|✕ button PAIR (a single state-showing
+   toggle inverted people's intent — everything starts ticked, so clicking the ones you
+   wanted turned them off) and switched to this ON/OFF control 2026-09-09 to match the
+   admin menu builder's built-in-row switch; ON still always means "shown," at a glance,
+   for the same reason the pair was idempotent. */
+.ax-lm-vis-switch { margin: 0; }
 .ax-lm-li.is-hidden-default { opacity: .74; border-style: dashed; }
 .ax-lm-li.is-hidden-default .ax-lm-title { color: var(--text-mute); font-style: italic; }
-.ax-lm-legend { display: grid; gap: 4px; margin: 0 0 10px; padding: 8px 9px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bg); }
-.ax-lm-legend span.ax-lm-key { display: inline-block; min-width: 16px; margin-right: 4px; padding: 0 3px; border: 1px solid var(--line); border-radius: 4px; text-align: center; font-weight: 700; color: var(--text-mute); }
-.ax-lm-legend .ax-lm-key-on { color: #3fb950; border-color: #2c5f38; background: rgba(63, 185, 80, .13); }
-.ax-lm-legend .ax-lm-key-del { color: #e3b341; border-color: #5a4a2a; }
 .ax-lm-edit { display: grid; gap: 7px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .ax-lm-field { display: grid; gap: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-mute); }
 .ax-lm-field input, .ax-lm-field select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
@@ -473,6 +525,67 @@ body {
   backdrop-filter: blur(8px);
   box-shadow: 0 6px 18px rgba(0,0,0,.4);
 }
+
+
+/* ─── Compass (client) ───────────────────────────────────────────────────── */
+/* Client-only: admin already has its own tools in that corner and the extra chrome would
+   only get in the way while editing. */
+body.is-admin .compass { display: none; }
+.compass {
+  position: absolute; top: 14px; right: 16px;
+  width: 108px; height: 108px;
+  z-index: 14; pointer-events: none;
+  filter: drop-shadow(0 4px 14px rgba(0,0,0,.5));
+  border-radius: 50%;
+  backdrop-filter: blur(5px) saturate(140%);
+  -webkit-backdrop-filter: blur(5px) saturate(140%);
+}
+.compass-svg { width: 100%; height: 100%; overflow: visible; }
+/* Glassy nautical compass-rose: a translucent frosted face (backdrop-blurred so the pano
+   behind it stays partly visible) with a soft radial highlight, a slim glowing ring, a
+   fine red north needle, and semi-transparent bicolour points rather than flat black/white
+   so it reads as light glass, not an opaque sticker. Label fill stays solid navy with a
+   white halo for legibility — a fully transparent label would vanish over a bright sky. */
+.cp-face { fill: rgba(255,255,255,.16); }
+.cp-cone { fill: rgba(30,34,42,.20); }          /* the sweeping "shadow" that marks the view */
+.cp-ring { fill: none; stroke: rgba(255,255,255,.75); stroke-width: 1.5; filter: drop-shadow(0 0 2px rgba(255,255,255,.5)); }
+.cp-ring-2 { fill: none; stroke: rgba(255,255,255,.32); stroke-width: 1; }
+.cp-lt { fill: rgba(255,255,255,.92); }
+.cp-dk { fill: rgba(12,14,18,.55); }
+.cp-sm-lt { fill: rgba(255,255,255,.85); }
+.cp-sm-dk { fill: rgba(12,14,18,.45); }
+.cp-n { fill: #ff3b3b; filter: drop-shadow(0 0 2.5px rgba(255,59,59,.85)); }
+.cp-hub { fill: rgba(255,255,255,.92); stroke: rgba(20,22,28,.6); stroke-width: 1; }
+.cp-lbl {
+  fill: #1b2a6b; font-size: 12px; font-weight: 800; text-anchor: middle;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  paint-order: stroke; stroke: rgba(255,255,255,.85); stroke-width: 2.2px; stroke-linejoin: round;
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  body:not(.is-admin) .compass { width: 74px; height: 74px; top: 10px; right: 12px; }
+}
+
+/* Footer icons (fullscreen / sound) drawn as SVG rather than emoji: emoji render at the
+   mercy of the platform font and can't take a colour. `.spk-on` / `.spk-off` swap on the
+   button's is-active state, so one element covers both mute and unmute. */
+.ftr-ico { width: 19px; height: 19px; display: block; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ftr-ico rect { fill: currentColor; stroke: none; }
+.ftr-ico .spk-body { fill: currentColor; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+.ftr-ico-pan .pan-orbit path { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; }
+.ftr-ico-pan .pan-orbit polygon { fill: currentColor; stroke: none; }
+.ftr-ico-pan .pan-stop rect { fill: currentColor; stroke: none; }
+.ftr-ico-pan .pan-go polygon { fill: currentColor; stroke: none; }
+/* is-active == the camera IS drifting, so offer the stop; otherwise offer to resume. */
+.ftr-ico-pan .pan-stop { display: none; }
+.ftr-ico-pan .pan-go { display: block; }
+.cat-foot-btn.is-active .ftr-ico-pan .pan-stop { display: block; }
+.cat-foot-btn.is-active .ftr-ico-pan .pan-go { display: none; }
+.ftr-ico-audio .spk-on { display: none; }
+.ftr-ico-audio .spk-off { display: block; }
+.cat-foot-btn.is-active .ftr-ico-audio .spk-on { display: block; }
+.cat-foot-btn.is-active .ftr-ico-audio .spk-off { display: none; }
 
 /* ─── Tooltip ─────────────────────────────────────────────────────────────── */
 .tooltip {
@@ -587,27 +700,9 @@ body {
 .amenities { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 7; }
 /* Mobile overflow hint — see renderLandmarks' CAP logic (app.js). Only ever gets un-hidden
    there, so no media query needed here; it simply never appears on desktop. */
-.lm-overflow-hint {
-  position: absolute;
-  left: 50%; bottom: 76px;
-  transform: translateX(-50%);
-  z-index: 16;
-  background: rgba(21, 23, 30, 0.92);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--gold-soft, rgba(212, 175, 55, 0.5));
-  color: var(--gold, #d4af37);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
-  cursor: pointer;
-  pointer-events: auto;
-  white-space: nowrap;
-}
+/* lm-overflow-hint ('+N more – filter by category') — hidden on all viewports */
+.lm-overflow-hint { display: none !important; }
 .lm-overflow-hint[hidden] { display: none; }
-.lm-overflow-hint:hover { background: rgba(21, 23, 30, 0.98); }
 .amenities[hidden] { display: none; }
 /* 0-size anchor sits exactly on the hotspot; its children (pin + label) position off it */
 .am-marker { position: absolute; width: 0; height: 0; pointer-events: none; }
@@ -883,15 +978,21 @@ body {
   :root { --topbar-h: auto; }
   .topbar { flex-wrap: wrap; padding: 10px 12px; gap: 10px; }
   .legend { order: 3; flex-basis: 100%; justify-content: flex-start; gap: 6px; }
-  .sync { margin-left: auto; min-width: 0; }
-  .sync-meta { overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
   .brand-text span { display: none; }
 
   /* Landmark/amenity labels default to a comfortably-spaced desktop size; on a narrow
      portrait phone, several projected close together (an inherent effect of less pixel
      width to spread the same panorama FOV across) — shrinking the label footprint
      noticeably cuts down how often that happens, on top of the horizontal edge-clamp and
-     the density cap in renderLandmarks/renderAmenities (app.js). */
+     the density cap in renderLandmarks/renderAmenities (app.js).
+     NOTE 2026-09-09: this rule is effectively DEAD for a real phone visitor — #rotateHint
+     blocks all interaction until the device is turned to landscape, so no phone ever
+     reaches this portrait state in practice. Kept for a portrait TABLET (>720px wide
+     skips the rotate gate) and admin, which is the only reason it's still here; the
+     landscape-phone equivalent (the mode a phone visitor actually uses) lives in the
+     `@media (orientation:landscape) and (max-height:500px)` block further down, added
+     after banners were reported cluttered on mobile and this rule turned out to never be
+     reachable. If touching mobile landmark sizing again, that's the block that matters. */
   .lm-ico { padding: 4px 7px; font-size: 13px; }
   .lm-label { font-size: 11.5px; }
   .lm-sub-bar { font-size: 9px; padding: 2px 7px; }
@@ -975,9 +1076,15 @@ body {
   }
   body:not(.is-admin) .zoom-controls .btn-icon { width: 28px; height: 28px; font-size: 14px; }
   body:not(.is-admin) .zoom-status-group {
-    position: fixed; top: 8px; right: 12px; z-index: 16;
-    flex-direction: row; flex-wrap: wrap; justify-content: flex-end;
-    gap: 5px; max-width: calc(100vw - 24px);
+    /* Sit just to the left of the compass.
+       Compass: width 74px, right 12px → its left edge is 86px from the right.
+       Add 6px gap → pills' right edge at 92px from the right. */
+    position: fixed; top: 10px; right: 92px; left: auto; z-index: 16;
+    flex-direction: row-reverse; flex-wrap: wrap-reverse;
+    justify-content: flex-start;
+    gap: 5px;
+    /* Never let the pills run off the left edge on very narrow screens */
+    max-width: calc(100vw - 110px);
   }
   body:not(.is-admin) .zoom-status-btn { padding: 5px 10px 5px 8px; min-height: 28px; font-size: 11px; gap: 5px; }
   body:not(.is-admin) .zoom-status-btn .dot { width: 8px; height: 8px; box-shadow: 0 0 0 2px rgba(255,255,255,.06); }
@@ -1009,6 +1116,25 @@ body {
   .cat-drawer .cat-nav { gap: 1px; margin-top: 2px; justify-content: flex-start; }
   .cat-drawer .cat-btn { padding: 7px 10px; font-size: 12px; letter-spacing: .5px; }
   .cat-drawer .cat-drawer-brand { margin-bottom: 8px; }
+
+  /* Landmark/amenity labels at full (desktop) size in the ONE mode phone visitors
+     actually use — landscape; the portrait-scoped shrink further down in this file
+     (`@media (max-width:720px) and (orientation:portrait)`) never applied to a real
+     phone visitor in practice, since #rotateHint blocks all interaction until the
+     device is turned to landscape. Reported as overlapping/cluttered banners on mobile
+     — this is that same fix, just aimed at the mode that's actually reachable.
+     Sized smaller still as of 2026-09-10: the mobile landmark density CAP (app.js,
+     LANDMARK_MOBILE_CAP) that used to hide the excess and show a "+N more" hint was
+     removed at explicit request — "make the banner/font size small for mobile instead"
+     of hiding anything — so EVERY landmark now renders on a landscape phone just like
+     desktop, and this shrink is the only thing standing between that and the original
+     clutter. Meaningfully smaller than the first landscape pass, not just a tweak. */
+  body:not(.is-admin) .lm-ico { padding: 2px 4px; font-size: 10px; }
+  body:not(.is-admin) .lm-label { font-size: 9px; }
+  body:not(.is-admin) .lm-sub-bar { font-size: 7px; padding: 1px 4px; }
+  body:not(.is-admin) .am-chip { padding: 2px 6px 2px 4px; gap: 3px; }
+  body:not(.is-admin) .am-ico { font-size: 11px; }
+  body:not(.is-admin) .am-label { font-size: 8.5px; }
 }
 
 /* ─── Admin import button ──────────────────────────────────────────────────── */
@@ -2591,6 +2717,175 @@ body.is-admin .cat-drawer { display: none !important; }
   flex-shrink: 0;
 }
 
+/* ─── Built-in menu rows (AERIAL VIEW / LANDMARKS) ──────────────────────────────
+   Same tree-node-row look as an authored item, minus the drag handle and overflow
+   menu (they're not draggable/deletable) plus a fixed ✓ switch and a ▾ info arrow. */
+.tree-node-row.is-builtin {
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  justify-content: space-between;
+}
+.tree-node-row.is-builtin:hover {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.builtin-expand-arrow {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: var(--gold, #facc15);
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.builtin-expand-arrow.is-open {
+  transform: rotate(180deg);
+}
+
+/* Generic ON/OFF switch — a small pill, not a plain checkbox. Shared by the built-in
+   menu rows (AERIAL VIEW / LANDMARKS, "shown to the client or not") and, since
+   2026-09-09, the per-landmark "show by default" control on the Landmarks tab. ON
+   always means "visible" and needs to read at a glance rather than be inferred from a
+   checkmark's ambiguity — the landmark control used to be exactly that single ambiguous
+   button, which caused a real bug the day it shipped (see the ✓/✕-pair history in
+   refreshLmList's comment); this switch fixes the ambiguity a different way, with an
+   unmistakable ON/OFF affordance instead of two separate buttons. */
+.ui-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ui-switch-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.ui-switch-track {
+  width: 34px;
+  height: 18px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  display: inline-block;
+  position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.ui-switch-thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #94a3b8;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.ui-switch-input:checked + .ui-switch-track {
+  background: rgba(52, 211, 153, 0.35);
+  border-color: rgba(52, 211, 153, 0.6);
+}
+.ui-switch-input:checked + .ui-switch-track .ui-switch-thumb {
+  transform: translateX(16px);
+  background: #34d399;
+}
+.ui-switch-input:focus-visible + .ui-switch-track {
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.5);
+}
+
+.builtin-info-panel {
+  margin: 2px 0 6px 26px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+.builtin-info-text {
+  font-size: 11px;
+  color: var(--text-mute, #94a3b8);
+  margin: 0 0 6px 0;
+  line-height: 1.5;
+}
+.builtin-info-panel:last-child .builtin-info-text:last-child {
+  margin-bottom: 0;
+}
+.builtin-cat-empty {
+  font-size: 11px;
+  color: var(--text-mute, #94a3b8);
+  margin: 0;
+  font-style: italic;
+}
+.builtin-cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.builtin-cat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: rgba(250, 204, 21, 0.05);
+}
+.builtin-cat-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: text;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.builtin-cat-title:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.builtin-lm-sublist {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 4px 14px;
+  padding-left: 8px;
+  border-left: 1.5px solid rgba(255, 255, 255, 0.1);
+}
+/* .builtin-tour-row/-title share this styling with the landmark rows above — kept as
+   SEPARATE classes (not reused) because the JS wiring for each is keyed off its own
+   class name, and a shared class would make the landmark wiring's blanket
+   querySelectorAll also catch — and misfire on — the tour rows. */
+.builtin-lm-row, .builtin-tour-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.builtin-lm-row:hover, .builtin-tour-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.builtin-lm-title, .builtin-tour-title {
+  font-size: 11px;
+  color: #e2e8f0;
+  cursor: text;
+  padding: 1px 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.builtin-lm-title:hover, .builtin-tour-title:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
 .tree-actions-wrapper {
   position: relative;
   flex-shrink: 0;
@@ -2731,6 +3026,15 @@ body.tour-open.is-admin .tour-hs:active { cursor: grabbing; }
   background: rgba(14,14,16,.86); border: 1px solid rgba(255,255,255,.12);
   box-shadow: 0 10px 34px rgba(0,0,0,.5); backdrop-filter: blur(10px);
 }
+/* `.tour-bar`'s own `display:flex` beats the `[hidden]` attribute at equal specificity —
+   the author rule always comes after the UA stylesheet's `[hidden]{display:none}` in the
+   cascade, so `els.tourBar.hidden = true` (closePanoTour) had NO visual effect: exiting a
+   tour correctly restored the plot map/pano/menu underneath, but the room-strip bar kept
+   showing on top of it regardless. Third time this exact class of bug has hit this
+   project (see the install-banner and admin-modal gotchas) — anything toggled via the
+   `.hidden` DOM property needs its own `[hidden]{display:none}` rule if the base class
+   sets a `display` of its own. */
+.tour-bar[hidden] { display: none; }
 .tour-bar.is-busy { opacity: .75; }
 .tour-bar-title {
   font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
@@ -2780,11 +3084,32 @@ body.tour-open .lm-overflow-hint { display: none !important; }
 .ax-tour-hs { margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255,255,255,.1); }
 .ax-tour-hs-h { font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
   color: rgba(255,255,255,.55); margin-bottom: 7px; }
-.ax-tour-hsrow { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+/* Label, arrow, target-select and delete used to fight for room on ONE flex line in a
+   ~240px-wide sidebar — the target <select> (often the longest text: a node name) lost
+   that fight and rendered truncated ("3._Washroom" as "3._Was"). Now a 2x2 grid: label +
+   delete share the top row, the arrow + target select (spanning nearly the full width)
+   share the row underneath, so the select finally has room to show a real name. */
+.ax-tour-hsrow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "label label del" "arrow select select";
+  align-items: center;
+  gap: 4px 6px;
+  margin-bottom: 8px;
+}
 .ax-tour-hsrow.is-sel { outline: 1px solid var(--gold); outline-offset: 2px; border-radius: 6px; }
-.ax-tour-hslabel { flex: 1 1 auto; min-width: 0; }
-.ax-tour-hsarrow { flex: none; color: rgba(255,255,255,.4); font-size: 12px; }
-.ax-tour-hsto { flex: 1 1 auto; min-width: 0; }
-.ax-tour-hsadd { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
-.ax-tour-hsadd .btn { flex: none; }
-.ax-tour-dv, .ax-tour-openall { width: 100%; margin-top: 7px; }
+.ax-tour-hslabel { grid-area: label; min-width: 0; }
+.ax-tour-hsarrow { grid-area: arrow; color: rgba(255,255,255,.4); font-size: 12px; }
+.ax-tour-hsto { grid-area: select; min-width: 0; width: 100%; }
+.ax-tour-hsrow .ax-lm-del { grid-area: del; }
+/* Same reasoning for the "add a hotspot" row: stack the target picker above the button
+   instead of squeezing both onto one line. */
+.ax-tour-hsadd { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ax-tour-hsadd .ax-tour-hsto { width: 100%; }
+.ax-tour-hsadd .btn { width: 100%; justify-content: center; }
+.ax-tour-dv, .ax-tour-openall, .ax-tour-exit { width: 100%; margin-top: 7px; }
+/* The compass-direction picker sits directly above the "Set as start view" button it's
+   saved alongside — a labelled row rather than squeezing the select onto the button. */
+.ax-tour-dvrow { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.ax-tour-dirlbl { font-size: 11.5px; color: rgba(255,255,255,.6); white-space: nowrap; }
+.ax-tour-dirsel { flex: 1 1 auto; min-width: 0; }
