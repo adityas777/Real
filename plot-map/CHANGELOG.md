@@ -5,6 +5,407 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (mobile: videos now actually get cached for offline playback)
+
+`sw.js`. User report, analyzed first: "for the mobile offline users are the videos not
+getting downloaded."
+
+- **Root cause**: `respondVideo`'s only cache-WRITE path lived in its `if (!range)`
+  branch — i.e. it only ever saved a video the first time it was requested WITHOUT a
+  `Range` header. Desktop browsers commonly make that first request as a plain GET;
+  mobile browsers (iOS Safari reliably, Android often too) send a `Range` header on the
+  very first request for a `<video>`/`<audio>` element, before playback even starts, just
+  to probe the file. So on mobile that `!range` branch was essentially unreachable, and
+  every video fell through to a bare network passthrough with no caching at all — on ANY
+  visit, however many times it was played. The function's own comment already described
+  the intended fix ("a separate unranged fetch kicked off in the background to prime the
+  full-file cache for next time") but that fetch didn't actually exist anywhere in the
+  code — comment and implementation had drifted apart.
+- **Fix**: `primeVideoCache(cache, key, url)` (new) — when a ranged request finds nothing
+  cached yet, it now also kicks off a second, plain (no Range header) fetch of the same
+  URL purely to populate the cache, wrapped in `event.waitUntil()` so the service worker
+  isn't torn down mid-download once the (unrelated) visible ranged response has been
+  sent. `respondVideo` gained an `event` parameter to make that possible.
+  `VIDEO_PRIME_INFLIGHT` (a key→Promise map) dedupes this: a video's several range
+  requests (the metadata probe, then real playback, then any seeks) arriving while that
+  background download is still in flight only ever start ONE fetch, not one per request
+  — once it lands, `full` is set on the next request and the priming path is skipped
+  from then on.
+- **`VERSION` bumped `'v6' → 'v7'`** per this file's own stated policy (bump on any
+  caching STRATEGY change) — not because existing cached videos are invalidated by this
+  (they aren't; this is purely additive), just for consistency with v2/v5/v6's own bumps.
+- **Verified**: `node --check` clean; a 10-assertion function-extraction test against the
+  real `respondVideo`/`primeVideoCache` — confirmed the already-cached and
+  uncached-plus-unranged paths are unaffected, confirmed the reported mobile scenario
+  (uncached + ranged) now starts a genuine background priming fetch AND still answers
+  the visible request immediately without waiting on it, confirmed the primed video is
+  actually in the cache once that background fetch resolves, and confirmed 3 overlapping
+  ranged requests for the same uncached video only ever trigger ONE background fetch —
+  10/10 passed. Full accumulated suite from every other change this session re-run clean
+  (78/78).
+
+---
+
+## 2026-09-11 (fixed the standalone export bundle actually failing to boot at all — `$` collision)
+
+`server.py`. User report, asked to analyze first: "after doing export standalone site,
+its not opening in offline mode."
+
+- **Confirmed with a REAL headless-Chrome load of a real exported bundle** (Playwright +
+  the system-installed Chrome, opening the extracted zip's `index.html` via a genuine
+  `file://` URL — not a server, not a simulation) rather than reasoning about it: the page
+  hung forever at "LOADING… 0%" with `[pageerror] Identifier '$' has already been
+  declared`.
+- **Root cause**: `module_to_global()` (added earlier this session, converts the vendored
+  three.js ES module into a `window.THREE = {...}` global for the bundle's classic
+  `<script src>` use) only rewrote the module's *trailing* `export {...}` line — every
+  other one of the module's thousands of top-level `const`/`let`/`class` declarations
+  (heavily minified single/double-letter names) was left as bare top-level code. Inside an
+  ES module those are scoped to that module, invisible to anything else. Loaded as a
+  classic script instead, top-level `const`/`let`/`class` declarations spill into ONE
+  lexical scope SHARED by every `<script>` tag on the page — and the minifier had assigned
+  one of ITS internal names to `$`, colliding head-on with `app.js`'s own top-level
+  `const $ = (id) => document.getElementById(id);` helper. That collision is a
+  `SyntaxError`, and a `SyntaxError` in a classic script means NONE of that script's code
+  runs — not just the one colliding line — which is exactly why the whole app never booted.
+- **Fix**: `module_to_global` now wraps the entire rewritten module body in an IIFE
+  (`(function () { ...module body...; window.THREE = {...}; })();`), scoping all those
+  internal declarations to that function instead of the page's shared scope. Only the
+  explicit `window.THREE = {...}` assignment still reaches outside it — exactly the
+  standard pattern real UMD/IIFE bundlers use for this exact reason.
+- **Verified end-to-end, not just at the unit level**: re-exported a real bundle after the
+  fix, loaded it in the same real headless Chrome via `file://`, and this time it fully
+  booted — "LOADING… 100%", the real brand/menu/legend/compass all rendered, 2 canvas
+  elements present — and a screenshot confirms the actual pano + plot overlay genuinely
+  painted on screen, not just present in the DOM. Also re-ran the isolated
+  IIFE-vs-collision reproduction in Node (simulate an app.js-shaped `const $` alongside
+  the transformed output of both the dev and minified builds) to confirm the fix
+  specifically closes the reported failure mode, not just "some" bundle-loading issue.
+  A separate, unrelated finding surfaced during this test: `test12` (one of the projects
+  used for a quick low-size re-test) has genuinely missing pano/ground-image files on
+  disk — not a code bug, that project's own data is incomplete; `anandman`'s images are
+  intact and were used for the definitive real-render confirmation instead.
+- **Also noted, not fixed (cosmetic, doesn't block anything)**: the bundle's Contact-modal
+  placeholder image (`projects/sample/Demo.web.jpg`, a static fallback `src` overwritten
+  by JS before it's ever actually shown) 404s under `file://` since bundle mode uses a
+  `data/` folder, not `projects/<id>/`. Worth fixing later; does not affect boot or any
+  visible functionality.
+
+---
+
+## 2026-09-11 (real progress feedback for "Export standalone site…")
+
+`app.js`. User report: "if the user clicks export standalone site how can he see the
+downloading is even started or not there is no downloading progress animation."
+
+- **Root cause**: `onProjAction` hides the project dropdown menu the instant any item in
+  it is clicked (`els.projMenu.hidden = true`) — BEFORE `exportBundle()` even runs — so
+  the "⬇ Export standalone site…" button itself is already invisible for the entire
+  operation; swapping its own label (the pattern the header "💾 Save" button already
+  uses) wouldn't be seen. The only feedback was a single `showNotice(...)` toast that
+  auto-hides after a fixed 9 seconds regardless of whether the export — which can
+  genuinely take a long time; a content-heavy project's zip was measured at 541MB in an
+  earlier session test — was anywhere near done.
+- **`showNotice(msg, {persist=false})`** — new option, skips the auto-hide timeout when
+  `true`. A caller reporting live, repeated progress passes `persist:true` on every
+  update so the message never disappears out from under an operation that's still
+  running; the final "done" or "error" message reverts to a normal (non-persist) call so
+  it still auto-hides as before.
+- **`exportBundle()`** now reports BOTH real phases: "Building…" while `server.py` is
+  still assembling the zip in memory (nothing to report yet — `fetch()` itself hasn't
+  resolved), then switches to a live "Downloading… N% (X MB of Y MB)" once bytes start
+  arriving, reusing `fetchBlobWithProgress` (already built for the boot progress bar) for
+  real byte-level progress — throttled to at most 4 UI updates/sec so a fast LAN transfer
+  doesn't hammer the DOM.
+- **`fetchBlobWithProgress`** also improved to extract a real `{error}` message from a
+  failed response's JSON body (several of this app's own API routes return one) instead
+  of only ever showing a generic status-code message — a small, backward-compatible
+  enhancement that benefits every caller, not just this one.
+- **Verified**: `node --check` clean; a 9-assertion function-extraction test — persist
+  vs normal `showNotice` timeout scheduling, and `fetchBlobWithProgress`'s new JSON vs
+  plain error-message fallback — 9/9 passed; full accumulated suite from every other
+  change this session re-run clean (68/68).
+
+---
+
+## 2026-09-11 (fixed the PWA offline cache — still referenced the old three.js file)
+
+`sw.js`. User asked "is the export standalone file not working, first analyze and tell
+me" after the load-time optimization work — traced every remaining reference to
+`vendor/three.module.js` across the whole project (not just server.py, which was already
+fixed) and found a second, separate bug in the PWA service worker's precache list.
+
+- **The bug**: `SHELL_URLS` (the shell files precached for offline use on install) still
+  listed `./vendor/three.module.js` — the OLD, now-unused dev build. Since that file is
+  still on disk, the fetch quietly succeeded and cached it anyway, wasting ~1.3MB of a
+  visitor's offline storage on a file the app never loads any more — while
+  `three.module.min.js` (what `app.js` actually imports now) was never precached at all.
+  A visitor who installed the site for offline use, then went offline, would find the 3D
+  pano viewer unable to load THREE.js at all.
+- **Fix**: `SHELL_URLS` now lists `./vendor/three.module.min.js`. Bumped `VERSION`
+  `'v5' → 'v6'` per the file's own documented convention ("bump whenever the caching
+  STRATEGY changes... so an already-installed worker cannot keep serving data under the
+  previous rules") — necessary here since an already-installed v5 worker's shell cache
+  has the wrong file in it; the version bump makes `activate` delete it and force a
+  fresh precache under the corrected list.
+- **Also checked and ruled out**: `spike/index.html` (an old dev prototype, not part of
+  the live app or the export bundle) still references the old path too, but doesn't
+  affect anything a visitor or the export feature touches — left alone.
+- **Verified**: `node --check` clean on both `app.js` and `sw.js`; confirmed live via
+  `curl` that the served `sw.js` has the corrected path and version.
+
+---
+
+## 2026-09-11 (site-wide load-time optimization: gzip, minified three.js, vendor caching)
+
+`server.py`, `app.js`, `vendor/three.module.min.js` (new). User request: "decrease the
+loading time of the overall website and make it fast." Audited actual response headers
+and file sizes first rather than guessing — found three real, safe wins with zero
+behavior change:
+
+- **Three.js was shipping the full unminified DEV build** (`vendor/three.module.js`,
+  1.3MB, 53,044 lines — a pretty-printed source build, not production output) on every
+  single page load, client and admin alike. Downloaded the OFFICIAL minified r160 build
+  (exact same version — confirmed via the `REVISION` constant, `unpkg.com/three@0.160.0/
+  build/three.module.min.js`, three.js's own npm package) to
+  `vendor/three.module.min.js` (670KB) and repointed `app.js`'s one import line at it.
+  Verified the new build exports everything `app.js` actually uses (`WebGLRenderer`,
+  `PerspectiveCamera`, `BufferGeometry`, `Mesh`, `Raycaster`, `SRGBColorSpace`, etc. — 21
+  symbols checked) and, separately, a Node smoke test actually constructing a `Scene`/
+  `Mesh`/`PerspectiveCamera`/`BufferGeometry` with the exact option shapes `app.js` uses
+  — 9/9 passed. The old dev build is left on disk (harmless, unreferenced) in case
+  THREE's own internals ever need debugging with readable stack traces.
+- **The server sent zero compression, ever** (`server.py`'s `_serve_static`, inherited
+  from `SimpleHTTPRequestHandler`) — confirmed via `curl -H "Accept-Encoding: gzip"`
+  getting back full-size, uncompressed bodies regardless. Added on-the-fly gzip for
+  text-ish MIME types (`text/*`, `application/javascript`, `application/json`,
+  `application/manifest+json`, `image/svg+xml`) above 1KB, only on the plain full-file
+  response path (the existing byte-range/streaming path for large media is untouched —
+  gzip and Range together is genuinely complex and media files aren't compressible
+  anyway). Falls back to the original uncompressed path for any client that doesn't
+  advertise `gzip` support. Measured live: `app.js` 475KB→140KB (70%),
+  `styles.css` 132KB→31KB (77%), `three.module.min.js` 670KB→167KB (75% — 87% off the
+  original 1.3MB dev build combined with the swap above).
+- **`/vendor/*` now gets a real `Cache-Control`** (`public, max-age=31536000,
+  immutable`) — these are third-party libraries this project never edits in place (a
+  version bump means a new filename), so they were the one class of asset safe to cache
+  hard; everything else (`app.js`/`styles.css`/`index.html`, already cache-busted via
+  their own `?v=` query string; project content under `projects/`; admin-editable data)
+  stays `no-cache`, since those genuinely change and admin edits must show up on reload
+  without a hard-refresh — unchanged behavior, verified nothing that needs to stay live
+  got the long-cache treatment.
+- **Verified**: `python -c "import ast; ast.parse(...)"` clean on `server.py`;
+  `node --check` clean on `app.js`; live `curl` checks (local AND through the Cloudflare
+  tunnel) confirming gzip negotiates correctly both ways, images/small manifests
+  correctly skip compression, byte-range requests on `vendor/three.module.min.js` still
+  return proper `206 Partial Content`, and the vendor cache header passes through the
+  tunnel intact; the full accumulated test suite from every other change this session
+  re-run clean (50/50) to confirm the import-path swap didn't disturb anything.
+- **Caught and fixed a real break in the standalone export bundle before shipping**:
+  `do_bundle`'s `strip_named_import`/`BUNDLE_SHELL`/the `elif rel == ...` copy check all
+  hardcoded the OLD `vendor/three.module.js` path — after repointing `app.js`'s import,
+  every future "Export standalone site…" would have shipped a bundle whose `app.js` still
+  contained a bare `import` statement inside a plain (non-module) `<script src>` tag, a
+  guaranteed `SyntaxError` in the browser. Found by tracing every reference to the old
+  path, not just testing the live server. **Also found `module_to_global` — the function
+  that rewrites the vendored ES module into a `window.THREE = {...}` global for file://
+  use — silently produced INVALID JavaScript against the minified build specifically**:
+  its regex spliced the raw `export {...}` list text into an object literal, which works
+  for the dev build (bare names, e.g. `{Scene, Mesh}`) but not the minified build's
+  aliased exports (e.g. `{nt as ACESFilmicToneMapping}` — `as` has no meaning inside an
+  object literal, `SyntaxError: Unexpected identifier 'as'`, confirmed by actually
+  executing the transformed output in Node, not just checking for a leftover "export"
+  string). Rewrote it to parse each export item (aliased or bare) and emit a real
+  `exportedName: localName` pair. Fixed all four references to use
+  `vendor/three.module.min.js` throughout. **Verified end-to-end against the real
+  endpoint**: downloaded an actual export bundle via `/api/export-bundle?project=
+  anandman`, extracted just `app.js` and `vendor/three.global.js` from the real zip
+  (skipping the project's own multi-hundred-MB embedded media), confirmed `app.js` has
+  no leftover `import` statement and `three.global.js` actually executes in Node and
+  produces a working `window.THREE.WebGLRenderer`/`.REVISION === '160'`.
+
+---
+
+## 2026-09-11 (a tour with only one room no longer shows a pointless room-list submenu)
+
+`app.js`. Bug report with screenshot on the same-day drawer-integration change: a
+"Swimming Pool" tour with a single room showed a drawer submenu with just that one room
+(highlighted green, since it's also the only one and the one you're standing in) plus
+Exit Tour — "I don't want to open a submenu when there is only one thing inside it,
+unlike Modern Villa which has multiple [rooms] inside it."
+
+- Exactly the same "one thing inside is never a choice" rule `resolveFolderTarget`
+  already applies to ordinary authored folders (see its own top-of-file comment), now
+  applied to tour rooms too: `openClientPanoTour` no longer pushes `tourRoomPickerNode`
+  for a tour with `nodes.length <= 1`.
+- Where the drawer lands instead depends on what else exists: 2+ tours total ⇒ stays at
+  the tour list (`virtualTourPickerNode`) so switching tours is still possible; exactly
+  one tour (and it has only one room) ⇒ falls all the way back to the ROOT menu.
+- **The root menu can now carry an "✕ Exit Tour" row of its own** (new, in
+  `renderClientSidebar`'s stack-length-0 branch and `wireClientSidebarButtons`) — needed
+  for that last case, since a single-tour/single-room project has no picker level left to
+  put it on, and a tour taking over the viewer still needs a visible way out. Also fixed
+  the drawer's own hide condition, which previously hid it entirely when nothing was
+  authored — now also checks `state.tourView` so the Exit Tour row doesn't vanish along
+  with the rest of the (empty) root menu.
+- **`withExitTourRow(children)`** (new, factors out what was a hardcoded array in
+  `tourRoomPickerNode`) — appends the Exit Tour row only `if (state.tourView)`, shared by
+  `virtualTourPickerNode` (which now also carries it, for the "2+ tours, active one has 1
+  room" case) and `tourRoomPickerNode`.
+- **`refreshTourRoomMenu`** extended to also highlight the active TOUR (not just the
+  active room) when the tour list — rather than a room list — is what's currently shown.
+- **Verified**: `node --check` clean; rewrote/extended the two relevant test files —
+  `tourRoomPickerNode`/`virtualTourPickerNode` now assert the Exit Tour row only appears
+  while touring (8/8), and a new `openClientPanoTour` suite covers all four room/tour-
+  count combinations (multi-tour + 1-room active tour stays at the tour list; single-
+  tour + 1-room falls to root; single-tour + multi-room still goes straight to the room
+  list; multi-tour + multi-room drills as before) — 13/13. Full accumulated suite across
+  every tour-related change this session re-run clean: 50/50.
+
+---
+
+## 2026-09-11 (multi-tour VIRTUAL TOUR click now auto-plays the topmost tour)
+
+`app.js`. Explicit request, refining the same-day drawer-integration change: "if there is
+more than one [tour] then only go inside it in the menu the same way we [do] for the
+other thing in the menu, and when the user clicks on virtual tour it should directly
+open the topmost virtual tour i.e temple in this case."
+
+- **Before**: with 2+ tours, clicking the root VIRTUAL TOUR item only opened the tour-list
+  picker in the drawer — nothing played in the pano until the visitor picked a tour by
+  name. That's inconsistent with every OTHER multi-child menu item, and with LANDMARKS,
+  which shows something (ALL LANDMARKS) the instant its own category list appears.
+- **`openClientPanoTour(tourId, title, {anchorRooms=true})`** — new option. `true`
+  (the default, unchanged for every other call site) drills the drawer straight to the
+  opened tour's own room list. `false` stops one level up at the tour list instead —
+  used ONLY by the root VIRTUAL TOUR click's multi-tour case, which now calls
+  `openClientPanoTour(state.tours[0].id, state.tours[0].name, {anchorRooms:false})`:
+  shows the tour list (matching generic folder "show my own children" behavior) while
+  auto-playing `state.tours[0]` (the admin's own ordering — "Temple" in the reported
+  case) so the visitor sees something immediately. Explicitly picking a DIFFERENT tour
+  from that list still drills one level deeper into ITS room list (default `anchorRooms`).
+- **Removed `openVirtualTourPicker`** — dead code once the root click stopped calling it
+  directly (its one job, setting the tour-list anchor, is now just `anchorRooms:false`'s
+  side effect inside `openClientPanoTour`).
+- **Boot auto-open gets this for free**: `computeAutoOpenTarget`/`fireAutoOpen` dispatch
+  through the exact same `openNodeContent` 'virtualtour' branch a real click uses, so a
+  project whose top menu row is VIRTUAL TOUR with 2+ tours now also auto-plays the
+  topmost tour on load, not just on a later click.
+- **Verified**: `node --check` clean; a 7-assertion function-extraction test against the
+  real `openClientPanoTour` (root click with `anchorRooms:false` shows the tour list only
+  AND plays the topmost tour's start node; explicitly picking a named tour still drills
+  to a 2-level stack; a single-tour project is unaffected, straight to its room list) —
+  7/7 passed, plus the two pre-existing tour test suites re-run clean (23/23 combined).
+
+---
+
+## 2026-09-11 (virtual tour room navigation moved into the drawer; floating tour bar removed)
+
+`app.js`, `index.html`, `styles.css`. Explicit request, discussed first: "the things
+under virtual tour should come in menu same as that when we click landmarks all the
+categories get shown up in the menu itself, and remove the bar which is shown in image
+[the floating room-strip], when someone clicks virtual it should automatically open the
+room which is on top of the menu."
+
+- **`tourRoomPickerNode(tour)`** (new, next to `virtualTourPickerNode`) — the per-room
+  analogue of the landmarks category list: a synthetic parent whose children are the
+  open tour's rooms (`contentType: 'panotourroom'`, `content: {tourId, nodeId}`) plus a
+  trailing **"✕ Exit Tour"** row (`contentType: 'exittour'`), rendered by the existing
+  generic drawer submenu (`renderClientSidebar`'s drilled-in-parent branch) — no new
+  rendering code needed, it's the same mechanism an authored folder or the tour-LIST
+  picker already uses.
+- **`openClientPanoTour`** now anchors the drawer to `[tourRoomPickerNode(tour)]`
+  (one level) when the project has exactly one tour, or `[virtualTourPickerNode(),
+  tourRoomPickerNode(tour)]` (two levels — pick a tour, then its rooms) when there are
+  2+. Its existing `tourGoTo(tour.startNode || tour.nodes[0].id, {instant:true})` call at
+  the end was already unchanged and already IS "auto-open the room on top" (the first
+  room in `tour.nodes` order, which the room list also renders in) — nothing new needed
+  there, just confirmed it still holds with the drawer now showing that same list.
+- **`openNodeContent`** gained two contentTypes: `'panotourroom'` (jump to a specific
+  room — walks within the current tour via `tourGoTo` if it's already open, otherwise
+  opens the tour fresh via `openClientPanoTour` then jumps to the clicked room, since
+  that would otherwise only land on the tour's designated start node) and `'exittour'`
+  (`closePanoTour()`).
+- **Removed the floating `#tourBar`** (title + room-strip pills + "✕ Exit tour", shown
+  in the user's screenshot) entirely: `index.html` markup, all `.tour-bar*`/`.tour-chip`/
+  `.tour-exit` CSS, `els.tourBar`, and `refreshTourBar()` (replaced by
+  `refreshTourRoomMenu()`, a much lighter function that just toggles `.is-active`/
+  `.is-busy` on the drawer's existing room-list buttons instead of rebuilding a separate
+  DOM tree — `.cat-btn.is-active` already existed and is shared with every other drawer
+  list). Admin already had its own equivalent room-jump control in the Tour tab's node
+  list (the ▶ button) and its own "← Back to the plot map" exit button, so removing the
+  bar for admin too (it had no `is-admin` scoping) does not strand admin workflow.
+- **Drawer back-button is now tour-aware**: backing out of the room list (single-tour)
+  or the tour list (multi-tour, one level further out) while a tour is open now calls
+  `closePanoTour()` instead of just popping to a root menu that would otherwise show
+  while the pano still displayed a tour room — a state this app has deliberately never
+  allowed since the tour-anchoring work two days earlier. `isTourMenuNode(node)` (new)
+  identifies both synthetic tour-related parents by id.
+- **Verified**: `node --check` clean, CSS brace-balanced (751/751); a 17-assertion
+  function-extraction test against the real `tourRoomPickerNode`/`isTourMenuNode` (room
+  order/content/titles, the Exit Tour row, both synthetic-id checks) plus a
+  reimplementation check of the back-button's exit-on-pop-out logic covering all four
+  real scenarios (single-tour, multi-tour partial pop, multi-tour full pop, and an
+  ordinary authored folder with no tour open never being mistaken for one) — 17/17
+  passed. Confirmed live via `curl` against the running server.
+
+---
+
+## 2026-09-11 (fixed a jarring hotspot transition: crossfade-then-snap → snap-then-crossfade)
+
+`app.js`. Follow-up bug report on the same-day "snap to start view" change: "shows a
+camera angle and then cut to the room start view, which is not looking good."
+
+- **Cause**: the camera-snap block (`state.view.lon/lat/fov = node.defaultView...`) ran
+  AFTER the crossfade's `await tourTween(460, ...)` had already fully completed — so the
+  entire 460ms fade played out at the visitor's stale, carried-over look direction, and
+  only once it finished did the camera hard-cut to the new room's saved view. Two
+  separate motions (a smooth fade at the wrong angle, then an abrupt jump) read as broken,
+  not smooth.
+- **Fix**: moved the `tv.nodeId`/`state.northDeg`/`state.view.lon,lat,fov` block to run
+  BEFORE the texture swap/crossfade decision, right after the node's texture finishes
+  loading. The crossfade (or hard swap) now plays out entirely at the correct, final
+  camera angle — one clean cut immediately followed by a smooth fade, not the reverse.
+- **Verified**: `node --check` clean; re-ran the existing 5-assertion `tourGoTo`
+  extraction test (still 100% passing — confirms the reorder didn't change any of the
+  already-verified snap/calibration behavior) plus a new 6th assertion added specifically
+  for this bug: a mocked `tourTween` records `state.view.lon` at the moment its per-frame
+  callback fires (i.e. *during* the fade) and confirms it already equals the target
+  room's saved lon, not the stale pre-transition one.
+
+---
+
+## 2026-09-11 (tour hotspots now snap the camera to the target room's start view)
+
+`app.js`. Explicit request, discussed first (an AskUserQuestion round-trip on animate-vs-
+cut and scope before implementing): "when the user clicks on any of the hotspot inside
+the virtual tour the camera should pan to the room's start view which was set by the
+admin."
+
+- **Diagnosis presented to the user before changing anything**: `tourGoTo(nodeId,
+  {instant})` only ever applied `node.defaultView.lon/lat/fov` to `state.view` when
+  `instant` was `true` — a fresh entry from the aerial map. A hotspot click
+  (`tourGoTo(k.to)`, no `instant` passed), the room-strip thumbnail click, and the
+  admin's own node-list click all default to `instant: false`, so the visitor's current
+  look direction simply carried over unchanged into the new room ("heading continuity",
+  a deliberate earlier design choice — not a bug).
+- **Confirmed with the user**: cut instantly to the new room's saved view the moment the
+  pano is done loading/crossfading, not an animated pan; applied to every non-instant
+  arrival uniformly (hotspots, room-strip thumbnails, admin node clicks) rather than
+  hotspots only, for consistency with the already-unconditional per-room compass
+  calibration added the day before.
+- **`app.js`**: removed the `if (instant) { ... }` gate around the `state.view.lon/lat/
+  fov` assignment in `tourGoTo` — it's unconditional now, right after the crossfade (or
+  hard pano swap) has already completed, so it reads as a cut rather than a pan mid-fade.
+- **Verified**: `node --check` clean; a function-extraction test against the real
+  `tourGoTo` (heavily mocked THREE/tour-cache/DOM dependencies) — 5/5 passed, covering a
+  non-instant hotspot-style arrival snapping lon/lat/fov to the target room's saved view
+  (starting from a deliberately different "mid-look-around" view to prove it's not
+  carrying over), the per-room compass calibration still firing on the same arrival, and
+  the pre-existing instant-entry path still behaving exactly as before.
+
+---
+
 ## 2026-09-10 (boot progress bar; parallelized the pano + site-plan image fetches)
 
 `index.html`, `styles.css`, `app.js`. User report: "the client wont know that something

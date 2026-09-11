@@ -23,6 +23,7 @@ network. Set HOST=127.0.0.1 (env) to restrict it back to this machine only.
 
 Run:  python server.py [port]      (default 8731)
 """
+import gzip
 import json
 import mimetypes
 import os
@@ -35,10 +36,26 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 # serve manifest.webmanifest as application/octet-stream — harmless in Chrome but some
 # browsers are stricter about the web app manifest's content type.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
+# Same issue for .webp — depends on the Python build/OS mimetypes registry rather than the
+# Python version alone (confirmed: 3.10 here returns None/None for it, 3.14 on the same
+# machine does not), so register it explicitly rather than relying on whatever happens to
+# be on the machine running this. Browsers still render an octet-stream image fine via
+# <img>/texture loads, but this also feeds GZIP_MIME_PREFIXES below, and an unrecognised
+# mime type there means a .webp asset silently never gets gzip'd.
+mimetypes.add_type("image/webp", ".webp")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PROJECTS_DIR = os.path.join(ROOT, "projects")
 PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+# gzip only text-ish assets — app.js/styles.css/index.html/the vendor JS libs are the big
+# ones (hundreds of KB to 1MB+, uncompressed, on every single page load) and compress
+# 70-85%. Never gzip images/video/audio (already-compressed formats gain nothing and
+# waste CPU) or anything under GZIP_MIN_BYTES (gzip's own header/footer overhead makes it
+# a net loss on tiny files).
+GZIP_MIME_PREFIXES = ("text/", "application/javascript", "application/json",
+                       "application/manifest+json", "image/svg+xml")
+GZIP_MIN_BYTES = 1024
 
 def safe_project(pid):
     """Return a validated project id or None."""
@@ -55,26 +72,60 @@ def safe_filename(name):
     return name
 
 # The app shell files (relative to ROOT) that a standalone bundle ships alongside the data.
-BUNDLE_SHELL = ["index.html", "app.js", "styles.css", os.path.join("vendor", "three.module.js")]
+BUNDLE_SHELL = ["index.html", "app.js", "styles.css", os.path.join("vendor", "three.module.min.js")]
 
 # Project data files a bundle embeds inline into index.html (see build_embedded_files_json)
 # so the exported site needs zero fetch() calls for its own data — see do_bundle's docstring.
 BUNDLE_DATA_FILES = ["plots.svg", "plots.csv", "alignment.json", "landmarks.json", "amenities.json", "tour.json"]
 
 def module_to_global(js, global_name):
-    """Rewrite the vendored three.module.js — a single flat ES module whose only
-    import/export surface is one trailing aggregate `export { A, B, C, ... };` line, with
-    no other export/import statements anywhere in the file — into a classic script that
+    """Rewrite the vendored three.module.min.js — a single flat ES module whose only
+    import/export surface is one trailing aggregate `export {...};` statement, with no
+    other export/import statements anywhere in the file — into a classic script that
     attaches everything to window.<global_name> instead. Needed because an exported bundle
     must run via file://, where ES module fetches are blocked by the browser (verified: a
     dynamic `import()` of a local module throws "Failed to fetch dynamically imported
     module" under file://, same for `fetch()`; a classic `<script src>` does not).
+    Each item in that export list is either a bare `localName` (identical local/exported
+    name — true of the old unminified build) or, in the MINIFIED build, `localName as
+    exportedName` (the minifier renames internals, so most items are aliased) — naively
+    splicing that raw text into `{...}` as an object literal is invalid JS wherever an
+    `as` shows up (`as` has no meaning outside an actual import/export statement), so each
+    item is reformatted into a real `exportedName: localName` pair instead (verified by
+    actually executing the transformed output of BOTH build shapes in Node and confirming
+    `window.THREE.WebGLRenderer` etc. come out as real functions, not just checking the
+    text for a leftover "export" keyword — that check alone missed this exact bug).
+    The whole rewritten body is wrapped in an IIFE — the module's own THOUSANDS of
+    top-level `const`/`let`/`class` declarations (heavily minified single/double-letter
+    names) were scoped to that module in the original ES module and must stay scoped
+    somewhere once this runs as a classic script instead, or they leak into the page's
+    ONE SHARED global lexical scope across every `<script>` tag. Confirmed as a real,
+    not theoretical, break: an actual exported bundle loaded in headless Chrome via
+    file:// got stuck at "LOADING… 0%" forever with `Identifier '$' has already been
+    declared` — the minifier happened to land one of ITS internal names on `$`, exactly
+    colliding with app.js's own top-level `const $ = (id) => document.getElementById(id)`
+    helper, and that SyntaxError kills app.js's ENTIRE script, not just the one line.
     Ships the file unmodified (falling back to the original ES module) if that one export
-    line isn't found in the expected shape, rather than silently producing a broken file."""
-    m = re.search(r"^export \{(.+)\};\s*$", js, re.MULTILINE)
+    statement isn't found in the expected shape, rather than silently producing a broken
+    file — note that fallback is only "safe" in the sense of not raising here; the bundle
+    itself would still be broken (an ES import/export statement isn't valid inside the
+    plain `<script src>` bake_bundle_html swaps it into), so an unrelated future change to
+    the vendored file's export shape needs re-verifying against this function, not just
+    trusting the fallback to make it silently fine."""
+    m = re.search(r"export\s*\{(.+)\};\s*$", js, re.DOTALL)
     if not m:
         return js
-    return js[:m.start()] + ("window.%s = {%s};\n" % (global_name, m.group(1))) + js[m.end():]
+    pairs = []
+    for item in m.group(1).split(","):
+        item = item.strip()
+        if not item:
+            continue
+        aliased = re.match(r"^(\S+)\s+as\s+(\S+)$", item)
+        local, exported = aliased.group(1, 2) if aliased else (item, item)
+        pairs.append("%s: %s" % (exported, local))
+    body = js[:m.start()]
+    assignment = "window.%s = {%s};\n" % (global_name, ", ".join(pairs))
+    return "(function () {\n" + body + assignment + "})();\n" + js[m.end():]
 
 def strip_named_import(js, module_rel_path):
     """Remove app.js's single `import * as X from '<module_rel_path>';` line so the
@@ -494,6 +545,14 @@ class Handler(SimpleHTTPRequestHandler):
                 pass
         size     = os.path.getsize(path)
         last_mod = email.utils.formatdate(os.path.getmtime(path), usegmt=True)
+        # Only /vendor/* (third-party libraries this project never edits in place — a
+        # version bump means a new filename, not a content change) gets long-lived
+        # caching. Everything else — app.js/styles.css/index.html (already cache-busted
+        # per-request via their own `?v=` query string, so a Cache-Control header here
+        # wouldn't matter either way), project content under projects/, admin-editable
+        # data — stays uncached, since those genuinely DO change and a stale cached copy
+        # would show the admin's edits inconsistently.
+        cache_control = "public, max-age=31536000, immutable" if "/vendor/" in path.replace("\\", "/") else "no-cache"
 
         range_hdr = self.headers.get("Range", "")
         if range_hdr:
@@ -515,6 +574,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_header("Content-Length", str(length))
                 self.send_header("Accept-Ranges",  "bytes")
                 self.send_header("Last-Modified",  last_mod)
+                self.send_header("Cache-Control",  cache_control)
                 self.end_headers()
                 try:
                     with open(path, "rb") as fh:
@@ -530,12 +590,37 @@ class Handler(SimpleHTTPRequestHandler):
                     pass
                 return
 
-        # Full-file response (no Range header, or unrecognised Range syntax)
+        # Full-file response (no Range header, or unrecognised Range syntax). gzip
+        # text-ish assets when the client advertises support — everything else
+        # (images/video/audio, or a client that can't decompress) falls through to the
+        # original streamed-from-disk path unchanged.
+        accepts_gzip = "gzip" in self.headers.get("Accept-Encoding", "")
+        compressible = mime.startswith(GZIP_MIME_PREFIXES)
+        if accepts_gzip and compressible and size >= GZIP_MIN_BYTES:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            body = gzip.compress(raw, compresslevel=6)
+            self.send_response(200)
+            self.send_header("Content-Type",     mime)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length",   str(len(body)))
+            self.send_header("Vary",             "Accept-Encoding")
+            self.send_header("Accept-Ranges",    "bytes")
+            self.send_header("Last-Modified",    last_mod)
+            self.send_header("Cache-Control",    cache_control)
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+
         self.send_response(200)
         self.send_header("Content-Type",   mime)
         self.send_header("Content-Length", str(size))
         self.send_header("Accept-Ranges",  "bytes")
         self.send_header("Last-Modified",  last_mod)
+        self.send_header("Cache-Control",  cache_control)
         self.end_headers()
         try:
             with open(path, "rb") as fh:
@@ -700,8 +785,8 @@ class Handler(SimpleHTTPRequestHandler):
                     if rel == "index.html":
                         data = bake_bundle_html(data.decode("utf-8"), pid, embedded_files_json, embedded_images_json).encode("utf-8")
                     elif rel == "app.js":
-                        data = strip_named_import(data.decode("utf-8"), "./vendor/three.module.js").encode("utf-8")
-                    elif rel == os.path.join("vendor", "three.module.js"):
+                        data = strip_named_import(data.decode("utf-8"), "./vendor/three.module.min.js").encode("utf-8")
+                    elif rel == os.path.join("vendor", "three.module.min.js"):
                         data = module_to_global(data.decode("utf-8"), "THREE").encode("utf-8")
                         arcname = os.path.join("vendor", "three.global.js")
                     z.writestr(f"{pid}/" + arcname.replace(os.sep, "/"), data)

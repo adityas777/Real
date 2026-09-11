@@ -66,7 +66,9 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
   view-only "standalone site" that runs via plain **`file://`, no server** (`do_bundle`:
   app shell — `index.html` with baked `window.B91_BUNDLE`/`window.B91_BUNDLE_FILES`/
   `window.B91_BUNDLE_IMAGES` flags, `app.js` (import-stripped), `styles.css`,
-  `vendor/three.global.js` (module→global rewrite of `three.module.js`) — plus the
+  `vendor/three.global.js` (module→global rewrite of `three.module.min.js`, the minified
+  build — see the load-time gotcha below for why `module_to_global` has to reformat each
+  export item rather than splice the raw list) — plus the
   project's files under `data/`, all under a top
   `<id>/` folder); `GET /api/export-bundle-check?project=<id>` → `{flagged:[...]}`, a
   pre-flight listing menu items that need internet even in the offline bundle (see
@@ -80,6 +82,17 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
   reach it (admin plotting from a remote browser) — the write API is **unauthenticated**,
   so run it only on a trusted/firewalled network (`HOST=127.0.0.1` env restricts it back
   to this machine).
+- **`_serve_static` gzips text-ish responses on the fly** (2026-09-11, load-time work):
+  `GZIP_MIME_PREFIXES` (`text/*`, JS, JSON, the manifest, SVG) above `GZIP_MIN_BYTES`
+  (1KB), only on the plain full-file path — the byte-range/streaming path for large media
+  is untouched (gzip+Range together is real complexity for zero benefit, since media is
+  already-compressed). Falls back to uncompressed for a client that doesn't advertise
+  `Accept-Encoding: gzip`. `/vendor/*` also gets `Cache-Control: public, max-age=
+  31536000, immutable` — the one class of asset genuinely safe to cache hard, since these
+  are third-party libraries never edited in place (a version bump = a new filename).
+  Everything else stays `no-cache` (`app.js`/`styles.css`/`index.html` are already
+  cache-busted via their own `?v=` query string anyway; project content and admin-editable
+  data genuinely change and must never serve stale).
 - **Client:** `state.projectId`/`state.assetBase` come from `?project=<id>` at boot
   (default `sample`; admin-only localStorage fallback `b91-project-id`). All data files
   (`plots.svg/csv`, `*.json`) load from `${assetBase}/…`; image paths stored in the JSON
@@ -415,14 +428,36 @@ Top-down, by section header:
   `closePanoTour` restores the saved view + texture and disposes the tour's textures.
   `tourGoTo(nodeId,{instant})` crossfades via a second sphere at 0.985× **sharing
   `three.pano.geometry`** (dispose the material only — never the shared geometry);
-  `tourTween` is the easing helper. Heading is carried across nodes; `defaultView` applies
-  on entry only. **Texture lifecycle:** `tourTex` LRU (`TOUR_CACHE_MAX = 3`) +
+  `tourTween` is the easing helper. **Every arrival (not just `instant`) now snaps to the
+  room's own saved `defaultView`** (2026-09-11 — heading is no longer carried across
+  nodes, a deliberate reversal of the original design) — the snap runs BEFORE the texture
+  swap/crossfade, not after, so the fade plays out at one stable angle instead of the old
+  angle then a jarring cut. **Texture lifecycle:** `tourTex` LRU (`TOUR_CACHE_MAX = 3`) +
   `tourTouch`/`tourEvict`/`loadTourNodeTex`/`prefetchTourNeighbours` (one hop) —
   download weight and GPU residency are separate problems (see gotchas).
   **Hotspots:** `rebuildTourHotspotDOM`/`renderTourHotspots` (projected each frame from
   `#tourHotspots`, same model as landmarks), `startTourHsDrag`/`onTourHsDragMove`/
   `endTourHsDrag` (drag-to-place), `addTourHotspot`/`deleteTourHotspot`/
-  `setTourNodeDefaultView`. `refreshTourBar` draws the room strip + exit (`#tourBar`).
+  `setTourNodeDefaultView`. **Room navigation lives in the drawer** (2026-09-11,
+  replacing the old floating `#tourBar`/`refreshTourBar`): `tourRoomPickerNode(tour)`
+  builds a synthetic parent (rooms + a trailing "Exit Tour" row) rendered by the generic
+  submenu system; `refreshTourRoomMenu()` just toggles `.is-active`/`.is-busy` on its
+  existing buttons to track the live room/in-flight jump.
+  **`openClientPanoTour(tourId, title, {anchorRooms=true})`** — `anchorRooms:false` (only
+  used by the root VIRTUAL TOUR click when 2+ tours exist) anchors the drawer at the
+  tour-list level instead of drilling into the opened tour's own room list, while STILL
+  auto-playing it — the root click behaves like any other multi-child folder (show my own
+  children) while not leaving the visitor staring at an empty picker. `openVirtualTourPicker`
+  was removed the same day (2026-09-11) once nothing called it directly any more.
+  **A tour with only ONE room never gets `tourRoomPickerNode` pushed at all** (also
+  2026-09-11, `resolveFolderTarget`'s "one thing inside is never a choice" rule applied to
+  rooms) — lands at the tour list if 2+ tours exist, or the bare ROOT menu if this is the
+  only tour. **The root menu can carry its own "✕ Exit Tour" row** (`renderClientSidebar`'s
+  stack-length-0 branch + `wireClientSidebarButtons`, `data-node-id="__exit_tour__"`) for
+  exactly that last case — a single-tour/single-room project has no picker level left to
+  put an exit on. `withExitTourRow(children)` appends the row `if (state.tourView)`,
+  shared by `virtualTourPickerNode` and `tourRoomPickerNode` so it's never duplicated
+  logic across the two.
   **Menu launch (D-12):** content type **`panotour`** stores `content.tourId` and
   dispatches to `openClientPanoTour` — distinct from `tour`, which iframes an *external*
   3DVista/Kuula URL/file. Wizard: 🧭 card + `renderWizardTourPicker` (warns on a tour with
@@ -703,6 +738,24 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   landmarks and amenities — *not* the camera-yaw convention. See the two-conventions note
   above `computeHome`. `defaultView`, by contrast, stores a **camera** lon/lat, because it
   is assigned straight into `state.view`. Mixing them mirrors placement horizontally.
+- **Every arrival at a tour node snaps to that node's own saved start view (2026-09-11,
+  explicit request) — there is no more "heading continuity."** `tourGoTo` used to apply
+  `node.defaultView.lon/lat/fov` to `state.view` only when `instant` was true (a fresh
+  entry from the aerial map); a hotspot click, the room-strip thumbnail, and the admin's
+  own node-list click all call it with `instant: false` and used to just carry the
+  visitor's current look direction over unchanged, on the theory that walking through a
+  doorway shouldn't spin the camera under them. That gate is gone: the view-set is now
+  unconditional, right after the crossfade (or hard swap) completes, so it reads as a cut
+  to the configured direction rather than an animated pan. If "heading continuity" is ever
+  wanted back for a specific path (e.g. only hotspot-to-hotspot walking), it needs to be
+  reintroduced deliberately, not assumed — this was a real, requested behavior change, not
+  a bug fix. **The view-snap runs BEFORE the texture swap/crossfade, not after** (fixed
+  same day) — it originally ran after `await tourTween(...)` completed, which meant the
+  whole ~460ms crossfade played out at the visitor's stale old angle and only hard-cut at
+  the very end ("shows a camera angle and then cuts... not smooth"). Snapping first means
+  the fade plays out at one stable, already-correct angle throughout — a single clean cut
+  immediately followed by a smooth fade. If this ever needs touching again, keep the view-
+  snap ahead of the swap/crossfade block — moving it back below is exactly this bug again.
 - **Per-room compass calibration (2026-09-10)**: `node.defaultView.facingDir` (`'N'|'E'|
   'S'|'W'|null`, set via the "Compass facing" `<select>` next to "Set as this room's
   start view") is a PER-NODE constant, independent of the main aerial pano's own
@@ -822,6 +875,46 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   from the source dir so the new project is complete. Same-project saves skip it (fast).
 - **`server.py` prints ASCII only** — the Windows console is cp1252 and a `→` in a
   `print()` crashes startup (`UnicodeEncodeError`). Keep server stdout ASCII.
+- **`showNotice(msg, {persist:true})`** (2026-09-11) — skips the normal 9s auto-hide, for
+  a message a long-running operation keeps overwriting with live progress (see
+  `exportBundle`'s Building→Downloading N% sequence, driven by `fetchBlobWithProgress`).
+  Always follow a run of persisted calls with one normal (non-persist) call once the
+  operation actually finishes/fails, or the message is stuck up forever.
+- **The vendored three.js path appears in FIVE places that must all agree** (learned the
+  hard way, 2026-09-11, when swapping the dev build for the minified one broke the
+  standalone export bundle AND the PWA offline cache, neither caught by just testing the
+  live server): `app.js`'s own `import * as THREE from './vendor/...'` line,
+  `BUNDLE_SHELL`, the `elif rel == ...` branch in `do_bundle` that decides which copied
+  file gets rewritten into `three.global.js`, `strip_named_import`'s target string (which
+  must match `app.js`'s import EXACTLY or it silently no-ops, leaving a live `import`
+  statement inside the bundle's non-module `<script src="app.js">` — a guaranteed
+  `SyntaxError`), and **`sw.js`'s `SHELL_URLS`** (the PWA offline precache list — pointing
+  it at the wrong file doesn't error at install time, since the OLD file still exists on
+  disk and fetches fine; it just means the file the app ACTUALLY needs is never cached,
+  so an offline visitor's pano viewer silently fails to load THREE.js — bump `VERSION` too
+  when fixing this, so an already-installed worker's stale shell cache gets discarded
+  rather than keeping the wrong file forever). `spike/index.html` also references the old
+  path but is a dev prototype, not part of the live app or the export bundle — leave it.
+  **`module_to_global`
+  is NOT interchangeable between the dev and minified builds** — the dev build's export
+  list is bare names (`{Scene, Mesh}`, valid object-literal shorthand as-is); the
+  minified build's is aliased (`{nt as Scene}` — `as` is only meaningful inside a real
+  import/export statement, so splicing it into `{...}` is a `SyntaxError`). Verify any
+  future change here by actually executing the transformed output in Node and checking a
+  few real properties (`window.THREE.WebGLRenderer`, `.REVISION`) — checking the text for
+  a leftover "export" string is not enough, it missed this exact bug. **The whole
+  rewritten body MUST stay wrapped in an IIFE** (fixed 2026-09-11, found by actually
+  loading a real exported bundle in headless Chrome via `file://` — see "How to verify a
+  change" below) — without it, the module's own thousands of top-level `const`/`let`/
+  `class` declarations (module-scoped in the real ES module) leak into the ONE lexical
+  scope every classic `<script>` tag on the page shares once loaded as `<script src>`
+  instead. The minifier happened to land one of its own internal names on `$`, colliding
+  with `app.js`'s own top-level `const $ = (id) => document.getElementById(id)` — a
+  `SyntaxError` that killed ALL of `app.js`, not just that line, and the bundle never
+  booted at all ("LOADING… 0%" forever). Any future edit to this function needs
+  re-verifying with an actual `file://` load in a real browser, not just Node execution
+  of the transformed output in isolation — Node happily ran the un-wrapped version fine
+  because nothing else declared a colliding `$` in that same test.
 - **Saves only reach disk under `server.py`.** `POST /api/save` (and rename/delete) exist
   only in `server.py`; under a plain `python -m http.server`, `/api/save` → 501, so
   `saveToProject` **downloads** the files instead of writing them. If a user reports "Save
@@ -979,9 +1072,22 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   answers a ranged request from cache once a **complete** (`200`) copy is already held,
   slicing it manually into a proper `206` reply (`sliceRange`); otherwise it passes the
   ranged request straight to the network and separately kicks off an unranged background
-  fetch to prime the full-file cache for next time. This naturally satisfies "cache video
-  only once actually played," since the client viewer never sets a `<video>` `src` until
-  `openClientVideoModal` runs (menu-item open), not on page load.
+  fetch (`primeVideoCache`, `VIDEO_PRIME_INFLIGHT` dedupes concurrent range requests for
+  the same not-yet-cached video into one shared fetch) to prime the full-file cache for
+  next time. This naturally satisfies "cache video only once actually played," since the
+  client viewer never sets a `<video>` `src` until `openClientVideoModal` runs (menu-item
+  open), not on page load. **This background-priming fetch genuinely did not exist in the
+  code for a while, this paragraph's own description notwithstanding** — a real bug found
+  2026-09-12 ("mobile offline users, videos not getting downloaded"): the doc/comment
+  described this exact fallback, but `respondVideo`'s uncached-and-ranged branch was just
+  a bare network passthrough with no `event.waitUntil`/priming call anywhere. Since MOBILE
+  browsers (iOS Safari reliably, Android often too) send a `Range` header on a `<video>`
+  element's very FIRST request — unlike most desktop browsers, which usually send a plain
+  GET first — this meant videos were never cached AT ALL on mobile, on any visit, however
+  many times played, while working fine in desktop testing. Re-implemented for real with a
+  test verifying the actual behavior (not just that the code runs) — if this ever looks
+  broken again, verify by actually reading `respondVideo`'s uncached+ranged branch, not by
+  trusting what this paragraph or its own inline comment claims.
 - **Live-server headless screenshots stay unreliable for admin verification specifically**
   (2026-09-02, offline-layer work): confirmed again that `--virtual-time-budget` +
   `--dump-dom`/`--screenshot` don't compose reliably with this app's dynamic `import('./app.js?v=...')`
@@ -1100,7 +1206,9 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   actually hiding after `hideInstallBanner()` set `.hidden = true` (2026-09-03), and now
   `.tour-bar` staying on screen after `closePanoTour()` correctly set
   `els.tourBar.hidden = true` (2026-09-09) — the room-strip bar sat visibly on top of the
-  correctly-restored aerial pano/landmark picker underneath it). `[hidden]` and a class
+  correctly-restored aerial pano/landmark picker underneath it; `#tourBar`/`.tour-bar`
+  itself was later removed entirely, 2026-09-11 — room navigation moved into the drawer).
+  `[hidden]` and a class
   selector have equal CSS specificity; the later one in the cascade wins regardless of
   which is "supposed" to take priority, and author stylesheets always come after the UA
   stylesheet's own `[hidden]{display:none}`. Any element toggled via the `.hidden` DOM
@@ -1178,6 +1286,24 @@ tools' `javascript_tool` (DOM text/classes/positions, `fetch('/api/projects')`,
 `localStorage`, IndexedDB, on-disk via a Bash `ls projects/<id>`). 4. console errors
 should be empty. 5. `node --check app.js` + `python -c "import ast;ast.parse(open('server.py').read())"`
 for syntax. Screenshot only as a bonus (WebGL flakiness).
+- **The standalone export bundle is a genuinely different runtime, not just the live app
+  copied elsewhere — verify it separately, with a REAL browser, not just Node.** app.js
+  runs as an ES module live but as a classic `<script src>` in a bundle (module→global
+  rewrite, import stripped) — scoping semantics differ (see the `module_to_global` IIFE
+  gotcha above, found exactly this way: a real headless-Chrome `file://` load caught a
+  `SyntaxError` that killed bundle boot entirely, which Node execution of the same
+  transformed output in isolation did NOT catch, since nothing else declared a colliding
+  name in that narrower test). To verify a bundle-affecting change: hit
+  `/api/export-bundle?project=<id>`, extract the zip (Python's `zipfile`, not a shell
+  unzip — some of these projects' bundles are 500MB+ from base64-embedded media), and
+  load `<id>/index.html` in an actual browser via a genuine `file://` URL — Playwright
+  driving the system-installed Chrome (`chromium.launch({executablePath: ...})`, no
+  download needed) works when available; capture `console`/`pageerror`/`requestfailed`
+  events, not just whether `goto()` resolves. Prefer a small project for a fast
+  iteration loop, but confirm the final result against one with real pano/ground images
+  too — a project with missing image files on disk (an unrelated data problem, not a
+  bundle bug) will throw fetch/CORS errors under `file://` that look superficially
+  similar and can be mistaken for the thing you're actually testing.
 
 ## Current status / open items
 

@@ -20,8 +20,17 @@
 // the previous rules. v2: project config moved to network-first. v3-v4: reserved by the
 // Virtual Tours branch. v5: isRangedMediaPath widened to cover audio extensions, since an
 // <audio> element makes the same byte-range requests as <video> and needs the same
-// respondVideo/sliceRange treatment.
-const VERSION = 'v5';
+// respondVideo/sliceRange treatment. v6: SHELL_URLS now precaches the MINIFIED three.js
+// build (app.js's own import switched to it, 2026-09-11, for load-time — see CLAUDE.md's
+// "vendored three.js path appears in FOUR places" gotcha) — bumped so an already-installed
+// worker's v5 shell cache (which had the OLD, now-unused three.module.js precached and was
+// therefore MISSING the file the app actually loads) gets discarded rather than silently
+// leaving a visitor's offline pano viewer unable to find its own THREE.js. v7:
+// respondVideo gained the background priming fetch for a ranged first-request (see
+// VIDEO_PRIME_INFLIGHT) — existing cached videos aren't invalidated by this (purely
+// additive: previously-uncached mobile videos can now get cached, nothing already stored
+// changes shape), bumped per this file's own policy of one per strategy change regardless.
+const VERSION = 'v7';
 const SHELL_CACHE = `b91-shell-${VERSION}`;
 const DATA_CACHE = `b91-data-${VERSION}`;
 const MEDIA_CACHE = `b91-media-${VERSION}`;
@@ -36,7 +45,7 @@ const ALL_CACHES = [SHELL_CACHE, DATA_CACHE, MEDIA_CACHE];
 // it (see openClientBrochureModal — that browser has no inline PDF viewer of its own) has
 // to work with no connection, and a visitor may well open the brochure for the first time
 // only after going offline. ~1.4MB, precached once.
-const SHELL_URLS = ['./', './index.html', './app.js', './styles.css', './vendor/three.module.js',
+const SHELL_URLS = ['./', './index.html', './app.js', './styles.css', './vendor/three.module.min.js',
   './vendor/pdf.min.js', './vendor/pdf.worker.min.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
@@ -141,7 +150,33 @@ async function staleWhileRevalidate(cache, request) {
 // the background to prime the full-file cache for next time (including offline playback).
 const VIDEO_BLOB_CACHE = new Map();
 
-async function respondVideo(cache, request) {
+// MOBILE browsers (iOS Safari reliably, Android often too) send a Range header on the very
+// FIRST request for a <video>/<audio> element — before playback even starts, just to probe
+// the file — where desktop browsers usually send a plain GET first. Every write to the
+// video cache used to live only in respondVideo's `!range` branch, so on mobile a video was
+// never actually cached on ANY visit, however many times it was played: the "opportunistic
+// offline caching" this file exists for silently never fired for the device class it
+// matters most for (2026-09-12 bug report: "for mobile offline users the videos are not
+// getting downloaded"). Fixed by firing this plain, unranged fetch of the same URL in the
+// background the first time a ranged request finds nothing cached yet, purely to populate
+// the cache for next time — the visible request is still answered straight from the
+// network immediately after, so playback is never held up waiting on the full download.
+// Deduped by key: a video's several range requests (the metadata probe, then real
+// playback, then any seeks) arriving while that download is still in flight must only ever
+// start ONE background fetch, not one per request — once it lands, `full` is set on the
+// NEXT request and this whole priming path is skipped from then on.
+const VIDEO_PRIME_INFLIGHT = new Map();   // cache key -> in-flight priming Promise
+function primeVideoCache(cache, key, url) {
+  if (VIDEO_PRIME_INFLIGHT.has(key)) return VIDEO_PRIME_INFLIGHT.get(key);
+  const task = fetch(url, { cache: 'no-store' })
+    .then((res) => { if (res && res.ok && res.status === 200) return cache.put(key, res); })
+    .catch(() => {})
+    .finally(() => VIDEO_PRIME_INFLIGHT.delete(key));
+  VIDEO_PRIME_INFLIGHT.set(key, task);
+  return task;
+}
+
+async function respondVideo(cache, request, event) {
   const key = cacheKeyFor(request.url);
   const full = await cache.match(key);
   const range = request.headers.get('range');
@@ -168,6 +203,11 @@ async function respondVideo(cache, request) {
     } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
   }
 
+  // Ranged AND nothing cached yet — mobile's own metadata-probe request lands here. Answer
+  // it from the network immediately so playback isn't held up, but keep the priming fetch
+  // alive past this handler's own return via waitUntil — otherwise the browser is free to
+  // tear the worker down the instant this response is sent, cutting the download short.
+  event.waitUntil(primeVideoCache(cache, key, request.url));
   try { return await fetch(request); } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
 }
 
@@ -243,7 +283,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     if (await isAdminRequest(event, url)) return fetch(req);
 
-    if (isRangedMediaPath(url.pathname)) return respondVideo(await caches.open(MEDIA_CACHE), req);
+    if (isRangedMediaPath(url.pathname)) return respondVideo(await caches.open(MEDIA_CACHE), req, event);
 
     if (SHELL_URLS.some((u) => cacheKeyFor(u) === cacheKeyFor(req.url))) {
       return staleWhileRevalidate(await caches.open(SHELL_CACHE), req);

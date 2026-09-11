@@ -3017,61 +3017,19 @@ body.is-admin .cat-drawer { display: none !important; }
 body.tour-open.is-admin .tour-hs { cursor: grab; }
 body.tour-open.is-admin .tour-hs:active { cursor: grabbing; }
 
-/* Bottom chrome: tour name, the room strip, and the way out. */
-.tour-bar {
-  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
-  z-index: 30; max-width: min(94vw, 900px);
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 10px 8px 16px; border-radius: 999px;
-  background: rgba(14,14,16,.86); border: 1px solid rgba(255,255,255,.12);
-  box-shadow: 0 10px 34px rgba(0,0,0,.5); backdrop-filter: blur(10px);
-}
-/* `.tour-bar`'s own `display:flex` beats the `[hidden]` attribute at equal specificity —
-   the author rule always comes after the UA stylesheet's `[hidden]{display:none}` in the
-   cascade, so `els.tourBar.hidden = true` (closePanoTour) had NO visual effect: exiting a
-   tour correctly restored the plot map/pano/menu underneath, but the room-strip bar kept
-   showing on top of it regardless. Third time this exact class of bug has hit this
-   project (see the install-banner and admin-modal gotchas) — anything toggled via the
-   `.hidden` DOM property needs its own `[hidden]{display:none}` rule if the base class
-   sets a `display` of its own. */
-.tour-bar[hidden] { display: none; }
-.tour-bar.is-busy { opacity: .75; }
-.tour-bar-title {
-  font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--gold-soft); white-space: nowrap; flex: none;
-}
-.tour-bar-nodes {
-  display: flex; gap: 5px; overflow-x: auto; scrollbar-width: thin;
-  padding: 2px; min-width: 0;
-}
-.tour-bar-nodes::-webkit-scrollbar { height: 4px; }
-.tour-bar-nodes::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 4px; }
-.tour-chip {
-  flex: none; padding: 5px 12px; border-radius: 999px; cursor: pointer;
-  border: 1px solid rgba(255,255,255,.16); background: transparent;
-  color: rgba(255,255,255,.74); font: inherit; font-size: 12px; white-space: nowrap;
-}
-.tour-chip:hover { background: rgba(255,255,255,.08); color: #fff; }
-.tour-chip.is-on { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
-.tour-exit {
-  flex: none; padding: 6px 13px; border-radius: 999px; cursor: pointer;
-  border: 1px solid rgba(255,255,255,.16); background: transparent;
-  color: rgba(255,255,255,.8); font: inherit; font-size: 12px; white-space: nowrap;
-}
-.tour-exit:hover { border-color: #e88; color: #f4b3b3; background: rgba(220,90,90,.14); }
+/* Room navigation during a tour now lives in the drawer's generic submenu
+   (tourRoomPickerNode/renderClientSidebar) instead of a floating bottom bar (removed
+   2026-09-11) — `.cat-btn.is-active` (already defined above, shared with every other
+   drawer list) marks the live room, and this just disables/dims the list while a jump
+   is in flight, same intent as the old bar's `.is-busy` opacity but also blocking
+   double-click spam instead of merely fading it. */
+#catSubMenuNav.is-busy .cat-btn { opacity: .55; pointer-events: none; }
 
 /* While a tour is open the plot-map furniture is meaningless — hide it. The client nav
    drawer deliberately STAYS: hiding it would trap the visitor inside the tour with only
    one way out, and switching menu items from in here is a reasonable thing to want. */
 body.tour-open .legend,
 body.tour-open .lm-overflow-hint { display: none !important; }
-
-@media (max-width: 640px) {
-  .tour-bar { left: 10px; right: 10px; bottom: 10px; transform: none; max-width: none;
-    border-radius: 14px; flex-wrap: wrap; padding: 8px 10px; }
-  .tour-bar-title { width: 100%; }
-  .tour-bar-nodes { flex: 1 1 auto; }
-}
 
 /* ── Admin Tour tab: hotspot authoring rows ── */
 .ax-tour-node.is-live { background: var(--gold-dim); border-radius: 6px; }

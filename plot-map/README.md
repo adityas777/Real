@@ -415,17 +415,29 @@ standing in:
 - **＋ Add hotspot here** drops a link at the centre of your current view — then
   **drag it onto the doorway** it leads through. Pick its target room from the dropdown,
   and give it a label if the room name isn't what you want on screen.
-- **⌖ Set this view as the room's start view** — visitors arriving in this room will face
-  the direction you're looking now.
+- **🏠 Set as this room's start view** — visitors will face the direction you're looking
+  now every time they arrive in this room, whether that's the very first room of the
+  tour, a hotspot click, or the room-strip thumbnail. Pick a compass direction (N/E/S/W)
+  in the dropdown right above the button at the same time, and the compass will point the
+  right way once visitors are standing here too — each room can be calibrated
+  independently, since every panorama has its own arbitrary "forward."
 - **▶** on any node jumps you there so you can place its hotspots too.
 - Links are one-way. For a doorway you can walk **both** ways, add a hotspot in each room.
 
-> **The client menu shows only what you build.** There are no built-in rows: the drawer is
-> exactly the menu you author, and a project with no menu items shows no drawer at all.
-> The two rows that used to be hardcoded are now item types you can add if you want them —
-> **📍 Landmarks** (opens the landmark category list) and **🗺️ Aerial View** (flies back to
-> the whole-site view). Neither needs a link. If your project has landmarks, add the
-> **Landmarks** item, or visitors on desktop have no way to filter them by category.
+> **Three menu rows are built in, not authored.** **🗺️ AERIAL VIEW**, **📍 LANDMARKS**, and
+> **🧭 VIRTUAL TOUR** appear automatically — drag them to wherever you want in the menu
+> builder, and switch any of them off (an ON/OFF switch right on the row, not a delete) if
+> a particular project doesn't need it. They can't be deleted for good: turn one off and
+> reload, and it reappears in the tree (still off) the next time the admin opens, so it's
+> always there to switch back on later. LANDMARKS with zero landmarks saved still shows
+> its picker (there's just nothing on the pano to frame); VIRTUAL TOUR with zero tours
+> tells the visitor plainly rather than opening to nothing. With exactly one tour,
+> clicking VIRTUAL TOUR opens straight into it; with several, it shows the tour list AND
+> auto-plays whichever tour you added first (the **Tour** tab lists them in that same
+> order; there's no reordering yet — delete and re-add if you need a different one on
+> top), so visitors see something immediately instead of an empty list to pick from. A
+> project with no OTHER authored items and every built-in switched off shows no
+> drawer at all.
 >
 > **After saving in admin, the client may need one reload** to pick the change up — and if
 > you had the client open already, reload it. (Project data is fetched fresh whenever
@@ -434,13 +446,20 @@ standing in:
 **Put it on the client menu:** open the menu builder, add an item, choose the
 **🧭 360° Tour** type, and pick your tour from the list. (This is different from the
 *virtual tour* type, which embeds an **external** 3DVista/Kuula tour by URL.) Visitors
-click that menu item and the tour takes over the screen, with a room strip and an
-**✕ Exit tour** button along the bottom.
+click that menu item and the tour takes over the screen. If the tour has **more than one
+room**, the room list moves into the navigation drawer itself (the same panel LANDMARKS
+uses for its categories) — every room is listed there, the one you're standing in is
+highlighted, and there's an **✕ Exit Tour** row at the bottom of that same list to leave.
+Clicking a hotspot on a doorway, or a room in the drawer, both jump you there the same
+way — the drawer stays open to that tour's room list the whole time you're touring. A
+tour with just **one** room skips that list entirely (nothing to pick between) — Exit
+Tour still shows up wherever the drawer is currently anchored (the tour list, if your
+project has more than one tour, or the plain root menu if it doesn't).
 
 > **Performance, and why it matters to the visitor.** Panoramas are big. A room downloads
 > in about a second on 4G, and the tour quietly pre-loads every room your current room
 > links to — so *walking* the tour has no waiting. **Jumping** to a distant room from the
-> strip is the one move that can pause, because it was never pre-loaded. Only a few rooms
+> drawer is the one move that can pause, because it was never pre-loaded. Only a few rooms
 > are held in graphics memory at once (they're far too large to keep all of them), which
 > is why a room you visited a while ago may load again.
 >

@@ -16,7 +16,11 @@
    in every direction; admin tweaks slide/scale/rotate it to match the photo.
    ============================================================================= */
 
-import * as THREE from './vendor/three.module.js';
+// Minified production build (r160, exact same version as the dev build this replaced) —
+// 670KB vs the dev build's 1.3MB unminified, gzipped further by server.py on top of that.
+// Swap back to the dev build only if THREE's own internals need debugging (its stack
+// traces are far more readable unminified); this app's own code is unaffected either way.
+import * as THREE from './vendor/three.module.min.js';
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const CONFIG = {
@@ -55,7 +59,7 @@ const els = {
   zoomStatusGroup: $('zoomStatusGroup'), zoomAvailableBtn: $('zoomAvailableBtn'),
   zoomReservedBtn: $('zoomReservedBtn'), zoomSoldBtn: $('zoomSoldBtn'), rotateHint: $('rotateHint'),
   landmarks: $('landmarks'), amenities: $('amenities'),
-  tourLayer: $('tourHotspots'), tourBar: $('tourBar'),
+  tourLayer: $('tourHotspots'),
   axAudioPick: $('axAudioPick'), axAudioFile: $('axAudioFile'), axAudioName: $('axAudioName'), axAudioClear: $('axAudioClear'), siteAudio: $('siteAudio'),
   compass: $('compass'), compassCone: $('compassCone'),
   catDrawer: $('catDrawer'), catDrawerToggle: $('catDrawerToggle'), catToggleIco: $('catToggleIco'), catLevel1: $('catLevel1'), catLevel2: $('catLevel2'), catLevelSubMenu: $('catLevelSubMenu'), catNavL1: $('catNavL1'), catNav: $('catNav'), catBackBtn: $('catBackBtn'),
@@ -414,10 +418,16 @@ function setBootProgress(pct) {
 // Fetches a URL as a Blob while reporting real bytes-loaded/total via onBytes(loaded,
 // total) — server.py always sends Content-Length for static assets, so `total` is
 // reliable here. Falls back to a plain non-streamed fetch (progress jumps once at the
-// end) if the runtime can't stream a response body.
+// end) if the runtime can't stream a response body. On a non-ok response, tries to read a
+// JSON `{error}` body for a real message (several of this app's own API routes return
+// one) before falling back to a plain status-code message.
 async function fetchBlobWithProgress(url, onBytes) {
   const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`Could not load ${url} (${res.status})`);
+  if (!res.ok) {
+    let msg = `Could not load ${url} (${res.status})`;
+    try { const j = await res.json(); if (j?.error) msg = j.error; } catch {}
+    throw new Error(msg);
+  }
   const total = +res.headers.get('content-length') || 0;
   if (!res.body?.getReader) { const blob = await res.blob(); onBytes?.(blob.size, total || blob.size); return blob; }
   const reader = res.body.getReader(); const chunks = []; let loaded = 0;
@@ -1592,10 +1602,18 @@ function openLandmarksCategoryPicker() {
   applyCategoryFilter('ALL');
 }
 
-// The synthetic "folder" both openVirtualTourPicker (below) and openClientPanoTour (the
-// takeover itself, so the drawer stays anchored to this section for as long as ANY tour
-// is open — see its own comment) push onto state.menuNavStack: one row per tour, built
-// live from state.tours rather than authored into menuConfig.tree.
+// A tour actually takes over the viewer, so SOME level of the drawer must always carry an
+// explicit way out while one is open — appended to whichever synthetic list is actually
+// being shown (see each call site below) rather than duplicated as its own concept.
+function withExitTourRow(children) {
+  if (!state.tourView) return children;
+  return [...children, { id: '__exit_tour__', kind: 'child', contentType: 'exittour', title: '✕ Exit Tour', content: {} }];
+}
+// The synthetic "folder" listing every TOUR (one row each) — only needed as its own menu
+// level when a project has 2+ tours (openClientPanoTour's own anchoring pushes this ahead
+// of tourRoomPickerNode, or alone when `anchorRooms:false` or the active tour has only one
+// room — see its own comment). Built live from state.tours rather than authored into
+// menuConfig.tree.
 // renderClientSidebar's submenu click handler falls back to searching a pushed parent's
 // own `children` when findNodeInfo can't find a node in the real tree, which is what
 // makes a synthetic (non-authored) parent like this work at all.
@@ -1603,20 +1621,29 @@ function virtualTourPickerNode() {
   return {
     id: '__virtualtour_picker__',
     title: 'VIRTUAL TOUR',
-    children: state.tours.map((t) => ({ id: `virtualtour-${t.id}`, kind: 'child', contentType: 'panotour', title: t.name || 'Untitled tour', content: { tourId: t.id } }))
+    children: withExitTourRow(state.tours.map((t) => ({ id: `virtualtour-${t.id}`, kind: 'child', contentType: 'panotour', title: t.name || 'Untitled tour', content: { tourId: t.id } })))
   };
 }
-// The VIRTUAL TOUR built-in's client-side analogue of the landmarks category picker,
-// for whatever tours exist in state.tours (see ensureBuiltinNodes). Reuses the generic
-// Level-2/3 "drilled-in parent" navigation (the same one an authored folder with 2+
-// children uses).
-function openVirtualTourPicker() {
-  els.catDrawer?.classList.remove('is-collapsed');
-  if (els.catToggleIco) els.catToggleIco.textContent = '‹';
-  state.menuNavStack = [virtualTourPickerNode()];
-  renderClientSidebar();
+// The per-ROOM analogue, one level deeper: once a SPECIFIC tour is open AND it actually
+// has more than one room to choose between, its rooms are browsable straight from the
+// drawer exactly like LANDMARKS' categories are (2026-09-11, explicit request — replaces
+// the old floating room-strip bar, `#tourBar`/`refreshTourBar`, removed the same day). A
+// tour with only ONE room never gets this level pushed at all (see openClientPanoTour) —
+// showing a "choice" of one room, highlighted because it's the only one AND the one
+// you're already standing in, was reported the same day as pointless clutter ("SWIMMING_
+// POOL" highlighted with nothing else to pick, unlike "MODERN VILLA"'s real multi-room
+// list) — exactly the same "one thing inside is never a choice" rule `resolveFolderTarget`
+// already applies to ordinary authored folders, just applied to rooms too.
+function tourRoomPickerNode(tour) {
+  return {
+    id: '__tour_room_picker__',
+    title: tour.name || 'VIRTUAL TOUR',
+    children: withExitTourRow(tour.nodes.map((n) => ({ id: `panotourroom-${tour.id}-${n.id}`, kind: 'child', contentType: 'panotourroom', title: n.name || 'Room', content: { tourId: tour.id, nodeId: n.id } }))),
+  };
 }
-
+function isTourMenuNode(node) {
+  return !!node && (node.id === '__tour_room_picker__' || node.id === '__virtualtour_picker__');
+}
 // `moveCamera:false` re-applies only the highlight/dim styling for the current
 // selection — used when the landmark DOM is rebuilt (see rebuildLandmarkDOM), where the
 // selection hasn't changed and flying the camera is actively wrong: it stole the client's
@@ -2337,7 +2364,16 @@ function hideRotateHint() {
   }, 280);
 }
 
-function showNotice(msg) { els.notice.innerHTML = `<strong>Heads up:</strong> ${msg}`; els.notice.hidden = false; clearTimeout(showNotice._t); showNotice._t = setTimeout(() => { els.notice.hidden = true; }, 9000); }
+// `persist:true` skips the auto-hide timeout — for a message that needs to keep updating
+// (a live progress readout) rather than vanish on its own fixed schedule regardless of
+// whether the thing it's reporting on is actually done yet. The caller is responsible for
+// eventually showing a normal (non-persist) notice to let it auto-hide again.
+function showNotice(msg, { persist = false } = {}) {
+  els.notice.innerHTML = `<strong>Heads up:</strong> ${msg}`;
+  els.notice.hidden = false;
+  clearTimeout(showNotice._t);
+  if (!persist) showNotice._t = setTimeout(() => { els.notice.hidden = true; }, 9000);
+}
 
 // ─── Alignment: load / save / admin UI ────────────────────────────────────────
 // An alignment = the overlay transform PLUS the camera view, so the client
@@ -3033,11 +3069,31 @@ async function exportBundle() {
     }
   } catch {}
 
-  showNotice(`Building the standalone site for “${esc(id)}”…`);
+  // The project menu (this button's own parent) already hid itself the instant it was
+  // clicked (onProjAction), so there is NOTHING else on screen for the rest of this
+  // function to show through except the notice banner below — reported 2026-09-11 as "how
+  // can he see the downloading is even started, there is no downloading progress
+  // animation." Two real phases, both visible: the server builds the whole zip in memory
+  // before sending anything (slow for a big project — base64-embeds every pano/plan image
+  // inline), during which `fetch()` itself simply hasn't resolved yet; then it streams,
+  // during which fetchBlobWithProgress's real byte counts drive a live percentage. Both
+  // phases use `persist:true` so the message doesn't vanish on showNotice's normal 9s
+  // timer while the admin is still waiting — only the final result reverts to normal.
+  showNotice(`Building the standalone site for “${esc(id)}”… this can take a while for a large project.`, { persist: true });
   try {
-    const res = await fetch(`/api/export-bundle?project=${encodeURIComponent(id)}`);
-    if (!res.ok) { let m = `server responded ${res.status}`; try { m = (await res.json()).error || m; } catch {} throw new Error(m); }
-    const blob = await res.blob();
+    let lastTick = 0;
+    const blob = await fetchBlobWithProgress(`/api/export-bundle?project=${encodeURIComponent(id)}`, (loaded, total) => {
+      const now = Date.now();
+      if (now - lastTick < 250 && loaded !== total) return;   // throttle — a fast LAN transfer can fire this hundreds of times/sec
+      lastTick = now;
+      const loadedMB = (loaded / 1048576).toFixed(1);
+      if (total) {
+        const pct = Math.min(100, Math.round((loaded / total) * 100));
+        showNotice(`Downloading the standalone site… ${pct}% (${loadedMB} MB of ${(total / 1048576).toFixed(1)} MB)`, { persist: true });
+      } else {
+        showNotice(`Downloading the standalone site… ${loadedMB} MB so far`, { persist: true });
+      }
+    });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${id}-plotmap.zip`;
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 8000);
     const embed = `<iframe src="https://YOUR-HOST/${id}/index.html" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen loading="lazy"></iframe>`;
@@ -4641,7 +4697,7 @@ function refreshTourList() {
         star.textContent = t.startNode === n.id ? '★' : '☆'; star.title = t.startNode === n.id ? 'Start node' : 'Set as the tour’s start node';
         star.addEventListener('click', (e) => { e.stopPropagation(); t.startNode = n.id; refreshTourList(); onToursChanged(); });
         const nn = document.createElement('input'); nn.className = 'ax-tour-nodename'; nn.value = n.name; nn.title = 'Node name';
-        nn.addEventListener('input', () => { n.name = nn.value; onToursChanged(); rebuildTourHotspotDOM(); refreshTourBar(); });
+        nn.addEventListener('input', () => { n.name = nn.value; onToursChanged(); rebuildTourHotspotDOM(); });
         // Open this node in the live viewer — where hotspots are placed and the start
         // view is set (both are inherently spatial, so they are authored in the pano).
         const go = document.createElement('button'); go.type = 'button'; go.className = 'ax-tour-open';
@@ -4810,7 +4866,17 @@ function prefetchTourNeighbours(tour, nodeId) {
 }
 
 // ─── Enter / exit the takeover ──────────────────────────────────────────────
-function openClientPanoTour(tourId, title) {
+// `anchorRooms` (default true): whether the drawer should drill straight to THIS tour's
+// own room list, or stop one level up at the tour list. True for every normal entry point
+// (a single-tour project has no tour-list step to stop at; explicitly picking a named
+// tour, or a specific room, is a deliberate "go there" that should show its rooms) —
+// false ONLY for the multi-tour root VIRTUAL TOUR click's own auto-play (see
+// openNodeContent's 'virtualtour' branch), which behaves like clicking any other
+// multi-child folder: it shows ITS OWN children (the tour list) one level in, exactly
+// like `resolveFolderTarget`'s 'menu' action, while auto-playing the topmost tour so the
+// visitor isn't staring at an empty picker — picking a DIFFERENT tour from that list is
+// what drills one level deeper into ITS room list.
+function openClientPanoTour(tourId, title, { anchorRooms = true } = {}) {
   let tour = state.tours.find((t) => t.id === tourId);
   // Be forgiving about a missing tourId: menu items saved before `cleanNodeForSave` kept
   // the field lost it on every save, and an item that silently does nothing is the worst
@@ -4848,16 +4914,29 @@ function openClientPanoTour(tourId, title) {
   if (els.amCard?.classList.contains('open')) closeAmCard();
   document.body.classList.add('tour-open');
   if (els.tourLayer) els.tourLayer.hidden = false;
-  if (els.tourBar) els.tourBar.hidden = false;
   // While ANY tour is open — freshly entered from the plot map, or switched to from a
-  // different tour — the drawer stays anchored to the VIRTUAL TOUR section (the same
-  // picker list openVirtualTourPicker shows), not reset to the plot map's root menu.
-  // Reopening the drawer mid-tour, or switching from this tour to another, should never
-  // unexpectedly drop the visitor back at the root — only actually EXITING the tour
-  // (closePanoTour) does that. Rebuilt fresh each time (not reused from whatever pushed
-  // it here) so it always reflects the current state.tours, e.g. if a tour was
-  // added/renamed since the last time this list was shown.
-  state.menuNavStack = [virtualTourPickerNode()];
+  // different tour — the drawer stays anchored to a tour-related section, not reset to
+  // the plot map's root menu. Reopening the drawer mid-tour, or switching from this tour
+  // to another, should never unexpectedly drop the visitor back at the root — only
+  // actually EXITING the tour (closePanoTour) does that. Rebuilt fresh each time (not
+  // reused from whatever pushed it here) so it always reflects the current
+  // state.tours/tour.nodes, e.g. if a room was added/renamed since this was last shown.
+  // A tour with only one room has nothing to pick between — same "one thing inside is
+  // never a choice" rule as an ordinary folder — so its own room-list level is skipped
+  // entirely, not just rendered with a single (pointless, already-highlighted) entry.
+  const roomChoiceNeeded = anchorRooms && tour.nodes.length > 1;
+  if (roomChoiceNeeded) {
+    state.menuNavStack = state.tours.length > 1 ? [virtualTourPickerNode(), tourRoomPickerNode(tour)] : [tourRoomPickerNode(tour)];
+  } else if (state.tours.length > 1) {
+    // Multiple tours but nothing to choose WITHIN this one ⇒ stay at the tour list (still
+    // lets the visitor switch tours) rather than drilling one level deeper for no reason.
+    state.menuNavStack = [virtualTourPickerNode()];
+  } else {
+    // The only tour AND only one room in it: no picker level makes sense at all — back to
+    // the root menu, which gets its own "Exit Tour" row appended while touring (see
+    // renderClientSidebar's root-level branch) so leaving is still always reachable.
+    state.menuNavStack = [];
+  }
   renderClientSidebar();
 
   state.view.fov = 75;
@@ -4875,7 +4954,6 @@ function closePanoTour({ silent = false } = {}) {
   applyLandmarkVisibility(); applyAmenityVisibility();     // restore per each one's own rules
   document.body.classList.remove('tour-open');
   if (els.tourLayer) { els.tourLayer.hidden = true; els.tourLayer.innerHTML = ''; }
-  if (els.tourBar) els.tourBar.hidden = true;
   tourHsDom = [];
   if (tv.saved?.panoMap) { three.pano.material.map = tv.saved.panoMap; three.pano.material.needsUpdate = true; }
   if (tv.saved?.view) Object.assign(state.view, tv.saved.view);
@@ -4914,10 +4992,41 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
   if (!node) return;
   if (node.id === tv.nodeId) return;
 
-  tv.busy = true; refreshTourBar();
+  tv.busy = true; refreshTourRoomMenu();
   try {
     const tex = await loadTourNodeTex(tour, node);
     if (!state.tourView) return;                            // exited while loading
+
+    tv.nodeId = node.id;
+    // Compass calibration is a per-ROOM constant (each pano has its own arbitrary "lon 0",
+    // unrelated to the main aerial pano's own northDeg) — set from the direction picked
+    // alongside this node's start view (see setTourNodeDefaultView), independent of the
+    // live camera yaw below, and reapplied on every arrival (walking a tour or jumping in
+    // fresh), not just on an instant entry. Uncalibrated rooms fall back to 0, matching the
+    // project's documented "uncalibrated ⇒ 0" default rather than leaking in whatever
+    // northDeg happened to be set for the aerial view or a previous room.
+    const dirDeg = { N: 0, E: 90, S: 180, W: 270 }[node.defaultView.facingDir];
+    state.northDeg = (dirDeg != null) ? (-(node.defaultView.lon || 0) - dirDeg) : 0;
+    // Every arrival snaps to the room's own saved start view (2026-09-11, explicit
+    // request) — hotspot clicks, the room-strip thumbnails, and the admin's node list all
+    // funnel through here with instant=false, so this used to only ever apply on a fresh
+    // instant entry ("heading continuity": the visitor's facing direction carried over
+    // unchanged when walking, so stepping through a doorway never spun the camera under
+    // them). That carry-over is intentionally gone — every room, however you arrive, faces
+    // the direction its admin picked. `state.view.lon` is a CAMERA yaw (see the
+    // two-lon-conventions note above `computeHome`), which is the convention defaultView
+    // stores.
+    // IMPORTANT: this runs BEFORE the texture swap/crossfade below, not after. Snapping
+    // the camera only once the fade had already finished (the original 2026-09-11 order)
+    // meant the entire crossfade played out at the visitor's OLD look direction and then
+    // hard-cut to the new one right at the end — reported the same day as "shows a camera
+    // angle and then cuts... not smooth." Setting the view first means the crossfade (or
+    // hard swap) plays out at one STABLE angle throughout — a single clean cut followed by
+    // a smooth fade, not a smooth fade followed by a jarring cut.
+    state.view.lon = (node.defaultView.lon || 0) * Math.PI / 180;
+    state.view.lat = (node.defaultView.lat || 0) * Math.PI / 180;
+    state.view.fov = node.defaultView.fov || 75;
+    clampView();
 
     if (instant || !three.pano.material.map) {
       swapPano(tex);
@@ -4933,35 +5042,15 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
       three.scene.remove(tourFadeMesh); tourFadeMesh.material.dispose(); tourFadeMesh = null;
     }
 
-    tv.nodeId = node.id;
-    // Compass calibration is a per-ROOM constant (each pano has its own arbitrary "lon 0",
-    // unrelated to the main aerial pano's own northDeg) — set from the direction picked
-    // alongside this node's start view (see setTourNodeDefaultView), independent of the
-    // live camera yaw below, and reapplied on every arrival (walking a tour or jumping in
-    // fresh), not just on an instant entry. Uncalibrated rooms fall back to 0, matching the
-    // project's documented "uncalibrated ⇒ 0" default rather than leaking in whatever
-    // northDeg happened to be set for the aerial view or a previous room.
-    const dirDeg = { N: 0, E: 90, S: 180, W: 270 }[node.defaultView.facingDir];
-    state.northDeg = (dirDeg != null) ? (-(node.defaultView.lon || 0) - dirDeg) : 0;
-    // Heading continuity: the visitor's facing direction is CARRIED OVER, not reset — a
-    // node's defaultView is only applied on entry (instant), so walking a tour never
-    // spins the camera under them. `state.view.lon` is a CAMERA yaw (see the two-lon-
-    // conventions note above `computeHome`), which is the convention defaultView stores.
-    if (instant) {
-      state.view.lon = (node.defaultView.lon || 0) * Math.PI / 180;
-      state.view.lat = (node.defaultView.lat || 0) * Math.PI / 180;
-      state.view.fov = node.defaultView.fov || 75;
-      clampView();
-    }
     tourTouch(tourKey(tour, node)); tourEvict();
     prefetchTourNeighbours(tour, node.id);
     state.tourHsSel = null;
-    rebuildTourHotspotDOM(); refreshTourBar(); requestRender();
+    rebuildTourHotspotDOM(); refreshTourRoomMenu(); requestRender();
     if (state.admin && state.adminTab === 'tour') refreshTourList();   // hotspot box follows the open node
   } catch (e) {
     showNotice(e.message || 'Could not load that panorama.');
   } finally {
-    if (state.tourView) { state.tourView.busy = false; refreshTourBar(); }
+    if (state.tourView) { state.tourView.busy = false; refreshTourRoomMenu(); }
   }
 }
 
@@ -5057,27 +5146,25 @@ function setTourNodeDefaultView(facingDir) {
   setAxStatus(`Start view saved for <strong>${esc(node.name)}</strong> — visitors arrive facing this way${dirNote}.`);
 }
 
-// ─── Viewer chrome (node strip + exit) ──────────────────────────────────────
-function refreshTourBar() {
-  if (!els.tourBar) return;
-  const tv = state.tourView, tour = curTourView();
-  if (!tv || !tour) return;
-  els.tourBar.innerHTML = '';
-  const title = document.createElement('span'); title.className = 'tour-bar-title';
-  title.textContent = tv.title || tour.name;
-  const strip = document.createElement('div'); strip.className = 'tour-bar-nodes';
-  tour.nodes.forEach((n) => {
-    const b = document.createElement('button'); b.type = 'button';
-    b.className = 'tour-chip' + (n.id === tv.nodeId ? ' is-on' : '');
-    b.textContent = n.name; b.title = `Jump to ${n.name}`;
-    // A jump is the one navigation that was never prefetched (0-A): show it is working.
-    b.addEventListener('click', () => tourGoTo(n.id));
-    strip.appendChild(b);
+// ─── Viewer chrome (room/tour menu active/busy indication) ──────────────────
+// The room list (and, for a tour with only one room, the tour list one level up instead —
+// see openClientPanoTour) lives in the drawer now, rendered generically by
+// renderClientSidebar — this just keeps whichever one is on screen in sync with what's
+// actually live and whether a jump is in flight, mirroring what the old floating
+// `#tourBar` did for its own chips. Only touches the DOM if a tour-related submenu
+// happens to be what's on screen; harmlessly no-ops otherwise (visitor could have the
+// drawer showing something else entirely — LANDMARKS, a folder, or the root+Exit-row
+// case where there's no submenu at all).
+function refreshTourRoomMenu() {
+  const tv = state.tourView; if (!tv) return;
+  const container = $('catSubMenuNav'); if (!container) return;
+  container.classList.toggle('is-busy', !!tv.busy);
+  const activeRoomId = `panotourroom-${tv.tourId}-${tv.nodeId}`;
+  const activeTourId = `virtualtour-${tv.tourId}`;
+  container.querySelectorAll('.cat-btn[data-node-id]').forEach((btn) => {
+    const id = btn.dataset.nodeId;
+    btn.classList.toggle('is-active', id === activeRoomId || id === activeTourId);
   });
-  const exit = document.createElement('button'); exit.type = 'button'; exit.className = 'tour-exit';
-  exit.textContent = '✕ Exit tour'; exit.addEventListener('click', () => closePanoTour());
-  els.tourBar.append(title, strip, exit);
-  els.tourBar.classList.toggle('is-busy', !!tv.busy);
 }
 
 // generic downscale-to-blob (renders): keeps the longest side ≤ cap, re-encodes JPEG
@@ -5311,12 +5398,17 @@ function renderClientSidebar() {
         const drills = menuRowOpensSubmenu(node);
         const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
         return `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
-      }).join('');
+      }).join('')
+      // A single-tour, single-room project has nowhere else to put an exit — see
+      // openClientPanoTour's `state.menuNavStack = []` case — so it's appended straight
+      // onto the root list itself, the one level that's always shown.
+      + (state.tourView ? `<button class="cat-btn" type="button" data-node-id="__exit_tour__">✕ EXIT TOUR</button>` : '');
 
     els.catNavL1.innerHTML = html;
     // Nothing to show at all (every item disabled, or nothing authored) ⇒ no drawer,
-    // rather than an empty panel over the panorama.
-    if (els.catDrawer && !state.admin) els.catDrawer.hidden = !tree.some((node) => node.enabled !== false);
+    // rather than an empty panel over the panorama — UNLESS a tour is open, in which case
+    // the Exit Tour row above is the only thing on screen and must stay reachable.
+    if (els.catDrawer && !state.admin) els.catDrawer.hidden = !state.tourView && !tree.some((node) => node.enabled !== false);
     wireClientSidebarButtons();
   } else {
     // Level 2 / Level 3: Drilled-in Parent Navigation
@@ -5397,8 +5489,8 @@ function computeAutoOpenTarget() {
   if (resolved.action === 'open' && resolved.node.contentType === 'aerial') return null;
   const needsLandmarks = resolved.action === 'open' && resolved.node.contentType === 'landmarks';
   // Both an authored 'panotour' item and the built-in 'virtualtour' row read state.tours
-  // (the built-in via openVirtualTourPicker/openClientPanoTour, the authored item via
-  // openClientPanoTour directly), so both need to wait for the same fire point.
+  // (both dispatch to openClientPanoTour — see its 'virtualtour' branch in openNodeContent),
+  // so both need to wait for the same fire point.
   const needsTours = resolved.action === 'open' && (resolved.node.contentType === 'panotour' || resolved.node.contentType === 'virtualtour');
   return { kind: needsLandmarks ? 'landmarks' : (needsTours ? 'panotour' : 'node'), node: top };
 }
@@ -5456,6 +5548,9 @@ function wireClientSidebarButtons() {
       touch();
       const nodeId = btn.dataset.nodeId;
       if (!nodeId) return;
+      // The one synthetic row that can appear at ROOT level (see renderClientSidebar) —
+      // a single-tour, single-room project has no picker level to carry it otherwise.
+      if (nodeId === '__exit_tour__') { closePanoTour(); return; }
       const nodeInfo = findNodeInfo(nodeId);
       if (!nodeInfo) return;
       // AERIAL VIEW / LANDMARKS are ordinary nodes now — activateMenuNode's own dispatch
@@ -5505,16 +5600,37 @@ function openNodeContent(node, nodeInfo = null, { autoOpen = false } = {}) {
       // 'virtualtour' below (an AUTHORED item always points at one specific tour by id;
       // the built-in row auto-discovers whichever tours currently exist).
       openClientPanoTour(content.tourId, node.title || 'Virtual Tour');
+    } else if (cType === 'panotourroom') {
+      // A room row inside the drawer's tour-room picker (see tourRoomPickerNode) — the
+      // per-room analogue of clicking a specific landmark. Already in this exact tour ⇒
+      // just walk to the room; otherwise open the tour fresh, then jump to the room the
+      // visitor actually clicked (openClientPanoTour on its own would only land on the
+      // tour's designated START node).
+      if (state.tourView && state.tourView.tourId === content.tourId) {
+        tourGoTo(content.nodeId);
+      } else {
+        const t = state.tours.find((x) => x.id === content.tourId);
+        if (!t) { showNotice('This tour no longer exists.'); return; }
+        openClientPanoTour(t.id, t.name);
+        if (t.startNode !== content.nodeId) setTimeout(() => tourGoTo(content.nodeId), 0);
+      }
+    } else if (cType === 'exittour') {
+      closePanoTour();
     } else if (cType === 'virtualtour') {
       // Built-in row (see ensureBuiltinNodes) — the client-side analogue of LANDMARKS'
       // category picker, but for state.tours: no tours ⇒ a plain notice; exactly one ⇒
-      // open it directly (nothing to pick from); two or more ⇒ a picker submenu.
+      // open it directly (nothing to pick from, straight to its room list); two or more ⇒
+      // behaves like any other multi-child folder — shows its own children (the tour
+      // list) one level in — while ALSO auto-playing the topmost tour (state.tours[0], the
+      // admin's own ordering) so the visitor sees something immediately, same as LANDMARKS
+      // showing "ALL LANDMARKS" the instant its category list appears. Picking a different
+      // tour from that list is what drills one level deeper into ITS OWN room list.
       if (!state.tours.length) {
         showNotice('This project has no virtual tours yet. Add one in the admin <strong>Tour</strong> tab.');
       } else if (state.tours.length === 1) {
         openClientPanoTour(state.tours[0].id, state.tours[0].name);
       } else {
-        openVirtualTourPicker();
+        openClientPanoTour(state.tours[0].id, state.tours[0].name, { anchorRooms: false });
       }
     } else if (cType === 'tour') {
       openClientTourModal(node.title || 'Virtual Tour', content);
@@ -7511,7 +7627,15 @@ function initCustomMenuAdminAndClient() {
   $('catSubMenuBackBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     if (state.menuNavStack && state.menuNavStack.length > 0) {
+      // Backing all the way out of the tour-list/room-list levels while a tour is still
+      // open would otherwise land on the root menu with the pano still showing a tour
+      // room — a state this app deliberately never allows (see closePanoTour's own
+      // comment: only actually EXITING resets to root). Exit for real instead, same as
+      // the room list's own "✕ Exit Tour" row.
+      const wasTourNode = isTourMenuNode(state.menuNavStack[state.menuNavStack.length - 1]);
       state.menuNavStack.pop();
+      const stillTourNode = state.menuNavStack.length > 0 && isTourMenuNode(state.menuNavStack[state.menuNavStack.length - 1]);
+      if (state.tourView && wasTourNode && !stillTourNode) { closePanoTour(); return; }
       renderClientSidebar();
     }
   });
