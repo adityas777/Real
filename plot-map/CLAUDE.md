@@ -530,30 +530,16 @@ Top-down, by section header:
   `state.admin`, unsupported/insecure origin, OR `!(isMobilePortrait() || isMobileLandscape())`
   — desktop is out of scope on purpose, since it already has a real offline mechanism via
   Export standalone site; `navigator.serviceWorker.ready` is raced against a 5s timeout so
-  a stalled activation can't wedge the rest of boot), `isStandaloneDisplay`. **Called at
-  the very START of `init()` (2026-09-12, still fire-and-forget/non-blocking) — it used to
-  live at the very END**, after every boot-critical project file (alignment/plots/
-  landmarks/amenities/tour) had already been fetched. A service worker only intercepts
-  fetches once it's active AND controlling the page, so with the OLD placement none of
-  that config was ever cached on a genuine first visit — confirmed with a real offline
-  reload in a real browser: the menu collapsed to just the 3 built-in rows (the only
-  things that don't depend on `menuConfig`), every authored item/landmark/tour gone.
-  Registering as early as possible instead gives the worker the best realistic chance of
-  already controlling the page before those fetches fire — not a 100% guarantee on a
-  very first, very slow-network visit (the worker's own install competes for the same
-  bandwidth), but every visit after the first is fine either way, and this makes the
-  first one far more likely to succeed too. Top-level `beforeinstallprompt` listener only
-  captures `deferredInstallPrompt` — it does NOT show anything itself (used to,
-  independently of the mobile gate — see **Conventions & gotchas** for why that was a
-  real bug). The actual cache logic lives in **`sw.js`** (separate file, not part of the
-  `app.js` module — see its own header comment for the full design: three caches,
-  cache-busting-aware key normalization, admin passthrough, byte-range-aware caching for
-  anything read via HTTP Range — video, audio, AND PDFs, since pdf.js reads a PDF
-  progressively via Range requests exactly like a media element (`isRangedCacheablePath`,
-  `respondRangedAsset` — renamed 2026-09-12 from their original video-only names once
-  PDFs needed the same treatment; see **Conventions & gotchas**) — and project-asset
-  navigations — an `<iframe>` loading a PDF counts as a navigation too — routed as data,
-  not a page load).
+  a stalled activation can't wedge the rest of boot), `isStandaloneDisplay`. Top-level
+  `beforeinstallprompt` listener only captures `deferredInstallPrompt` — it does NOT show
+  anything itself (used to, independently of the mobile gate — see **Conventions &
+  gotchas** for why that was a real bug). The actual cache logic lives in **`sw.js`**
+  (separate file, not part of the `app.js` module — see its own header comment for the
+  full design: three caches, cache-busting-aware key normalization, admin passthrough,
+  byte-range-aware media caching (`isRangedMediaPath` covers AUDIO as well as video — an
+  `<audio>` element makes the same ranged requests, and caching a lone `206` would corrupt
+  the entry exactly as it would for video), and project-asset navigations — an `<iframe>` loading a
+  PDF counts as a navigation too — routed as data, not a page load).
   **One combined "Add to Home Screen" + save-for-offline prompt** (merged 2026-09-03 from
   two separate prompts, per explicit user request — see CHANGELOG): `collectOfflineAssets()`
   walks `state.menuConfig.tree` + landmarks/amenities renders + pano/site-plan/logo for
@@ -578,6 +564,24 @@ Top-down, by section header:
   a later visit instead of falsely declaring victory. Plot-level media
   (`getPlotMediaList`) is deliberately not walked — always meant to be external by design,
   same reasoning as the export-flagging feature.
+  **`app.js`'s `SW_VERSION` constant must be bumped in lockstep with `sw.js`'s `VERSION`
+  — a real bug found 2026-09-12, not just a theoretical risk.** `SW_VERSION` namespaces
+  the banner's dismissal memory (`b91-offline-declined-${SW_VERSION}-<pid>` /
+  `-saved-${SW_VERSION}-<pid>` in `localStorage`); its own comment says "must match
+  VERSION in sw.js," but it sat hardcoded at `'v5'` through two later `sw.js` version
+  bumps (`v6` the three.js swap, `v7` the video priming fix) before anyone noticed —
+  meaning any earlier tap of "Skip" (or a completed download) stayed permanently recorded
+  under the stale key, silently preventing the banner from EVER showing again on that
+  browser/project, regardless of how much the underlying caching code changed
+  afterward. Found because the user asked "why can't I see it" after the PDF fix below —
+  don't assume a missing banner means the feature broke; check this constant first.
+  Separately, and for the same reason: `sw.js`'s OWN `VERSION` bump is not optional
+  "housekeeping" — a caching-strategy change landed without bumping it (the PDF fix,
+  documented in `sw.js`'s own header + CHANGELOG) meant `activate()` never discarded the
+  cache name that held a CORRUPTED PDF entry from before the fix, so the fixed code kept
+  reading that same broken blob back on any device that had already opened it. If a
+  caching fix "isn't taking effect," check whether `VERSION` actually moved, not just
+  whether the code changed.
 
 **Client menu skips folders that offer no choice** (2026-09-04) — `resolveFolderTarget(node)`
 is the single decision point behind every menu-row click, returning `open` / `images` /
@@ -1079,53 +1083,29 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   offline demo; a temporary HTTPS tunnel (e.g. `cloudflared` quick tunnel) in front of
   `server.py` is required. `localhost` itself IS exempt, so `sw.js` registration can (and
   was) verified directly on this dev machine without any tunnel.
-- **Range-requested assets can't be cached like any other GET in `sw.js`.** A `<video>`/
-  `<audio>` element requests its `src` with byte-range headers for seeking, AND pdf.js
-  reads a PDF the same way (progressive, out-of-order Range reads for the brochure viewer
-  — see `openClientBrochureModal`) — the server answers with `206 Partial Content`, and
-  caching a single 206 response under the resource's URL would silently corrupt the cache
-  (only that one byte slice would ever be served back; worse, since different Range
-  requests for the SAME file return DIFFERENT slices, each caching attempt overwrites the
-  last one under that same key — whichever slice lands last "wins" as the permanently
-  cached, corrupted copy). `respondRangedAsset` (renamed 2026-09-12 from `respondVideo`
-  once PDFs needed the exact same treatment — also renamed: `isRangedMediaPath`→
-  `isRangedCacheablePath`, `VIDEO_BLOB_CACHE`→`RANGED_BLOB_CACHE`,
-  `VIDEO_PRIME_INFLIGHT`/`primeVideoCache`→`RANGE_PRIME_INFLIGHT`/`fetchAndCacheFull`)
-  only ever answers a ranged request from cache once a **complete** (`200`) copy is
-  already held, slicing it manually into a proper `206` reply (`sliceRange`); otherwise it
-  passes the ranged request straight to the network and separately kicks off a background
-  fetch (`fetchAndCacheFull`) to prime the full-file cache for next time. This naturally
-  satisfies "cache only once actually opened," since neither a `<video>` `src` nor a PDF
-  load happens until the relevant modal actually opens (menu-item click), not on page
-  load. **`fetchAndCacheFull` is shared by BOTH the ranged-priming path AND the plain
-  (`!range`) direct-fetch path** (unified 2026-09-12) — before that, each had its OWN
-  independent "is a fetch for this key already running" check, so a request shape mix
-  pdf.js commonly produces (one main unranged streaming request ALONGSIDE a few early
-  ranged reads for out-of-order data) triggered TWO separate complete downloads of the
-  same file, not one; confirmed via real service-worker console instrumentation that
-  after unifying them, exactly one real `fetch()` happens per file (Playwright's network
-  log still shows what LOOKS like two responses per fetch — that's just how it reports a
-  worker-mediated request: the worker's own outbound fetch and the page-visible response,
-  as two separate log entries — not an actual second download; don't be misled by it).
-  **This background-priming fetch genuinely did not exist in the code for a while, this
-  paragraph's own earlier description notwithstanding** — a real bug found 2026-09-12
-  ("mobile offline users, videos not getting downloaded", then confirmed as the exact
-  same gap for PDFs, which weren't even routed through this function at all until the
-  same day): the doc/comment described this exact fallback, but the uncached-and-ranged
-  branch was just a bare network passthrough with no `event.waitUntil`/priming call
-  anywhere. Since MOBILE browsers (iOS Safari reliably, Android often too) send a `Range`
-  header on a `<video>`/PDF's very FIRST request — unlike most desktop browsers, which
-  usually send a plain GET first — this meant videos (and, separately, PDFs) were never
-  cached AT ALL on mobile, on any visit, however many times opened, while working fine in
-  desktop testing. Re-implemented for real and verified END-TO-END with an actual browser
-  (Playwright driving system Chrome): opened a video + the brochure online, polled real
-  Cache Storage until both were confirmed cached, reloaded once more online, then
-  genuinely went offline (`context.setOffline(true)`) and reloaded again — the video's
-  `readyState` came back `4` (fully loaded) with no error, and the PDF rendered the
-  identical page count it did online. If this ever looks broken again, verify with an
-  actual offline browser load, not just reading the code or a unit test in isolation — a
-  unit test using mocked `fetch`/`caches` had ALREADY "passed" while the real end-to-end
-  scenario was still broken by the missing-registration-timing bug documented above.
+- **Video can't be cached like any other GET in `sw.js`.** A `<video>` element requests
+  its `src` with byte-range headers for seeking, and the server answers with `206 Partial
+  Content` — caching a single 206 response under the resource's URL would silently corrupt
+  the cache (only that one byte slice would ever be served back). `respondVideo` only ever
+  answers a ranged request from cache once a **complete** (`200`) copy is already held,
+  slicing it manually into a proper `206` reply (`sliceRange`); otherwise it passes the
+  ranged request straight to the network and separately kicks off an unranged background
+  fetch (`primeVideoCache`, `VIDEO_PRIME_INFLIGHT` dedupes concurrent range requests for
+  the same not-yet-cached video into one shared fetch) to prime the full-file cache for
+  next time. This naturally satisfies "cache video only once actually played," since the
+  client viewer never sets a `<video>` `src` until `openClientVideoModal` runs (menu-item
+  open), not on page load. **This background-priming fetch genuinely did not exist in the
+  code for a while, this paragraph's own description notwithstanding** — a real bug found
+  2026-09-12 ("mobile offline users, videos not getting downloaded"): the doc/comment
+  described this exact fallback, but `respondVideo`'s uncached-and-ranged branch was just
+  a bare network passthrough with no `event.waitUntil`/priming call anywhere. Since MOBILE
+  browsers (iOS Safari reliably, Android often too) send a `Range` header on a `<video>`
+  element's very FIRST request — unlike most desktop browsers, which usually send a plain
+  GET first — this meant videos were never cached AT ALL on mobile, on any visit, however
+  many times played, while working fine in desktop testing. Re-implemented for real with a
+  test verifying the actual behavior (not just that the code runs) — if this ever looks
+  broken again, verify by actually reading `respondVideo`'s uncached+ranged branch, not by
+  trusting what this paragraph or its own inline comment claims.
 - **Live-server headless screenshots stay unreliable for admin verification specifically**
   (2026-09-02, offline-layer work): confirmed again that `--virtual-time-budget` +
   `--dump-dom`/`--screenshot` don't compose reliably with this app's dynamic `import('./app.js?v=...')`
@@ -1606,7 +1586,7 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   far has needed at least one more round after "verified" — treat any single confirmation
   from the user as provisional until they've gone through the full add-to-home-screen →
   airplane-mode → browse-everything sequence without hitting a new issue), and exercising
-  the video/PDF byte-range caching path (`sw.js`'s `respondRangedAsset`) against a real seek/replay.
+  the video byte-range caching path (`sw.js`'s `respondVideo`) against a real seek/replay.
   The per-project
   `manifest.webmanifest` limitation (static/generic, not per-`?project=`) is intentional —
   see the 2026-09-02 CHANGELOG entry for why it doesn't matter for the actual planned

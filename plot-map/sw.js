@@ -26,18 +26,19 @@
 // worker's v5 shell cache (which had the OLD, now-unused three.module.js precached and was
 // therefore MISSING the file the app actually loads) gets discarded rather than silently
 // leaving a visitor's offline pano viewer unable to find its own THREE.js. v7:
-// respondVideo (since renamed, see v8) gained the background priming fetch for a ranged
-// first-request — existing cached videos aren't invalidated by this (purely additive:
-// previously-uncached mobile videos can now get cached, nothing already stored changes
-// shape), bumped per this file's own policy of one per strategy change regardless. v8:
-// PDFs (the brochure viewer, read progressively by pdf.js via Range requests exactly like
-// a media element) are now routed through the same safe path — renamed respondVideo/
-// VIDEO_BLOB_CACHE/VIDEO_PRIME_INFLIGHT/primeVideoCache/isRangedMediaPath to their generic
-// respondRangedAsset/RANGED_BLOB_CACHE/RANGE_PRIME_INFLIGHT/primeRangedCache/
-// isRangedCacheablePath names since "video" no longer describes what they cover. PDFs were
-// previously falling through to the plain staleWhileRevalidate path, where pdf.js's several
-// different-byte-range 206 responses for the same file kept overwriting each other under
-// one cache key — the brochure could never actually be reconstructed offline.
+// respondVideo gained the background priming fetch for a ranged first-request (see
+// VIDEO_PRIME_INFLIGHT) — existing cached videos aren't invalidated by this (purely
+// additive: previously-uncached mobile videos can now get cached, nothing already stored
+// changes shape), bumped per this file's own policy of one per strategy change regardless.
+// v8 (2026-09-12): PDFs routed through the same ranged-asset path as video/audio
+// (isRangedCacheablePath now matches .pdf; respondVideo/etc. renamed to their generic
+// respondRangedAsset/fetchAndCacheFull/etc. names — see CLAUDE.md). This bump was
+// missed when that code first landed, which matters here specifically: any browser that
+// had already opened a PDF before the fix had a CORRUPTED partial copy sitting in the v7
+// media cache (the old staleWhileRevalidate path overwrote it with mismatched byte
+// ranges) — without bumping VERSION, activate() never discards that cache name, so the
+// fixed code would keep reading the same broken blob back forever. Bumping now actually
+// forces every client onto a clean media cache.
 const VERSION = 'v8';
 const SHELL_CACHE = `b91-shell-${VERSION}`;
 const DATA_CACHE = `b91-data-${VERSION}`;
@@ -90,19 +91,13 @@ function cacheKeyFor(url) {
   return u.toString();
 }
 
-// Anything fetched with byte-range requests: <audio>/<video> elements, AND pdf.js (used
-// for the brochure viewer on mobile — see openClientBrochureModal — which reads a PDF
-// progressively via Range requests exactly like a media element, not as one big download).
-// Caching a single 206 under the resource URL silently corrupts the cache (only that one
-// slice would ever be served again) — the exact hazard respondRangedAsset exists to
-// prevent. Background music (added 2026-09-04) went through the ordinary cache path until
-// audio extensions were added here; PDFs (2026-09-12) had the exact same gap — routed
-// through the plain staleWhileRevalidate path, where pdf.js's several different-byte-range
-// 206 responses for the SAME file kept overwriting each other under one cache key, so the
-// brochure was never actually reconstructible offline (whichever slice landed last "won"
-// and any offline open got a corrupted fragment, not the real document).
-function isRangedCacheablePath(pathname) {
-  return /\.(mp4|webm|ogg|mov|m4v|mkv|mp3|m4a|aac|oga|wav|weba|flac|pdf)$/i.test(pathname);
+// Anything an <audio> or <video> element streams. AUDIO BELONGS HERE TOO: a media element
+// requests its src with byte-range headers and gets 206 Partial Content back, and caching a
+// single 206 under the resource URL silently corrupts the cache (only that one slice would
+// ever be served again) — the exact hazard respondVideo exists to prevent. Background music
+// (added 2026-09-04) went through the ordinary cache path until these extensions were added.
+function isRangedMediaPath(pathname) {
+  return /\.(mp4|webm|ogg|mov|m4v|mkv|mp3|m4a|aac|oga|wav|weba|flac)$/i.test(pathname);
 }
 
 async function isAdminRequest(event, requestUrl) {
@@ -155,96 +150,73 @@ async function staleWhileRevalidate(cache, request) {
   return res || new Response('Offline', { status: 503, statusText: 'Offline' });
 }
 
-// Range-requested assets (video, audio, and pdf.js's PDF reads) need their own strategy:
-// the client requests them with byte-range headers (for seeking/streaming/progressive PDF
-// rendering), and caching a single 206 partial-content response under the resource's key
-// would silently corrupt the cache (only that one slice would ever be served again). So a
-// range request is only ever answered from cache once we already hold a COMPLETE (status
-// 200) copy — sliced manually to build a proper 206 reply — and is otherwise passed
-// straight to the network, with a separate unranged fetch kicked off in the background to
-// prime the full-file cache for next time (including offline playback).
-const RANGED_BLOB_CACHE = new Map();
+// Video needs its own strategy: the <video> element requests it with byte-range headers
+// (for seeking/streaming), and caching a single 206 partial-content response under the
+// resource's key would silently corrupt the cache (only that one slice would ever be
+// served again). So a range request is only ever answered from cache once we already hold
+// a COMPLETE (status 200) copy — sliced manually to build a proper 206 reply — and is
+// otherwise passed straight to the network, with a separate unranged fetch kicked off in
+// the background to prime the full-file cache for next time (including offline playback).
+const VIDEO_BLOB_CACHE = new Map();
 
 // MOBILE browsers (iOS Safari reliably, Android often too) send a Range header on the very
-// FIRST request for a <video>/<audio> element, AND pdf.js does the same for a PDF — before
-// playback/rendering even starts, just to probe the file — where desktop browsers usually
-// send a plain GET first. Every write to the cache used to live only in
-// respondRangedAsset's `!range` branch, so on mobile the asset was never actually cached on
-// ANY visit, however many times it was opened: the "opportunistic offline caching" this
-// file exists for silently never fired for the device class it matters most for
-// (2026-09-12: reported first for video, then confirmed the exact same gap existed for the
-// PDF brochure, which wasn't even routed through this function at all until the same fix).
-// Fixed by firing this plain, unranged fetch of the same URL in the background the first
-// time a ranged request finds nothing cached yet, purely to populate the cache for next
-// time — the visible request is still answered straight from the network immediately
-// after, so playback/rendering is never held up waiting on the full download. Deduped by
-// key: several range requests for the same asset (a video's metadata probe then playback
-// then seeks; a PDF's many out-of-order page reads) arriving while that download is still
-// in flight must only ever start ONE background fetch, not one per request — once it
-// lands, `full` is set on the NEXT request and this whole priming path is skipped from
-// then on. This also fixed an incidental bandwidth waste for PDFs: before being routed
-// here, every one of pdf.js's range requests independently triggered its own
-// staleWhileRevalidate "revalidate" fetch of the same file, observed as TWO full 36MB
-// downloads for a single brochure open — now there's at most one deduped background fetch.
-// One shared tracker for "a full-file fetch of this key is already in flight," used by
-// BOTH the plain (`!range`) path below AND the ranged-priming path — not just ranged
-// requests among themselves. pdf.js in particular doesn't only make range requests: it
-// commonly issues one main, unranged streaming request for the bulk of the file ALONGSIDE
-// a few early ranged reads for out-of-order data (e.g. the xref table near the end).
-// Before this was unified, each path had its own independent "am I already fetching this"
-// check, so those two request shapes for the SAME uncached file each started their OWN
-// full download — observed directly as two separate complete 36MB fetches for a single
-// brochure open. Whichever request (ranged or not) gets here first starts the ONE fetch;
-// every other concurrent request for the same key, ranged or not, joins the same promise.
-const RANGE_PRIME_INFLIGHT = new Map();   // cache key -> in-flight full-file fetch Promise
-function fetchAndCacheFull(cache, key, url) {
-  if (RANGE_PRIME_INFLIGHT.has(key)) return RANGE_PRIME_INFLIGHT.get(key);
+// FIRST request for a <video>/<audio> element — before playback even starts, just to probe
+// the file — where desktop browsers usually send a plain GET first. Every write to the
+// video cache used to live only in respondVideo's `!range` branch, so on mobile a video was
+// never actually cached on ANY visit, however many times it was played: the "opportunistic
+// offline caching" this file exists for silently never fired for the device class it
+// matters most for (2026-09-12 bug report: "for mobile offline users the videos are not
+// getting downloaded"). Fixed by firing this plain, unranged fetch of the same URL in the
+// background the first time a ranged request finds nothing cached yet, purely to populate
+// the cache for next time — the visible request is still answered straight from the
+// network immediately after, so playback is never held up waiting on the full download.
+// Deduped by key: a video's several range requests (the metadata probe, then real
+// playback, then any seeks) arriving while that download is still in flight must only ever
+// start ONE background fetch, not one per request — once it lands, `full` is set on the
+// NEXT request and this whole priming path is skipped from then on.
+const VIDEO_PRIME_INFLIGHT = new Map();   // cache key -> in-flight priming Promise
+function primeVideoCache(cache, key, url) {
+  if (VIDEO_PRIME_INFLIGHT.has(key)) return VIDEO_PRIME_INFLIGHT.get(key);
   const task = fetch(url, { cache: 'no-store' })
-    .then(async (res) => {
-      // Awaited (not fire-and-forget) so a waitUntil(task) caller's stay-alive tracking
-      // actually covers the cache WRITE too, not just the network fetch finishing.
-      if (res && res.ok && res.status === 200) await cache.put(key, res.clone()).catch(() => {});
-      return res;
-    })
-    .finally(() => RANGE_PRIME_INFLIGHT.delete(key));
-  RANGE_PRIME_INFLIGHT.set(key, task);
+    .then((res) => { if (res && res.ok && res.status === 200) return cache.put(key, res); })
+    .catch(() => {})
+    .finally(() => VIDEO_PRIME_INFLIGHT.delete(key));
+  VIDEO_PRIME_INFLIGHT.set(key, task);
   return task;
 }
 
-async function respondRangedAsset(cache, request, event) {
+async function respondVideo(cache, request, event) {
   const key = cacheKeyFor(request.url);
   const full = await cache.match(key);
   const range = request.headers.get('range');
 
   if (full) {
     if (!range) return full.clone();
-    let blob = RANGED_BLOB_CACHE.get(key);
+    let blob = VIDEO_BLOB_CACHE.get(key);
     if (!blob) {
       blob = await full.blob();
-      RANGED_BLOB_CACHE.set(key, blob);
-      if (RANGED_BLOB_CACHE.size > 5) {
-        const oldestKey = RANGED_BLOB_CACHE.keys().next().value;
-        RANGED_BLOB_CACHE.delete(oldestKey);
+      VIDEO_BLOB_CACHE.set(key, blob);
+      if (VIDEO_BLOB_CACHE.size > 5) {
+        const oldestKey = VIDEO_BLOB_CACHE.keys().next().value;
+        VIDEO_BLOB_CACHE.delete(oldestKey);
       }
     }
-    return sliceRange(blob, range, full.headers.get('Content-Type') || 'application/octet-stream');
+    return sliceRange(blob, range, full.headers.get('Content-Type') || 'video/mp4');
   }
 
   if (!range) {
-    // Nothing cached yet, and this request already wants the whole file — it CAN be the
-    // caching fetch itself, so it joins the same shared tracker instead of always
-    // starting its own independent fetch (that dedup matters when a ranged probe for the
-    // same key got here microseconds earlier and is already mid-download).
-    try { return (await fetchAndCacheFull(cache, key, request.url)).clone(); }
-    catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
+    try {
+      const res = await fetch(request);
+      if (res && res.ok && res.status === 200) await cache.put(key, res.clone()).catch(() => {});   // see the note in staleWhileRevalidate about why this can reject
+      return res;
+    } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
   }
 
-  // Ranged AND nothing cached yet — mobile's own metadata-probe request (or pdf.js's first
-  // page read) lands here. Answer it from the network immediately so playback/rendering
-  // isn't held up, but keep the priming fetch alive past this handler's own return via
-  // waitUntil — otherwise the browser is free to tear the worker down the instant this
-  // response is sent, cutting the download short.
-  event.waitUntil(fetchAndCacheFull(cache, key, request.url));
+  // Ranged AND nothing cached yet — mobile's own metadata-probe request lands here. Answer
+  // it from the network immediately so playback isn't held up, but keep the priming fetch
+  // alive past this handler's own return via waitUntil — otherwise the browser is free to
+  // tear the worker down the instant this response is sent, cutting the download short.
+  event.waitUntil(primeVideoCache(cache, key, request.url));
   try { return await fetch(request); } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
 }
 
@@ -320,7 +292,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     if (await isAdminRequest(event, url)) return fetch(req);
 
-    if (isRangedCacheablePath(url.pathname)) return respondRangedAsset(await caches.open(MEDIA_CACHE), req, event);
+    if (isRangedMediaPath(url.pathname)) return respondVideo(await caches.open(MEDIA_CACHE), req, event);
 
     if (SHELL_URLS.some((u) => cacheKeyFor(u) === cacheKeyFor(req.url))) {
       return staleWhileRevalidate(await caches.open(SHELL_CACHE), req);
