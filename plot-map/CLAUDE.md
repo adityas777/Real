@@ -578,6 +578,19 @@ Top-down, by section header:
   a later visit instead of falsely declaring victory. Plot-level media
   (`getPlotMediaList`) is deliberately not walked — always meant to be external by design,
   same reasoning as the export-flagging feature.
+  **Cold-load latency lives almost entirely in project IMAGES, not code** (profiled
+  2026-09-12 at 9 Mbps/60ms/4× CPU with the SW blocked, which is the only honest way to
+  measure a first visit). Baseline was 29.1s to usable / 27.2MB, and app.js + three.js +
+  styles together were under 350KB of it — three images were the whole critical path.
+  Fixes: a 4.8MB `Demo.web.jpg` hard-coded as `src` on `#clientContactImg` in `index.html`
+  (downloaded every visit, never shown, since `openClientContactModal` always reassigns
+  `img.src` — don't put a `src` back on that tag); the ground overlay PNG→WebP (17.0→2.5MB,
+  RGBA with real alpha so WebP not JPEG); and the pano JPEG→WebP (5.2→2.7MB). Result 9.1s
+  / 5.6MB. **When a project feels slow, profile the images before touching the code.**
+  Note `PANO_TEX_CAP` is 8192 but `loadPanoTexture` downscales to `gpuMaxTexSize()` (4096
+  on most mobile GPUs) — phones download the full-width pano and discard half of it; a
+  4096-wide mobile variant is the next available win but needs `collectOfflineAssets`, the
+  admin save path and the export bundle to agree on it.
   **`collectOfflineAssets()` must walk `state.tours` too** — added 2026-09-12 after a
   strict audit found all 17 of this project's virtual-tour room panoramas returning 503
   offline. A tour room's pano is only requested when that specific room is opened, so

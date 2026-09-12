@@ -884,7 +884,13 @@
 
       <!-- Left Side Image -->
       <div class="contact-modal-left">
-        <img id="clientContactImg" src="projects/sample/Demo.web.jpg" alt="Project Site Map" />
+        <!-- No src here on purpose: openClientContactModal ALWAYS assigns img.src before the
+             modal is shown (the project's own contact photo, else the project pano, else the
+             sample fallback), so a hard-coded one is never the image anyone sees — it just
+             made every visitor download this 4.8MB JPEG during boot, on every project, for a
+             modal most of them never open. It was the third-heaviest request on a cold load
+             (~15s of a 4G first visit) and pure waste. -->
+        <img id="clientContactImg" alt="Project Site Map" decoding="async" />
       </div>
 
       <!-- Right Side Info -->

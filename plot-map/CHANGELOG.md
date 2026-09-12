@@ -5,6 +5,49 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (cold-load latency: 29s → 9s to usable on 4G, 27.2MB → 5.6MB transferred)
+
+`index.html` + project content. User asked to make the UI load fast and cut latency.
+Profiled first rather than guessing: cold cache, service worker blocked (so it measures a
+genuine first visit), Chrome DevTools throttling at 9 Mbps / 60ms RTT / 4× CPU slowdown.
+Baseline was **29.1s to usable** (boot curtain cleared) and **27.2 MB** transferred, with
+the entire critical path being three images:
+
+- **`projects/sample/Demo.web.jpg` — 4.8MB, ~15s, downloaded on EVERY visit of EVERY
+  project, and never actually shown.** It was hard-coded as `src` on
+  `#clientContactImg` in `index.html`, so the browser fetched it during boot — but
+  `openClientContactModal` unconditionally assigns `img.src` before showing the modal (the
+  project's own contact photo, else the project pano, else a fallback), so the hard-coded
+  one is never the image anyone sees. Removed the attribute; the fallback path is
+  unchanged. Pure waste, zero behaviour change.
+- **Ground/site-plan overlay 17.0MB PNG → 2.5MB WebP (85% smaller).** It's RGBA with real
+  transparency (alpha extrema 0–255), so WebP, not JPEG — same approach as the earlier
+  `Low-Size.web.png` conversion, and `server.py` already registers the `.webp` MIME type.
+  Verified by compositing 100% crops over a checkerboard: road markings, "18.00 M WD ROAD"
+  lettering, plot outlines and tree detail all preserved.
+- **Main panorama 5.2MB JPEG → 2.7MB WebP (48% smaller)**, same 8192×4096 dimensions.
+  Compared the highest-edge-energy tile in the image: mean absolute difference 1.4%, max
+  channel delta 26/255 — a normal recompression delta, invisible at viewing scale.
+
+Result: **9.1s to usable on 4G (3.2× faster), 5.6 MB transferred (79% less)**; 44.7s on a
+1.6 Mbps 3G profile. The offline download also drops by ~20MB. Both originals were backed
+up to `.originals/` — and, unlike the incident earlier in this session, the directory was
+listed FIRST to confirm neither name was already taken.
+
+Re-ran the full strict offline audit afterwards since `alignment.json` now points at
+different filenames: still **66/66 assets available and 18/18 features working offline**,
+and the map renders identically (screenshot-compared).
+
+**Still on the table, not done** (it changes the asset pipeline, so it needs a decision):
+`PANO_TEX_CAP` is 8192 but `loadPanoTexture` downscales to `gpuMaxTexSize()`, which is
+4096 on most mobile GPUs — so phones currently download a 2.7MB 8192-wide panorama and
+throw half the pixels away, paying a 33-megapixel decode plus a canvas downscale on top. A
+4096-wide variant served when the GPU cap is 4096 would cut that to roughly 800KB and
+speed up decode substantially, but it needs a second file per project plus handling in
+`collectOfflineAssets`, the admin save path and the export bundle.
+
+---
+
 ## 2026-09-12 (strict offline audit: virtual-tour panoramas were never downloaded — now 66/66 assets and 18/18 features verified offline)
 
 `app.js`. User asked for a strict check of whether *everything* works offline for mobile
