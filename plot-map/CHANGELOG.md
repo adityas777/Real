@@ -5,6 +5,42 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (double-checked offline VIDEO for real; closed a first-visit gap that left a cached video unreachable)
+
+`app.js`. User asked to double-check that video genuinely plays offline on mobile.
+`readyState: 4` only says "enough data is buffered", so this verified the things that
+actually matter: that the playhead advances in wall-clock time, and that seeking into the
+middle and end of the file works — seeking is what truly exercises `sw.js`'s
+cached-Range slicing (`respondRangedAsset`/`sliceRange`), since it has to synthesise a
+`206` out of the stored full copy.
+
+- **Confirmed working, with decoded frames as evidence.** With the "Add" download done:
+  video 1 played and seeked to **70s and 130s** (of 138.4s) offline, rendering its real
+  end-card frame; video 2 seeked to **60s** and rendered a real aerial-map frame. Playback
+  advanced **4.01s of media time in 4.0s of wall clock** — genuine real-time playback, not
+  a stalled buffer.
+- **Confirmed the background priming path too**: simply *watching* ~10s of the video online
+  silently pulled the **entire 43.7MB** file into `b91-media` (present within a second of
+  checking), with no download prompt involved.
+- **Found and fixed a real gap**: a visitor who DECLINES the offline banner and visits
+  exactly once ended up with the full video cached and **no menu row left to reach it
+  with**. A service worker only intercepts fetches once it controls the page, and on a
+  genuine first visit it is typically still installing while boot fetches the project
+  config — so `alignment.json` never got cached, and the next (offline) load fell back to
+  the built-in rows alone: no LOCATION INTELLIGENCE, no BROCHURE, nothing authored. A
+  second online visit fixed it by itself, which is exactly why it had gone unnoticed.
+  Fixed with `warmOfflineConfigCache()`: once the worker reports ready, the ~30KB of
+  per-project config is re-requested so it actually lands in the cache. Deliberately not
+  extended to the pano/site-plan images — those are megabytes, and a visitor who wants
+  them offline has the "Add" button. `collectOfflineAssets` now shares the same
+  `OFFLINE_CONFIG_FILES` list so the two can't drift apart.
+
+Measured before → after for the declining single-visit case: **menu rows 10 → 15, video
+menu item present false → true, playback n/a → 4.01s advanced**. The second-visit case was
+already fine and is unchanged. Both paths now behave identically.
+
+---
+
 ## 2026-09-12 (cold-load latency: 29s → 9s to usable on 4G, 27.2MB → 5.6MB transferred)
 
 `index.html` + project content. User asked to make the UI load fast and cut latency.

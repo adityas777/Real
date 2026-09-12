@@ -578,6 +578,19 @@ Top-down, by section header:
   a later visit instead of falsely declaring victory. Plot-level media
   (`getPlotMediaList`) is deliberately not walked — always meant to be external by design,
   same reasoning as the export-flagging feature.
+  **`warmOfflineConfigCache()` exists because a first visit can't cache its own config.**
+  The worker only intercepts fetches once it controls the page, and on a genuine first
+  visit it is still installing while boot fetches `alignment.json` and friends — so none of
+  it caches, and the next offline load shows only the built-in rows (no authored menu items
+  at all). Measured 2026-09-12: a visitor who declined the banner and visited once had the
+  full 43.7MB video cached and *no menu row left to reach it with*; a second online visit
+  fixed it by itself, which is why it hid for so long. So once registration reports ready,
+  the ~30KB of config is re-requested to force it into the cache. Keep it to the small
+  files — the pano/site-plan are megabytes and belong to the "Add" download. **Verifying
+  offline VIDEO: `readyState: 4` is not proof of playback** — it only means data is
+  buffered. Check that `currentTime` advances against wall clock, and seek deep into the
+  file (e.g. 130s of 138s); seeking is the only thing that really exercises
+  `respondRangedAsset`'s cached-Range slicing.
   **Cold-load latency lives almost entirely in project IMAGES, not code** (profiled
   2026-09-12 at 9 Mbps/60ms/4× CPU with the SW blocked, which is the only honest way to
   measure a first visit). Baseline was 29.1s to usable / 27.2MB, and app.js + three.js +

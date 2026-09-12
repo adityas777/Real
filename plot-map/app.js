@@ -7846,8 +7846,33 @@ async function registerOfflineSupport() {
 // down to connection speed and whether the worker was already installed, which is why it
 // looked intermittent. Registration is kicked off at the top of init and only awaited here,
 // at the end, so the banner always sees a fully loaded project.
+// The small per-project files the client cannot render a real menu without. Shared with
+// collectOfflineAssets so the eager download and the warm-up below can't drift apart.
+const OFFLINE_CONFIG_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json', 'tour.json'];
+
+// Re-request the project config once the worker is genuinely active, so it lands in the
+// cache even on a FIRST visit. A service worker only intercepts fetches once it controls the
+// page, and on a first visit it is usually still installing while boot fetches this exact
+// config — so nothing caches it, and the visitor's NEXT load (offline) falls back to the
+// built-in rows alone: no LOCATION INTELLIGENCE, no BROCHURE, no authored items at all.
+// Measured 2026-09-12: a visitor who declined the download and visited once had the full
+// 43.7MB video sitting in the cache and no menu row left to reach it with; a second online
+// visit fixed it by itself. This closes that first-visit window for ~30KB, and costs nothing
+// afterwards (these are already-cached URLs by then, and staying network-first keeps them
+// fresh). Deliberately NOT extended to the pano/site-plan images: those are megabytes, and
+// the visitor who wants them offline has the "Add" button, which fetches everything.
+async function warmOfflineConfigCache() {
+  const pid = state.projectId || 'sample';
+  await Promise.all(OFFLINE_CONFIG_FILES.map((f) =>
+    fetch(`projects/${pid}/${f}`, { cache: 'no-store' }).catch(() => {})));
+}
+
 async function offerOfflineSaveAfterBoot(registration) {
-  try { if (await registration) await maybeOfferOfflineSave(); } catch {}
+  try {
+    if (!(await registration)) return;
+    await warmOfflineConfigCache();
+    await maybeOfferOfflineSave();
+  } catch {}
 }
 
 // ─── Add to Home Screen + save-for-offline (one combined prompt) ───────────
@@ -7942,7 +7967,7 @@ function collectOfflineAssets() {
   const pid = state.projectId || 'sample';
   // tour.json included since 2026-09-12 alongside the node panoramas above — boot fetches it
   // anyway, so it was usually cached by luck, but "usually" isn't what this list is for.
-  const DATA_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json', 'tour.json'];
+  const DATA_FILES = OFFLINE_CONFIG_FILES;
   for (const f of DATA_FILES) add(`projects/${pid}/${f}`, 'data');
 
   return items;
