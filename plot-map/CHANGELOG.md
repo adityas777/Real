@@ -5,6 +5,73 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (PDF brochure offline caching + a deeper boot-order fix; verified with a real end-to-end offline test)
+
+`sw.js`, `app.js`. User asked to analyze PDF preview/offline behavior first, then confirmed:
+"make sure the video and images are getting downloaded and can be previewed inside the
+app, the pdf also gets downloaded the same way... for the online mobile users the pdf
+should be previewed in the app itself."
+
+- **Root cause (PDF)**: pdf.js reads a PDF progressively via HTTP Range requests, exactly
+  like a `<video>` element — confirmed by capturing real network traffic (multiple `206`
+  responses for different byte ranges of the same file). But `.pdf` wasn't in the file
+  extension list routed through the safe ranged-asset caching path added the day before
+  for video — it fell through to the generic `staleWhileRevalidate`, which caches
+  whatever comes back under one key per URL. Since pdf.js's several range requests each
+  return a *different* slice, each one overwrote the last under that same key — whichever
+  slice landed last "won" and became the permanently cached (corrupted, partial) copy.
+  Offline, pdf.js could never parse that fragment as a real document.
+- **Fix**: extended the same safe-caching mechanism used for video to also cover PDFs.
+  Renamed the (now no-longer video-specific) infrastructure for accuracy:
+  `isRangedMediaPath`→`isRangedCacheablePath` (now includes `.pdf`), `respondVideo`→
+  `respondRangedAsset`, `VIDEO_BLOB_CACHE`→`RANGED_BLOB_CACHE`, `VIDEO_PRIME_INFLIGHT`→
+  `RANGE_PRIME_INFLIGHT`, `primeVideoCache`→`fetchAndCacheFull`. `VERSION` bumped
+  `'v7'→'v8'`.
+- **A second, real gap found and fixed in the same pass**: the plain (`!range`) fetch
+  path and the ranged background-priming path weren't deduped against EACH OTHER — only
+  against themselves. pdf.js commonly issues one main unranged streaming request
+  alongside a few early ranged reads (e.g. for the xref table near the end of the file);
+  before this fix, each of those two REQUEST SHAPES independently triggered its own full
+  download of the same file — observed directly as two complete 36MB fetches for one
+  brochure open. Unified both paths behind one shared `fetchAndCacheFull` tracker so
+  whichever request (ranged or not) arrives first starts the one real fetch and every
+  other concurrent request for the same key joins it. Verified with real service-worker
+  console instrumentation (temporarily added, then removed) that exactly ONE real
+  `fetch()` now happens per file, not two — Playwright's own network log still shows two
+  "200" entries per fetch, which turned out to be how it reports a service-worker-
+  mediated request (the worker's own outbound fetch AND the page-visible response,
+  logged as two separate entries) rather than an actual duplicate download.
+- **A separate, deeper bug found while verifying end-to-end**: `registerOfflineSupport()`
+  was called at the very END of `init()`, after every boot-critical project file
+  (alignment.json, plots.svg, landmarks/amenities/tour.json) had already been fetched.
+  Since a service worker only intercepts fetches once it's actually active and
+  controlling the page, NONE of that config was ever cached on a genuine first visit —
+  confirmed directly: a real offline reload showed the menu collapsed to just the three
+  built-in rows (AERIAL VIEW/LANDMARKS/VIRTUAL TOUR, the only items that don't depend on
+  `menuConfig`), every authored menu item, landmark, and tour simply gone. Moved the
+  (still fire-and-forget, non-blocking) registration call to the very start of `init()`
+  instead, giving the worker the best realistic chance of being active before those
+  fetches fire.
+- **Verified end-to-end with a real browser, not just unit tests**: used Playwright
+  driving the system-installed Chrome (`chromium.launch({executablePath: ...})`, no
+  download needed) to load the live client, open a video and the brochure while online,
+  poll the actual Cache Storage until both were confirmed fully cached, reload once more
+  online (realistic — a visitor browses a bit before ever going offline), then call
+  `context.setOffline(true)` and reload again for real. Result: the video's `readyState`
+  was `4` (`HAVE_ENOUGH_DATA`) with no error and the correct duration; the PDF rendered
+  the identical 4/4 pages it did online; every piece of project config, the pano, and the
+  site-plan image all loaded with `200` while genuinely offline. Also re-verified the 19
+  extraction-based unit tests (rewritten/extended for the rename + a new dedup-across-
+  paths case) and the full accumulated 87-test suite from every other change this
+  session — all clean.
+- **Diagnostic note for later**: an early version of this same end-to-end test wrongly
+  reported the video as never caching, due to a bug in the TEST's own matching regex
+  (literal spaces that don't match a URL-encoded `%20`) — worth remembering that a
+  negative result from custom verification tooling needs the same scrutiny as the code
+  under test, not automatic trust.
+
+---
+
 ## 2026-09-12 (mobile: videos now actually get cached for offline playback)
 
 `sw.js`. User report, analyzed first: "for the mobile offline users are the videos not

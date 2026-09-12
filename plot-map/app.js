@@ -8169,6 +8169,22 @@ function isStandaloneDisplay() {
 // ─── Boot ───────────────────────────────────────────────────────────────────
 (async function init() {
   try {
+    // Fire-and-forget, as early as possible — NOT at the end of boot where this used to
+    // live. A service worker only intercepts fetches once it's actually active AND
+    // controlling the page (`clients.claim()`); registering it after every other boot
+    // fetch (alignment/plots/landmarks/amenities/tour) had already completed meant NONE of
+    // that project config was ever cached on a genuine first visit — a phone that opened
+    // the app once online, then went offline, found the menu reduced to just the built-in
+    // rows (AERIAL VIEW/LANDMARKS/VIRTUAL TOUR — the only thing that doesn't need
+    // menuConfig) with every authored item and every landmark/tour simply gone (confirmed
+    // via a real offline reload in a real browser, not just reasoning about timing).
+    // Starting registration here instead — concurrently with, not blocking, the rest of
+    // boot — gives the worker the best realistic chance of being active before those
+    // fetches fire, so `networkFirst`/`staleWhileRevalidate` actually get to cache them.
+    // Still no guarantee on a very first, very slow-network visit (installing the worker
+    // competes for the same bandwidth), but every visit after the first is unaffected
+    // either way, and this makes the FIRST one far more likely to succeed too.
+    registerOfflineSupport();
     await loadGeometry();
     setBootProgress(3);
     // alignment precedence — client: committed file only. admin: freshest of the full
@@ -8295,7 +8311,6 @@ function isStandaloneDisplay() {
     if (autoOpenTarget && autoOpenTarget.kind === 'panotour') { fireAutoOpen(autoOpenTarget); hideBootCurtain(); }
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
     initProjectBar();                                    // header project switcher / manage menu
-    registerOfflineSupport();                             // client-only PWA offline cache — see definition above
     hideBootCurtain();                                    // safety net — idempotent, in case no branch above matched
   } catch (err) {
     console.error(err);
