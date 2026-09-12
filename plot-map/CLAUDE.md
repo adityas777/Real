@@ -578,6 +578,24 @@ Top-down, by section header:
   a later visit instead of falsely declaring victory. Plot-level media
   (`getPlotMediaList`) is deliberately not walked — always meant to be external by design,
   same reasoning as the export-flagging feature.
+  **`collectOfflineAssets()` must walk `state.tours` too** — added 2026-09-12 after a
+  strict audit found all 17 of this project's virtual-tour room panoramas returning 503
+  offline. A tour room's pano is only requested when that specific room is opened, so
+  runtime caching never picks them up either unless someone walks every tour online first;
+  leaving them out of this list made VIRTUAL TOUR the one headline feature that stayed
+  broken with no signal (list opens, every room is a blank sphere). If a new content type
+  is added that loads media lazily, it belongs in this walk.
+  **Verifying "does it work offline" — read this before writing another test.** Three
+  separate false failures came out of one audit: the boot curtain clears via
+  `classList.add('is-hidden')` (not `'gone'`); `readPixels()` on three.js's canvas is
+  ALWAYS blank because the renderer runs without `preserveDrawingBuffer`, so pixel-sampling
+  the WebGL context proves nothing (screenshot the composited page instead); and **a
+  PORTRAIT phone viewport shows the "Rotate your phone" overlay instead of the map**, so
+  any visual check has to run landscape (844×390) or it is just measuring that overlay.
+  Also, a single-node tour renders no `.tour-hs` hotspots — detect a running tour by the
+  drawer's `✕ EXIT TOUR` row instead. And a fresh Playwright context starts with EMPTY
+  storage, so the download must actually be run in the same context before going offline;
+  otherwise the test proves only that an empty cache is empty.
   **Registration is early, the BANNER is late — never re-fuse them** (2026-09-12, a real
   bug with a nasty signature). `registerOfflineSupport()` runs at the TOP of `init()` so
   the worker can cache boot fetches, and returns whether the worker became ready;

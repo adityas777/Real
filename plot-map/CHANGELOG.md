@@ -5,6 +5,48 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (strict offline audit: virtual-tour panoramas were never downloaded — now 66/66 assets and 18/18 features verified offline)
+
+`app.js`. User asked for a strict check of whether *everything* works offline for mobile
+visitors. Built a data-driven audit rather than spot-checking: it parses the project's own
+`alignment.json`/`tour.json`/`landmarks.json`, enumerates every local asset they reference
+(66 for `anandman`), runs the real "Add" download, goes genuinely offline
+(`context.setOffline(true)`), then fetches every one of those assets through the service
+worker AND drives each feature in the UI.
+
+- **Found: all 17 virtual-tour panoramas returned 503 offline.** `collectOfflineAssets()`
+  walked the menu tree, landmarks, amenities and the pano/ground/logo/audio, but never
+  `state.tours` — so across this project's 9 tours, not one room panorama was included in
+  the offline download. Because a room's pano is only requested when a visitor opens that
+  specific room, opportunistic runtime caching never reached them either unless someone had
+  manually walked all nine tours while online. VIRTUAL TOUR was therefore the one headline
+  feature that stayed broken with no signal: the tour list opened, every room landed on a
+  blank sphere. Fixed by walking `state.tours` in `collectOfflineAssets()`, and adding
+  `tour.json` to `DATA_FILES` (boot fetched it anyway, so it was cached by luck rather than
+  by intent). The offered download grows from ~230MB to ~305MB for this project — that's
+  114MB of tour panoramas that genuinely have to be there; the banner already shows the
+  size up front and warns when it exceeds free space.
+- **Three audit "failures" turned out to be bugs in the audit, not the app** — worth
+  recording because each would have sent a future session chasing nothing: (1) the boot
+  curtain is cleared with `classList.add('is-hidden')`, not `'gone'`; (2) `readPixels()` on
+  three.js's WebGL canvas always returns blank because the renderer runs without
+  `preserveDrawingBuffer`, so "1 distinct colour" said nothing about what's on screen; and
+  (3) **the whole audit was running at a PORTRAIT phone viewport, where this app
+  deliberately shows a "Rotate your phone — the map opens up in landscape" overlay instead
+  of the map** — so every visual check was measuring that overlay. Re-run at 844×390
+  landscape with screenshot-based checks, the map, plots, compass, legend and tour rooms
+  all render. A single-node tour also has no `.tour-hs` hotspots, so "is a tour running"
+  has to be read from the drawer's `✕ EXIT TOUR` row, not hotspot presence.
+
+Final verified state, offline, real Chrome, genuine offline emulation: **66/66 assets
+available, 18/18 features working** — app shell, project config, 360° panorama
+(8192×4096), site-plan overlay, plot geometry, landmark categories, both videos
+(`readyState 4`), all 25 gallery images, 4-page brochure PDF, contact card + photo,
+background audio, and all 9 virtual tours including multi-room navigation through MODERN
+VILLA's 9 rooms (screenshots confirm real imagery, not blank spheres).
+
+---
+
 ## 2026-09-12 (the real cause of "video and images stopped working offline": the offline download was racing boot and only saving ~19KB of config)
 
 `app.js`, `sw.js`. User report: "video and images worked perfectly well yesterday, and I

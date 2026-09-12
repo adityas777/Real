@@ -7877,6 +7877,16 @@ function collectOfflineAssets() {
   if (state.audio?.file) add(siteAudioSrc(), 'audio');   // background music, same treatment as any other local asset
   for (const lm of state.landmarks || []) if (lm.render) add(renderSrc(lm), 'image');
   for (const am of state.amenities || []) if (am.render) add(renderSrc(am), 'image');
+  // Virtual-tour room panoramas — one equirectangular JPEG per node, across every tour in
+  // tour.json. Missing from this walk until 2026-09-12, found by auditing every asset the
+  // project references against what a real offline device could actually fetch: all 17 of
+  // this project's tour panoramas came back 503 offline, so VIRTUAL TOUR was the one headline
+  // feature that stayed broken with no signal — the room list opened, then every room landed
+  // on a blank sphere. They're only requested when a visitor opens that specific room, so
+  // opportunistic runtime caching never reached them either unless someone had walked all
+  // nine tours online first. parseTours normalises each node's pano to a plain path string
+  // (see its own comment), which is what assetUrl expects.
+  for (const t of state.tours || []) for (const n of t.nodes || []) if (n.pano) add(assetUrl(n.pano), 'image');
 
   // Custom menu tree — mirrors server.py's scan_menu_for_online_content's walk of the same
   // shape, but collecting local files to prefetch instead of flagging external ones. Plot
@@ -7930,7 +7940,9 @@ function collectOfflineAssets() {
   // amenities. Without them the map can't boot at all offline. They're fetched via
   // assetUrl so the path resolves correctly (projects/{pid}/...) and de-duped by `seen`.
   const pid = state.projectId || 'sample';
-  const DATA_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json'];
+  // tour.json included since 2026-09-12 alongside the node panoramas above — boot fetches it
+  // anyway, so it was usually cached by luck, but "usually" isn't what this list is for.
+  const DATA_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json', 'tour.json'];
   for (const f of DATA_FILES) add(`projects/${pid}/${f}`, 'data');
 
   return items;
