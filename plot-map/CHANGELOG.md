@@ -5,6 +5,45 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (S3 + CloudFront deploy script for the client view)
+
+`deploy_s3.py` (new). Deploys the CLIENT view of one project to an S3 bucket behind
+CloudFront. Verified first that this is even possible: the client makes **zero** `/api/*`
+calls (`initProjectBar` returns immediately when `!state.admin`), and `index.html` has no
+root-absolute paths — so the client is already pure static hosting. The admin view is not
+deployable this way and isn't meant to be; it needs server.py's save/upload/export endpoints.
+
+Why a script rather than `aws s3 sync`:
+
+- **Content-Type per file.** The CLI guesses from the extension and gets `.webmanifest` and
+  `.webp` wrong — the same two `server.py` had to register by hand. Wrong types mean the PWA
+  manifest is ignored outright and the newly-optimized WebP site-plan/panorama don't render.
+- **Cache-Control per class.** `sw.js` and `index.html` must revalidate: a hard-cached
+  service worker pins every visitor to an old build permanently, with no way to push a fix.
+  `/vendor/*` and icons get a year; media a day; project config 60s so re-uploads show up.
+- **`.originals/` must not ship** — ~950MB of pre-optimization backups living inside the
+  project folder. Excluded along with every other dot-directory, matching `do_bundle`.
+- **The unminified `vendor/three.module.js` is skipped** (1.3MB): `app.js` imports the `.min`
+  build and `sw.js` precaches only that, so it is pure bulk in a deployment.
+- **The version stamp.** `index.html` ships `app.js?v=${Date.now()}` and the same for
+  `styles.css` — correct for local dev, actively harmful on a CDN: the URL is unique on every
+  page load, so the browser can never reuse its copy and CloudFront misses the edge cache
+  every single time. That is ~169KB gzipped of app.js + styles.css re-downloaded on EVERY
+  visit, forever. The script rewrites both to one stamp per deploy (the short git SHA), so
+  repeat visits answer `304` while a deploy still busts instantly. Only the uploaded copy is
+  rewritten; the working tree keeps `Date.now()`.
+
+**HTTPS is not optional**: service workers only run on HTTPS or localhost, so on a bare S3
+website endpoint the entire PWA layer — offline mode, the install/download banner, cached
+video — silently does not exist. CloudFront (or equivalent) is required, not a nicety.
+
+Payload for `anandman`: 90 objects, ~292MB (343MB in the folder, of which ~55MB is
+unreferenced leftovers — panoramas from deleted tours, the superseded `Low-Size.web.webp`,
+`Connectivity.web.jpg`. Not auto-filtered: a wrong guess about what's referenced breaks
+production, so pruning stays a deliberate manual step).
+
+---
+
 ## 2026-09-12 (double-checked offline VIDEO for real; closed a first-visit gap that left a cached video unreachable)
 
 `app.js`. User asked to double-check that video genuinely plays offline on mobile.
