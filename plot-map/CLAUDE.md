@@ -578,6 +578,28 @@ Top-down, by section header:
   a later visit instead of falsely declaring victory. Plot-level media
   (`getPlotMediaList`) is deliberately not walked — always meant to be external by design,
   same reasoning as the export-flagging feature.
+  **Registration is early, the BANNER is late — never re-fuse them** (2026-09-12, a real
+  bug with a nasty signature). `registerOfflineSupport()` runs at the TOP of `init()` so
+  the worker can cache boot fetches, and returns whether the worker became ready;
+  `offerOfflineSaveAfterBoot()` runs at the END of `init()` and is what actually shows the
+  banner. They were briefly fused (the banner was offered from inside
+  `registerOfflineSupport`), which meant the banner raced boot — and
+  `collectOfflineAssets()` reads `state.menuConfig`/landmarks/amenities/tours, none of
+  which exist that early. When the worker won the race, the banner offered a **19KB**
+  download (just the unconditional config files) instead of the real **230MB** one, and
+  tapping Add cached the config and nothing else: menu present offline, every video/image/
+  PDF behind it missing. It presented as "video and images randomly stopped working
+  offline," was intermittent (it depended on connection speed and whether the worker was
+  already installed), and looked nothing like a boot-order problem. If the offline
+  download ever reports an implausibly small size, check WHEN the banner ran, not what it
+  downloaded.
+  **The content caches are deliberately NOT version-namespaced** (`b91-data`, `b91-media`
+  — only `b91-shell-<VERSION>` is). `activate` deletes every cache outside the current
+  set, so while they were versioned, any `VERSION` bump wiped a visitor's entire ~200MB
+  download; the v7→v8 PDF bump did exactly that in production. `migrateLegacyContentCaches()`
+  folds any older `b91-data-v*`/`b91-media-v*` forward on activate, copying only complete
+  `200` entries so old corrupt partials are dropped rather than preserved. Don't "tidy" the
+  content caches back under `VERSION`.
   **`app.js`'s `SW_VERSION` constant must be bumped in lockstep with `sw.js`'s `VERSION`
   — a real bug found 2026-09-12, not just a theoretical risk.** `SW_VERSION` namespaces
   the banner's dismissal memory (`b91-offline-declined-${SW_VERSION}-<pid>` /

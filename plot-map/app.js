@@ -7830,7 +7830,24 @@ async function registerOfflineSupport() {
   } catch {
     // unsupported browser / insecure origin / activation timeout — app still works online, just not offline
   }
-  if (ready) await maybeOfferOfflineSave();  // the one combined "Add to Home Screen (+offline)" banner — see its own comment
+  return ready;
+}
+
+// Registration has to happen EARLY (so the worker can cache boot fetches — see init), but the
+// offline banner has to happen LATE, and the two were fused until 2026-09-12 with real
+// consequences. maybeOfferOfflineSave calls collectOfflineAssets(), which reads
+// state.menuConfig/landmarks/amenities/tours to decide what to download. Offering it the
+// moment registration finished meant racing boot: if the worker went active before the
+// project finished loading, the banner collected only the handful of config files that
+// collectOfflineAssets adds unconditionally and offered a ~19KB download instead of the real
+// ~213MB one. Tapping Add then cached the config and NOTHING else — so the menu worked
+// offline while every video, image and PDF behind it was missing, which is exactly the
+// "video and images stopped working offline" report that led here. Whoever wins that race is
+// down to connection speed and whether the worker was already installed, which is why it
+// looked intermittent. Registration is kicked off at the top of init and only awaited here,
+// at the end, so the banner always sees a fully loaded project.
+async function offerOfflineSaveAfterBoot(registration) {
+  try { if (await registration) await maybeOfferOfflineSave(); } catch {}
 }
 
 // ─── Add to Home Screen + save-for-offline (one combined prompt) ───────────
@@ -7974,23 +7991,66 @@ function isIosSafari() {
   return isIos && isSafari;   // iOS never fires beforeinstallprompt on ANY browser — Safari is the only one that even has a manual Share-sheet path
 }
 
+// How many of these assets aren't in any b91- cache yet. Asked of Cache Storage directly
+// rather than inferred from a localStorage "saved" flag, because the flag records only that a
+// download once FINISHED — not that the content is still there. Those diverge for real: a
+// browser can evict a non-persisted cache under storage pressure (iOS Safari also clears it
+// after ~7 days unopened), and until 2026-09-12 a service-worker VERSION bump deleted the
+// content caches outright. Either way the visitor was left with the flag set, the banner
+// therefore suppressed, and nothing actually cached — no way back to a working offline copy
+// short of clearing site data. Checking what's really stored is what makes that self-healing.
+async function countMissingOfflineAssets(items) {
+  if (!('caches' in window) || !items.length) return 0;
+  try {
+    const names = (await caches.keys()).filter((k) => k.startsWith('b91-'));
+    if (!names.length) return items.length;
+    const opened = await Promise.all(names.map((n) => caches.open(n)));
+    let missing = 0;
+    for (const it of items) {
+      // sw.js keys entries with the cache-busting query stripped (see its cacheKeyFor), so
+      // match on the bare URL or nothing would ever be found.
+      const u = new URL(it.url, location.href);
+      u.search = '';
+      const key = u.toString();
+      let found = false;
+      for (const c of opened) { if (await c.match(key)) { found = true; break; } }
+      if (!found) missing++;
+    }
+    return missing;
+  } catch { return 0; }   // can't tell — don't nag on the strength of a failed probe
+}
+
 async function maybeOfferOfflineSave() {
-  if (state.admin || !els.offlineSaveBanner || isStandaloneDisplay() || navigator.onLine === false) return;
+  if (state.admin || !els.offlineSaveBanner || navigator.onLine === false) return;
   const pid = state.projectId || 'default';
-  let skip = false;
-  try { skip = localStorage.getItem(`b91-offline-saved-${SW_VERSION}-${pid}`) === '1' || localStorage.getItem(`b91-offline-declined-${SW_VERSION}-${pid}`) === '1'; } catch {}
-  if (skip) return;
+  const standalone = isStandaloneDisplay();
+  let saved = false, declined = false;
+  try {
+    saved = localStorage.getItem(`b91-offline-saved-${SW_VERSION}-${pid}`) === '1';
+    declined = localStorage.getItem(`b91-offline-declined-${SW_VERSION}-${pid}`) === '1';
+  } catch {}
+  if (declined) return;   // they said no; respect it until the next SW version
 
   const assets = collectOfflineAssets();
   const iosManual = isIosSafari();
-  // Nothing this banner could actually do: no content worth caching, and no install path
-  // either (not a beforeinstallprompt browser, not iOS Safari's manual Share-sheet route).
-  if (!assets.length && !deferredInstallPrompt && !iosManual) return;
+  const missing = await countMissingOfflineAssets(assets);
+  // Everything's already downloaded: the banner has no content job left, so only show it if
+  // there's still an INSTALL worth offering (i.e. not already installed, and never saved).
+  if (missing === 0 && (saved || standalone)) return;
+  // Nothing this banner could actually do: no content to fetch, and no install path either
+  // (not a beforeinstallprompt browser, not iOS Safari's manual Share-sheet route, or already
+  // running installed).
+  if (!missing && !deferredInstallPrompt && !iosManual) return;
 
-  if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = 'Add to Home Screen';
+  // Already installed → "Add to Home Screen" is meaningless; this is purely a re-download.
+  // That case exists because content can go missing under an intact install (see
+  // countMissingOfflineAssets), and the home-screen icon is exactly where such a visitor
+  // lives — suppressing the banner there used to leave them with no route back at all.
+  if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = standalone ? 'Download for offline use' : 'Add to Home Screen';
   const sizeLabel = (bytes) => {
     const size = formatBytes(bytes);
     const base = assets.length ? (size ? `Includes offline access — approx. ${size}` : 'Includes offline access') : 'Opens instantly next time';
+    if (standalone) return size ? `Approx. ${size} · so it works with no signal` : 'So it works with no signal';
     return iosManual ? `${base} · tap Share → Add to Home Screen after` : base;
   };
   if (els.offlineSaveSize) els.offlineSaveSize.textContent = assets.length ? 'Checking size…' : sizeLabel(0);
@@ -8184,7 +8244,10 @@ function isStandaloneDisplay() {
     // Still no guarantee on a very first, very slow-network visit (installing the worker
     // competes for the same bandwidth), but every visit after the first is unaffected
     // either way, and this makes the FIRST one far more likely to succeed too.
-    registerOfflineSupport();
+    // NOT awaited here, and the offline BANNER deliberately isn't offered from inside it —
+    // that waits for the end of boot, once there's a loaded project to measure. See
+    // offerOfflineSaveAfterBoot.
+    const offlineRegistration = registerOfflineSupport();
     await loadGeometry();
     setBootProgress(3);
     // alignment precedence — client: committed file only. admin: freshest of the full
@@ -8311,6 +8374,7 @@ function isStandaloneDisplay() {
     if (autoOpenTarget && autoOpenTarget.kind === 'panotour') { fireAutoOpen(autoOpenTarget); hideBootCurtain(); }
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
     initProjectBar();                                    // header project switcher / manage menu
+    offerOfflineSaveAfterBoot(offlineRegistration);       // now that the project is loaded, there's something real to measure
     hideBootCurtain();                                    // safety net — idempotent, in case no branch above matched
   } catch (err) {
     console.error(err);

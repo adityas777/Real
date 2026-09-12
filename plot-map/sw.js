@@ -39,10 +39,29 @@
 // different-byte-range 206 responses for the same file kept overwriting each other under
 // one cache key — the brochure could never actually be reconstructed offline.
 const VERSION = 'v8';
+// Only the SHELL is version-namespaced. The shell is CODE (app.js/styles/vendor) — a new
+// deploy genuinely invalidates it, and it's ~2MB, cheap to re-fetch.
+//
+// DATA and MEDIA are deliberately NOT versioned, as of 2026-09-12, and this is load-bearing:
+// they hold the visitor's actual downloaded CONTENT (project images in data, video/audio/PDF
+// in media — together the whole ~200MB "Includes offline access" download). When these were
+// versioned, every VERSION bump deleted them via the activate sweep below, and a phone that
+// had downloaded everything for offline use silently lost ALL of it the next time it
+// connected — which is exactly what happened when v7→v8 shipped: "video and images worked
+// perfectly yesterday, now nothing plays offline." Un-versioning them means a caching-strategy
+// change costs a visitor the small shell re-fetch, never their content. That's safe because
+// these entries are plain complete 200 responses keyed by stable URL — always valid to serve
+// as an offline fallback regardless of which strategy stored them — and online visitors still
+// get fresh copies anyway (config is networkFirst, images are staleWhileRevalidate).
+// Corrupt-entry risk (the thing a bump WOULD have flushed) is handled directly instead: the
+// migration below refuses to carry over anything that isn't a complete 200.
 const SHELL_CACHE = `b91-shell-${VERSION}`;
-const DATA_CACHE = `b91-data-${VERSION}`;
-const MEDIA_CACHE = `b91-media-${VERSION}`;
+const DATA_CACHE = 'b91-data';
+const MEDIA_CACHE = 'b91-media';
 const ALL_CACHES = [SHELL_CACHE, DATA_CACHE, MEDIA_CACHE];
+// Versioned content caches written by any earlier build, to be folded into the un-versioned
+// ones on activate rather than deleted (see migrateLegacyContentCaches).
+const LEGACY_CONTENT_PREFIXES = ['b91-data-', 'b91-media-'];
 
 // The minimum needed to boot the client shell (pano engine + UI) with zero network.
 // Project data (alignment/plots/landmarks/amenities json+csv+svg), the pano/plan images,
@@ -67,11 +86,43 @@ self.addEventListener('install', (event) => {
   })());
 });
 
+// Fold any older VERSIONED data/media cache into its un-versioned replacement, so upgrading
+// to this build doesn't cost a visitor content they already downloaded. Entries are copied
+// one at a time and only when they're a COMPLETE 200 — a stored 206/partial is the corrupt
+// shape the old PDF bug produced, and carrying that forward would preserve the very thing a
+// version bump used to flush. Anything already present in the destination wins (it was
+// written by current code). The legacy cache is dropped once drained, so this runs once.
+async function migrateLegacyContentCaches(keys) {
+  const legacy = keys.filter((k) => LEGACY_CONTENT_PREFIXES.some((p) => k.startsWith(p)));
+  for (const name of legacy) {
+    try {
+      const dest = await caches.open(name.startsWith('b91-media-') ? MEDIA_CACHE : DATA_CACHE);
+      const src = await caches.open(name);
+      for (const req of await src.keys()) {
+        try {
+          if (await dest.match(req)) continue;
+          const res = await src.match(req);
+          if (res && res.status === 200 && !res.headers.get('Content-Range')) await dest.put(req, res);
+        } catch {}   // one unreadable entry must not abort the whole migration
+      }
+      await caches.delete(name);
+    } catch {}
+  }
+}
+
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => !ALL_CACHES.includes(k)).map((k) => caches.delete(k)));
+    // Claim first: migration below can take a while on a phone holding a few hundred MB, and
+    // there's no reason for the page to sit uncontrolled (falling through to the network for
+    // everything, caching nothing) while it runs.
     await self.clients.claim();
+    const keys = await caches.keys();
+    const isLegacyContent = (k) => LEGACY_CONTENT_PREFIXES.some((p) => k.startsWith(p));
+    // Superseded SHELL caches only — content caches are migrated, not dropped.
+    await Promise.all(keys
+      .filter((k) => !ALL_CACHES.includes(k) && !isLegacyContent(k))
+      .map((k) => caches.delete(k)));
+    await migrateLegacyContentCaches(keys);
   })());
 });
 

@@ -5,6 +5,63 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-12 (the real cause of "video and images stopped working offline": the offline download was racing boot and only saving ~19KB of config)
+
+`app.js`, `sw.js`. User report: "video and images worked perfectly well yesterday, and I
+don't know what you changed today with the PDF that everything else is not getting played
+in offline on mobile." Analyzed against yesterday's commit (`16ab80f`) before touching
+anything. Three separate faults, all introduced or exposed by today's earlier work:
+
+- **ROOT CAUSE — the offline download was collecting the wrong asset list.** Moving
+  `registerOfflineSupport()` to the top of `init()` (done earlier today, so the worker
+  could cache boot fetches) also moved the offline BANNER there, because the banner offer
+  was fused to the end of that same function. The banner calls `collectOfflineAssets()`,
+  which reads `state.menuConfig`/landmarks/amenities/tours to decide what to download —
+  none of which are loaded yet that early in boot. So when the worker won the race, the
+  banner collected only the handful of config files `collectOfflineAssets` adds
+  unconditionally and offered a **19KB** download instead of the real **230MB** one.
+  Tapping Add cached the config and nothing else: the menu worked offline while every
+  video, image and PDF behind it was missing — precisely the reported symptom. Whoever won
+  the race depended on connection speed and whether the worker was already installed,
+  which is why it looked intermittent rather than simply broken. **Fixed by splitting the
+  two concerns**: `registerOfflineSupport()` still starts at the top of `init()` and now
+  just returns whether the worker became ready; the new `offerOfflineSaveAfterBoot()` is
+  called at the END of `init()`, so the banner always measures a fully loaded project.
+  Verified in a real browser: the same eviction scenario that offered "approx. 19 KB"
+  before the fix offers "approx. 230 MB" after it.
+- **A VERSION bump used to destroy the visitor's entire download.** `DATA_CACHE` and
+  `MEDIA_CACHE` were version-namespaced, and `activate` deletes every cache not in the
+  current version's list — so bumping v7→v8 for the PDF fix silently wiped ~200MB of
+  already-downloaded content off every phone that had it, which is why "everything else"
+  broke and not just the PDF. **Both content caches are now un-versioned** (`b91-data`,
+  `b91-media`); only the SHELL stays versioned, since it's code and it's ~2MB to refetch.
+  A new `migrateLegacyContentCaches()` folds any pre-existing `b91-data-v*`/`b91-media-v*`
+  cache into the un-versioned one on activate — copying only complete `200` entries, so
+  the corrupt partial responses the old PDF bug produced are dropped rather than carried
+  forward — then deletes the drained legacy cache. Claim happens before migration so the
+  page isn't left uncontrolled while a few hundred MB is folded over.
+- **The banner could never re-offer once it had been dismissed or completed.** It skipped
+  itself whenever the `b91-offline-saved-*` flag was set, and bailed out entirely under
+  `isStandaloneDisplay()`. But that flag only records that a download once FINISHED — not
+  that the content is still there; caches get evicted under storage pressure (iOS Safari
+  also clears them after ~7 days unopened), and until today a version bump deleted them
+  outright. A visitor left with the flag set and an empty cache had no route back short of
+  clearing site data, and an INSTALLED visitor — opening from the home-screen icon, i.e.
+  the exact audience this feature exists for — had no route at all. Now
+  `countMissingOfflineAssets()` asks Cache Storage what is actually stored, the banner
+  re-offers whenever content is genuinely missing (installed or not), and in standalone it
+  presents as "Download for offline use · approx. N · so it works with no signal" instead
+  of a meaningless "Add to Home Screen". The declined flag is still respected.
+
+Verified end-to-end in real Chrome at phone viewport, with genuine `setOffline(true)`:
+full download → offline reload → video `readyState 4` / no error / 138.4s, brochure 4/4
+pages, gallery images all loaded; content survives a simulated version bump (legacy caches
+migrated, 38 entries intact, video still plays); banner re-offers after eviction and in
+standalone, and stays quiet once content is genuinely present. 15 ranged-cache unit tests,
+8 cache-survival assertions and 5 banner assertions all pass.
+
+---
+
 ## 2026-09-12 (offline banner permanently silenced by a stale SW_VERSION; separately, the working tree itself was found reverting on disk)
 
 `sw.js`, `app.js`, `CLAUDE.md`, `CHANGELOG.md`. User asked why the "Add to Home Screen /
