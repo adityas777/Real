@@ -1,6 +1,12 @@
 *.png
 *.jpg
 *.jpeg
+# Secrets — .env.local holds live API tokens (Instagram, LinkedIn) and AWS keys.
+# It was untracked but NOT ignored, so a single `git add -A` would have published them.
+.env.local
+.env
+
 # Build artefacts and downloaded tools — not source
 __pycache__/
 plot-map/cloudflared.exe
+plot-map/tools/

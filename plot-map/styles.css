@@ -67,13 +67,28 @@ html, body {
   align-items: center;
   justify-content: center;
   background: var(--bg);
+  background-size: cover;
+  background-position: center;
   transition: opacity 0.25s ease;
 }
 #bootCurtain.is-hidden {
   opacity: 0;
   pointer-events: none;
 }
+/* Admin-uploaded loading-screen image (2026-09-16) — applyBootImage() (app.js) sets
+   background-image + this class directly on #bootCurtain; plain background-color (above)
+   is the fallback when no image is set. The darkening overlay keeps the "Loading…" label
+   and progress bar readable over an arbitrary photo of unknown brightness/contrast.
+   `::before` rather than a real element so no index.html change was needed; `position:
+   absolute` takes it out of the flex layout so it doesn't disturb the centered label. */
+#bootCurtain.has-image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,.55));
+}
 .boot-curtain-label {
+  position: relative;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 1.5px;
@@ -83,11 +98,12 @@ html, body {
 /* Bottom-anchored loading bar — real byte progress of the pano + site-plan image fetches
    (the two big downloads boot actually waits on), see setBootProgress/fetchBlobWithProgress
    in app.js. Scoped to the FIRST boot only: hideBootCurtain hides this wrap permanently
-   after boot so a later tour-switch reuse of the same curtain (showBootCurtain) shows just
-   the plain label, not a stale "100%" bar. */
+   after boot so it doesn't linger as a stale "100%" bar if the curtain element is ever
+   reused for anything else in the future. */
 .boot-progress-wrap {
   position: absolute;
   left: 24px; right: 24px; bottom: 28px;
+  z-index: 1;
   display: flex; align-items: center; gap: 10px;
 }
 .boot-progress {
@@ -237,6 +253,28 @@ body {
 .proj-name-hint .is-bad { color: var(--reserved); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 auto; justify-content: center; }
+/* Client area-band dropdown. Hidden outright when the project defines no bands; `.is-hidden`
+   is the separate "not on the plot map" state it shares with the legend. */
+.area-filter-sel {
+  flex: none; max-width: 210px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.area-filter-sel:hover { border-color: var(--gold); }
+.area-filter-sel[hidden] { display: none; }
+.area-filter-sel.is-hidden { display: none; }
+/* The landscape twin sits in the floating control stack instead of the (collapsed) topbar.
+   Off by default — on desktop the topbar copy is the one in use — and switched on only
+   inside the landscape query below. That show-rule spells out :not([hidden]):not(.is-hidden)
+   deliberately: a bare `display:block` declared later would override both hidden states and
+   resurrect the dropdown on projects with no bands, or inside a tour. */
+.area-filter-sel.is-floating {
+  display: none;
+  max-width: 150px; font-size: 11px; padding: 4px 10px;
+  background: rgba(21, 23, 30, .82);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
 /* Available/Reserved/Sold describes PLOT status — hidden while the visitor is looking at
    LANDMARKS or a VIRTUAL TOUR instead of the plot map itself; see updateLegendVisibility. */
 .legend.is-hidden { display: none; }
@@ -537,8 +575,12 @@ body.is-admin .compass { display: none; }
   z-index: 14; pointer-events: none;
   filter: drop-shadow(0 4px 14px rgba(0,0,0,.5));
   border-radius: 50%;
-  backdrop-filter: blur(5px) saturate(140%);
-  -webkit-backdrop-filter: blur(5px) saturate(140%);
+  /* Lighter blur/saturation than before (2026-09-16, on request for more see-through) —
+     5px blur was heavy enough to noticeably flatten the pano detail behind the face even
+     at a low fill opacity; 3px keeps enough softness to hold the glass look without
+     obscuring what's behind it. */
+  backdrop-filter: blur(3px) saturate(125%);
+  -webkit-backdrop-filter: blur(3px) saturate(125%);
 }
 .compass-svg { width: 100%; height: 100%; overflow: visible; }
 /* Glassy nautical compass-rose: a translucent frosted face (backdrop-blurred so the pano
@@ -546,8 +588,8 @@ body.is-admin .compass { display: none; }
    fine red north needle, and semi-transparent bicolour points rather than flat black/white
    so it reads as light glass, not an opaque sticker. Label fill stays solid navy with a
    white halo for legibility — a fully transparent label would vanish over a bright sky. */
-.cp-face { fill: rgba(255,255,255,.16); }
-.cp-cone { fill: rgba(30,34,42,.20); }          /* the sweeping "shadow" that marks the view */
+.cp-face { fill: rgba(255,255,255,.09); }       /* lighter than the original .16 — more pano visible through the face */
+.cp-cone { fill: rgba(30,34,42,.12); }          /* the sweeping "shadow" that marks the view — lighter than the original .20 */
 .cp-ring { fill: none; stroke: rgba(255,255,255,.75); stroke-width: 1.5; filter: drop-shadow(0 0 2px rgba(255,255,255,.5)); }
 .cp-ring-2 { fill: none; stroke: rgba(255,255,255,.32); stroke-width: 1; }
 .cp-lt { fill: rgba(255,255,255,.92); }
@@ -563,7 +605,22 @@ body.is-admin .compass { display: none; }
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
-  body:not(.is-admin) .compass { width: 74px; height: 74px; top: 10px; right: 12px; }
+  /* 74px fixed was measured against a full-width viewport, which hid how big it actually
+     reads against a SHORT one — this project's own reference measurement for a real phone
+     in landscape is ~552x225 inner, where 74px is a full third of the available HEIGHT
+     (reported as "occupying too much space", 2026-09-16). `min(52px, 20vh)` caps it at
+     20% of viewport height on any landscape screen instead of a flat px value, so it
+     scales down further on an even shorter window rather than just being "smaller." The
+     inner SVG (needle/ring/labels) scales proportionally with the container automatically
+     — no separate sizing needed there. */
+  body:not(.is-admin) .compass { width: min(52px, 20vh); height: min(52px, 20vh); top: 8px; right: 10px; }
+  /* The topbar (and its area dropdown) is collapsed at this size, so the floating twin
+     takes over — see its base rule for why the :not() guards are spelled out. */
+  body:not(.is-admin) .area-filter-sel.is-floating:not([hidden]):not(.is-hidden) { display: block; }
+  /* NOTE: the tour minimap's phone sizing is NOT here — a media query adds no specificity,
+     and `.tour-map`'s base rules are declared much later in this file, so an override here
+     would silently lose to them (the trap this file has now hit five times). It lives in
+     its own media query immediately after that base block instead. */
 }
 
 /* Footer icons (fullscreen / sound) drawn as SVG rather than emoji: emoji render at the
@@ -1096,26 +1153,56 @@ body.is-admin .compass { display: none; }
      plain row would sit the name and tagline beside each other. This keeps the logo on the
      left spanning both text lines, which stack as they do in portrait. */
   .cat-drawer .cat-drawer-brand {
-    display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 9px;
-    padding: 0 2px 8px; margin-bottom: 8px;
+    display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 6px;
+    padding: 0 2px 6px; margin-bottom: 6px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
     text-align: left;
   }
   .cat-drawer .cat-drawer-logo { grid-row: 1 / span 2; }
-  .cat-drawer .cat-drawer-logo img { max-width: 40px; max-height: 30px; margin: 0; }
-  .cat-drawer .cat-drawer-name { font-size: 9.5px; letter-spacing: 1.6px; }
-  .cat-drawer .cat-drawer-tagline { font-size: 13px; letter-spacing: .6px; }
-  /* The desktop width bump (250 -> 282, for the roomier padding) is unwanted here: a
-     landscape phone is the one place horizontal space is scarcest, and 282 of 844 is a
-     third of the screen. `body:not(.is-admin)` for specificity, NOT a bare `.cat-drawer`
-     — the base rule is declared later in this file and a media query adds no specificity
-     of its own, so a bare selector would silently lose the cascade (same trap as the
-     brand rules above). */
-  body:not(.is-admin) .cat-drawer { width: min(250px, 78vw); }
-  .cat-drawer .cat-drawer-inner { padding: 12px 12px 10px; }
-  .cat-drawer .cat-nav { gap: 1px; margin-top: 2px; justify-content: flex-start; }
-  .cat-drawer .cat-btn { padding: 7px 10px; font-size: 12px; letter-spacing: .5px; }
-  .cat-drawer .cat-drawer-brand { margin-bottom: 8px; }
+  /* Sized up further (2026-09-16, on request, second pass — was 24x18, then 54x36) — when
+     a project has a logo, `.has-logo` hides the name/tagline text entirely (see the base
+     rule below), so the logo is the ONLY brand element on screen here; nothing else
+     competes for the space it takes. */
+  .cat-drawer .cat-drawer-logo img { max-width: 78px; max-height: 52px; margin: 0; }
+  /* Centered (2026-09-16, on request): the base rule's `grid-template-columns: auto 1fr`
+     pins the logo to the LEFT column with the (now-empty, text hidden) 1fr column eating
+     the rest of the row — the grid itself still spans the full width even with nothing
+     visible in that second track, so plain `justify-content:center` on the grid
+     wouldn't help. Switching to flex + justify-content:center for this state specifically
+     centers the one thing that's actually showing. */
+  .cat-drawer .cat-drawer-brand.has-logo { display: flex; justify-content: center; }
+  .cat-drawer .cat-drawer-name { font-size: 7px; letter-spacing: 1px; }
+  .cat-drawer .cat-drawer-tagline { font-size: 8.5px; letter-spacing: .3px; }
+  /* Narrowed from 250px (measured ~30% of an 844px landscape phone — a real reported
+     complaint, 2026-09-16) to a hard ≤15vw cap, since real phone visitors only ever see
+     THIS block (a portrait phone is blocked by #rotateHint until turned to landscape —
+     see the code map). `min(140px, 15vw)` never exceeds 15% of viewport width on any
+     landscape screen, only using the 140px ceiling to avoid being needlessly narrow on a
+     wide landscape tablet. Trade-off: a long title ("LOCATION INTELLIGENCE") now wraps to
+     2-3 lines instead of fitting one — inherent to fitting inside 15% of the width, not a
+     bug. `body:not(.is-admin)` for specificity, NOT a bare `.cat-drawer` — the base rule
+     is declared later in this file and a media query adds no specificity of its own, so a
+     bare selector would silently lose the cascade (same trap as the brand rules above). */
+  body:not(.is-admin) .cat-drawer { width: min(140px, 15vw); }
+  .cat-drawer .cat-drawer-inner { padding: 6px 5px 5px; }
+  /* Gap/padding widened (2026-09-16, on request) — 1px between rows + 4px padding was
+     tight enough to cause real mis-taps, adjacent rows practically touching. `.cat-nav`
+     is shared by the root menu, landmark categories, AND the tour/feature submenu (all
+     three render into it), so this one change covers "menu and submenu" together. Trades
+     a bit of the density this same block was tuned for a few messages back — genuinely
+     unsafe tap targets are the worse problem of the two. */
+  .cat-drawer .cat-nav { gap: 6px; margin-top: 2px; justify-content: flex-start; }
+  .cat-drawer .cat-btn { padding: 7px 6px; font-size: 9.5px; line-height: 1.2; letter-spacing: .2px; }
+  /* Same squeeze as the rows around it — at 140px wide the label has to give up its
+     tracking to stay on one line next to the checkbox. */
+  .cat-drawer .cat-keep { padding: 4px 6px 6px; font-size: 8px; letter-spacing: .3px; gap: 5px; }
+  .cat-drawer .cat-keep-box { width: 10px; height: 10px; }
+  .cat-drawer .cat-btn-arrow { font-size: 11px; }
+  .cat-drawer .cat-drawer-brand { margin-bottom: 6px; }
+  .cat-drawer .cat-drawer-head { padding-bottom: 6px; }
+  .cat-drawer .cat-back-btn { width: 22px; height: 22px; }
+  .cat-drawer .cat-back-btn svg { width: 12px; height: 12px; }
+  #catSubMenuTitle { font-size: 9.5px !important; }
 
   /* Landmark/amenity labels at full (desktop) size in the ONE mode phone visitors
      actually use — landscape; the portrait-scoped shrink further down in this file
@@ -1171,7 +1258,55 @@ body.is-admin .compass { display: none; }
 .ax-data-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text); cursor: pointer; }
 .ax-data-toggle input { accent-color: var(--gold); width: 14px; height: 14px; }
 .ax-data-body { display: grid; gap: 8px; }
-.ax-data-actions { display: flex; align-items: flex-start; gap: 8px; }
+/* ── Admin: area unit + size bands — floats over the Import & Trace stage, top-right ──
+   Lives here rather than in the Align sidebar (2026-09-18) because that column was already
+   crowded and this belongs beside the plot data it filters. Collapsible so it can be got
+   out of the way of the plan underneath. */
+.ax-area {
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  width: 252px; max-height: calc(100% - 20px);
+  display: flex; flex-direction: column;
+  background: rgba(16, 18, 24, .94); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  overflow: hidden;
+}
+.ax-area-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 11px; cursor: pointer; flex: none;
+  background: none; border: 0; width: 100%; text-align: left;
+  font: inherit; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--gold);
+}
+.ax-area-chev { transition: transform .18s ease; font-size: 10px; }
+.ax-area.is-collapsed .ax-area-chev { transform: rotate(-90deg); }
+.ax-area.is-collapsed .ax-area-body { display: none; }
+.ax-area-body {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 0 11px 11px; overflow-y: auto; min-height: 0;
+}
+/* Project area unit, in the Plot Data section. */
+.ax-unit-row { display: flex; align-items: center; gap: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-mute); }
+.ax-unit-row select {
+  flex: 1; min-width: 0; text-transform: none; letter-spacing: 0;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 7px; font: inherit; font-size: 12px;
+}
+.ax-area select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.ax-area-note { margin: 0; font-size: 10.5px; line-height: 1.4; color: var(--text-mute); }
+.ax-area-note.is-warn { color: var(--status-reserved, #e3b341); }
+.ax-area-list { display: flex; flex-direction: column; gap: 8px; }
+.ax-area-item { display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--bg); }
+.ax-area-row { display: flex; align-items: center; gap: 6px; }
+.ax-area-color { width: 26px; height: 26px; flex: none; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); cursor: pointer; }
+.ax-area-name { flex: 1; min-width: 0; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font: inherit; font-size: 12px; }
+.ax-area-range { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-mute); }
+.ax-area-num { width: 62px; flex: none; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font: inherit; font-size: 11px; }
+.ax-area-unit { flex: none; }
+.ax-area-count { margin-left: auto; flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-dim); }
+.ax-area-add { width: 100%; justify-content: center; font-size: 12px; }
+
+.ax-data-actions { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 .ax-data-actions .btn { padding: 5px 12px; font-size: 12px; flex: none; }
 .ax-data-note { flex: 1; font-size: 10.5px; line-height: 1.4; color: var(--text-mute); }
 .ax-data-note code { font-size: 10px; background: var(--panel-2); border-radius: 3px; padding: 0 3px; }
@@ -1189,8 +1324,19 @@ body.is-admin .compass { display: none; }
 .trace-hint { color: var(--text-dim); font-size: 12px; flex: 1; min-width: 0; }
 .trace-hint.is-warn { color: #e3b341; }
 .tracewin-actions { display: flex; align-items: center; gap: 8px; }
-.tracewin-body { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+/* Three columns: tools, the captured-plot list, then the stage. The list was moved out of
+   the tools sidebar (2026-09-18) because sharing that one scroll container left it a sliver
+   at the bottom — with a per-plot inline editor inside it, that was the hardest part of the
+   tracer to actually use. Its column clamps rather than being fixed so it gives back space
+   on a smaller screen; admin is desktop-oriented by design (see CLAUDE.md), so the stage
+   still gets the remainder. */
+.tracewin-body { flex: 1; display: grid; grid-template-columns: 280px clamp(230px, 22vw, 330px) 1fr; min-height: 0; }
 .trace-tools { border-right: 1px solid var(--line); background: var(--panel); padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.trace-plots {
+  border-right: 1px solid var(--line); background: var(--panel-2);
+  padding: 12px; display: flex; flex-direction: column; gap: 8px;
+  min-height: 0; overflow: hidden;      /* the LIST scrolls, not this column */
+}
 .trace-tools .ax-data { margin: 0; }
 .trace-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 10px; font-size: 12px; color: var(--text-dim); }
 .trace-row input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--gold); cursor: pointer; }
@@ -1202,15 +1348,31 @@ body.is-admin .compass { display: none; }
 .trace-dxflayer { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
 .trace-dxflayer[hidden] { display: none; }
 .trace-dxflayer select, .trace-status { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
-.trace-count { font-size: 11px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .6px; margin: 4px 0 0; }
-.trace-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; overflow-y: auto; }
+.trace-count { font-size: 11px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .6px; margin: 0; flex: none; }
+/* flex:1 + min-height:0 is what actually makes this scroll inside .trace-plots — a flex
+   item's default min-height:auto refuses to shrink below its content, so overflow-y alone
+   would just push the list past the column instead of scrolling it (the recurring trap
+   noted in CLAUDE.md). */
+.trace-list { list-style: none; margin: 0; padding: 0 2px 0 0; display: flex; flex-direction: column; gap: 5px; overflow-y: auto; flex: 1; min-height: 0; }
 .trace-li { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 5px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--bg); cursor: pointer; }
 .trace-li.is-sel { border-color: var(--gold); }
 .trace-id { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.trace-status-sheet-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--status-available, #34c77b); flex-shrink: 0;
+}
+.trace-status-sheet-dot[hidden] { display: none; }
 .trace-del { width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 15px; line-height: 1; }
 .trace-del:hover { color: #e3b341; border-color: #5a4a2a; }
 .trace-edit { grid-column: 1 / -1; display: grid; gap: 7px; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line); cursor: default; }
 .trace-field { display: grid; gap: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-mute); }
+.trace-field-label-row { display: flex; align-items: center; gap: 6px; }
+.trace-field-sheet-badge {
+  font-size: 8.5px; font-weight: 700; letter-spacing: .3px; text-transform: none;
+  color: var(--status-available, #34c77b);
+  background: rgba(52, 199, 123, 0.14);
+  border-radius: 4px; padding: 1px 5px;
+}
 .trace-field input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
 .trace-field input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
 .trace-media-box { display: grid; gap: 6px; background: var(--panel-2); padding: 8px; border-radius: 6px; border: 1px solid var(--line); margin-top: 4px; }
@@ -1342,6 +1504,7 @@ body.is-admin .cat-drawer { display: none !important; }
 .cat-drawer.is-collapsed .cat-drawer-inner { pointer-events: none !important; }
 .cat-drawer-inner {
   pointer-events: auto !important;
+  position: relative;   /* positioning context for the top-left BACK button below */
   width: 100%; height: 100%;
   /* Translucent, NOT frosted. The panorama is the product, so the panel is a tinted
      pane you read the scene through rather than a solid slab covering a third of it.
@@ -1369,9 +1532,13 @@ body.is-admin .cat-drawer { display: none !important; }
   padding: 34px 26px 24px;
   box-shadow: 10px 0 34px rgba(0, 0, 0, 0.45);
 }
+/* Back in normal flow (2026-09-16, third pass — see .cat-back-btn below for the full
+   history). A plain row above the nav list, sized to just the small round icon button
+   it holds — no border; the button now carries its own visible shape. */
 .cat-drawer-head {
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  padding-bottom: 10px;
 }
 
 /* Project branding at the top of the drawer. Shown on EVERY size since 2026-09-04, at the
@@ -1387,6 +1554,27 @@ body.is-admin .cat-drawer { display: none !important; }
   text-align: center;
   padding: 2px 0 0;
   margin-bottom: 26px;
+}
+/* BACK, unified across every size (2026-09-16, third pass): tried as a bordered row
+   below the brand on desktop, then a corner overlay first on the right, then the left —
+   both overlay attempts anchored to `.cat-drawer-inner` independent of the brand block's
+   own height, which drifted into the nav list below whenever that block was shorter than
+   expected (reported directly: BACK overlapping "ALL LANDMARKS"). Back to plain normal
+   flow — a small round icon button, just "‹" (no label; a plain arrow reads back fine on
+   its own, per request), sitting in `.cat-drawer-head` ABOVE the nav list exactly where
+   the DOM already puts it. Flow layout can't overlap what comes after it by construction,
+   which absolute positioning never actually guaranteed despite two tries. */
+/* The submenu title ("VIRTUAL TOUR" etc.) no longer shares its row with BACK on any
+   size now that BACK overlays the corner instead — override the inline max-width/
+   white-space/ellipsis from index.html (sized back when the two shared one row; only
+   `!important` can beat an inline `style=""` from an external stylesheet) so a long
+   title wraps onto its own line(s) across the row's full width instead of truncating
+   ("VIRTUAL TO…", reported as "alignment is off", 2026-09-16). */
+#catSubMenuTitle {
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
 }
 /* A logo image nearly always carries the company wordmark, so printing the name/tagline
    under it as well just repeats the same words — applyBrand() adds `has-logo` when an
@@ -1407,30 +1595,63 @@ body.is-admin .cat-drawer { display: none !important; }
   font-size: 17px; letter-spacing: 1.2px; color: #fff; line-height: 1.2;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
+/* A real button now, not a bare text link — floating unbordered text directly over a
+   live, unpredictable panorama read as barely-there; a small round pill gives it its own
+   visible shape regardless of what's behind it. An actual SVG chevron (matching the
+   gallery lightbox's own prev/next icons) rather than the text character "‹" (2026-09-17,
+   on request) — glyphs like that carry uneven built-in side-bearing that no amount of
+   flex-centering corrects, so it visibly sat off-centre in the circle; an SVG path has no
+   such bias and centers exactly. `stroke="currentColor"` follows the button's own
+   color/hover state automatically, no separate icon color to keep in sync. Icon-only (no
+   "BACK" label) so this stays this compact at every size rather than needing separate
+   mobile/desktop treatments — aria-label carries the "Back" name for screen readers. */
 .cat-back-btn {
-  background: transparent;
-  border: none;
-  color: #9ca3af;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 1px;
+  width: 26px; height: 26px;
+  flex-shrink: 0;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: #d1d5db;
   cursor: pointer;
-  padding: 4px 0;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: color 0.2s;
+  justify-content: center;
+  transition: color 0.2s, background-color 0.2s, border-color 0.2s;
 }
+.cat-back-btn svg { display: block; width: 14px; height: 14px; }
 .cat-back-btn:hover {
   color: #ffffff;
+  background: rgba(15, 23, 42, 0.75);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 .cat-menu-level {
+  position: relative;   /* positioning context for the "more below" fade hint below */
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 .cat-menu-level[hidden] { display: none; }
+/* "There's more to scroll" hint (2026-09-16, on request) — a bare `overflow-y:auto` gives
+   no signal that a list is cut off until a visitor happens to drag it, and mobile Safari/
+   Chrome's own scrollbar is an ephemeral overlay that only flashes during an active drag,
+   never sitting there as a standing cue. `.has-more-below` is toggled by JS
+   (updateNavScrollHint, app.js) from real scroll metrics — genuinely accurate, not a
+   static decoration that would keep showing even once actually at the bottom. Fades to
+   the drawer's own tint rather than a flat colour so it blends with the translucent panel
+   instead of reading as an opaque strip. `pointer-events:none` so it never intercepts a
+   tap meant for the row underneath it. */
+.cat-menu-level.has-more-below::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 26px;
+  background: linear-gradient(to bottom, rgba(16, 20, 29, 0), rgba(16, 20, 29, 0.82) 70%);
+  pointer-events: none;
+}
 .cat-nav {
   display: flex;
   flex-direction: column;
@@ -1453,6 +1674,36 @@ body.is-admin .cat-drawer { display: none !important; }
      in that case. A browser that doesn't know the keyword drops the declaration and gets
      flex-start too — top-aligned, never clipped, which is the right way to fail. */
   justify-content: safe center;
+}
+/* A visible scrollbar wherever client content can actually overflow (2026-09-16, on
+   request) — without this, a long menu/list relies on the platform's own default, which
+   on mobile Safari/Chrome is a thin overlay scrollbar that only flashes briefly on
+   scroll and gives no standing signal that there's more below the fold. Gold accent to
+   match the rest of the app; `scrollbar-width`/`scrollbar-color` cover Firefox, the
+   `::-webkit-scrollbar-*` pseudo-elements cover Chrome/Safari (the two don't overlap, so
+   both are needed — neither alone reaches every browser). `.cat-nav` is the menu drawer
+   itself (root menu, landmark categories, tour/room pickers all share it); the brochure
+   PDF viewer and the Contact card are the other two places client content can genuinely
+   run long enough to scroll. Deliberately NOT applied to the admin side — the desktop
+   browsers admin runs in already show a native scrollbar by default, and
+   `#adminMenuTreeContainer` already has its own matching thin gold scrollbar. */
+.cat-nav, .brochure-canvas, .contact-modal-right {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(250, 204, 21, 0.45) rgba(15, 23, 42, 0.35);
+}
+.cat-nav::-webkit-scrollbar, .brochure-canvas::-webkit-scrollbar, .contact-modal-right::-webkit-scrollbar {
+  width: 6px;
+}
+.cat-nav::-webkit-scrollbar-track, .brochure-canvas::-webkit-scrollbar-track, .contact-modal-right::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.35);
+  border-radius: 10px;
+}
+.cat-nav::-webkit-scrollbar-thumb, .brochure-canvas::-webkit-scrollbar-thumb, .contact-modal-right::-webkit-scrollbar-thumb {
+  background: rgba(250, 204, 21, 0.45);
+  border-radius: 10px;
+}
+.cat-nav::-webkit-scrollbar-thumb:hover, .brochure-canvas::-webkit-scrollbar-thumb:hover, .contact-modal-right::-webkit-scrollbar-thumb:hover {
+  background: rgba(250, 204, 21, 0.75);
 }
 .cat-btn-sub {
   display: flex;
@@ -1484,6 +1735,31 @@ body.is-admin .cat-drawer { display: none !important; }
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
+/* "Keep open" pin, prepended to any menu level holding 2+ rows (see addKeepMenuToggle).
+   Deliberately quieter than a .cat-btn — it's a preference about the menu, not an item in
+   it, so it must not read as another destination. */
+.cat-keep {
+  display: flex; align-items: center; gap: 7px;
+  background: none; border: 0; cursor: pointer;
+  padding: 6px 12px 8px; margin-bottom: 2px;
+  font: inherit; font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
+  color: rgba(229, 231, 235, .5);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .65);
+}
+.cat-keep:hover { color: rgba(255, 255, 255, .8); }
+.cat-keep-box {
+  width: 11px; height: 11px; flex: none; border-radius: 3px;
+  border: 1.5px solid currentColor; position: relative;
+}
+.cat-keep.is-on { color: var(--gold); }
+.cat-keep.is-on .cat-keep-box { background: var(--gold); border-color: var(--gold); }
+/* Tick drawn in the box only when on — a border-based check needs no extra element. */
+.cat-keep.is-on .cat-keep-box::after {
+  content: ''; position: absolute; left: 2.5px; top: 0px;
+  width: 3px; height: 6px; border: solid #111; border-width: 0 2px 2px 0;
+  transform: rotate(43deg);
+}
+.cat-keep-lbl { white-space: nowrap; }
 .cat-btn.is-active {
   background: #9ab33b; /* Vibrant lime-gold category highlight matching reference design */
   color: #111111;
@@ -1880,6 +2156,43 @@ body.is-admin .cat-drawer { display: none !important; }
 .gallery-lightbox-close:active {
   transform: scale(0.95) !important;
 }
+/* Same visual language as the close button, sitting just to its left. is-paused swaps
+   which of the two inline SVGs shows (2026-09-16). */
+.gallery-lightbox-autoplay {
+  position: absolute !important;
+  top: 16px !important;
+  right: 68px !important;
+  width: 44px !important;
+  height: 44px !important;
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: none !important;
+  border-radius: 2px !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  z-index: 20 !important;
+  pointer-events: auto !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+  transition: transform 0.15s ease, background-color 0.15s ease !important;
+}
+.gallery-lightbox-autoplay:hover {
+  background-color: #f1f5f9 !important;
+  transform: scale(1.06) !important;
+}
+.gallery-lightbox-autoplay:active {
+  transform: scale(0.95) !important;
+}
+/* Icon swap driven by a single `.is-paused` class on the BUTTON (toggled in JS via
+   classList, exactly like `.cat-drawer.is-collapsed`/`.cat-btn.is-active` elsewhere in
+   this file) rather than toggling `hidden` on the two icons individually — simpler, and
+   sidesteps the `[hidden]`-vs-later-rule specificity trap this project has hit four
+   times before (see CLAUDE.md's gotcha). Playing (default): pause icon shows. Paused:
+   play icon shows. */
+.gallery-autoplay-play { display: none; }
+.gallery-lightbox-autoplay.is-paused .gallery-autoplay-pause { display: none; }
+.gallery-lightbox-autoplay.is-paused .gallery-autoplay-play { display: block; }
 .gallery-lightbox-nav {
   position: absolute !important;
   top: 50% !important;
@@ -1964,6 +2277,12 @@ body.is-admin .cat-drawer { display: none !important; }
   .gallery-lightbox-close {
     top: 10px !important;
     right: 10px !important;
+    width: 38px !important;
+    height: 38px !important;
+  }
+  .gallery-lightbox-autoplay {
+    top: 10px !important;
+    right: 56px !important;
     width: 38px !important;
     height: 38px !important;
   }
@@ -2990,6 +3309,179 @@ body.is-admin .cat-drawer { display: none !important; }
 
 .tour-hs-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 
+/* ── Tour minimap (client) ────────────────────────────────────────────────────
+   The tour's isometric/floor-plan image with one dot per room, drawn BARE in the
+   top-right — deliberately NO panel, border, radius, backdrop-filter or background
+   (2026-09-17, from a reference screenshot: the first version wrapped it in a dark
+   rounded card, which reads as a UI widget bolted over the scene rather than part of
+   it). It takes the COMPASS's own slot — `body.tour-map-on` hides the compass for the
+   duration (see renderClientTourMap), so the two never fight for this corner.
+   The uploaded image is a PNG specifically so its transparent background lets the
+   panorama through here; see setTourMapFromFile. */
+.tour-map {
+  /* Flush to the extreme top-right corner (2026-09-17, from the reference screenshot) —
+     NOT inset by a margin. The render's own transparent border supplies the visual
+     breathing room, so an extra CSS offset just reads as a floating rectangle nudged
+     away from the edge, which is the look this is trying to avoid. */
+  position: absolute; top: 0; right: 0;
+  z-index: 14;
+  /* max-width, not width, so the box SHRINK-WRAPS the image. That matters because the
+     image is also height-capped below: with a fixed width the container would stay wide
+     while a tall/narrow map rendered narrower inside it, and the dots (positioned in % of
+     this box) would drift off the plan. */
+  max-width: min(380px, 34vw);
+  /* Shrink-to-fit resolves from the image's INTRINSIC width and can't see the max-height
+     cap below, so when height is the binding constraint this box stays wider than the
+     image inside it. Right-aligning the inline-block keeps the map hugging the screen
+     edge instead of drifting inward by the difference. */
+  text-align: right;
+  /* Transparent to drags, so panning the panorama still works across the map's area —
+     only the dots themselves take input. This ALSO matters for input routing: the dots
+     must stay hit-testable by document.elementFromPoint, which is how pick() finds them
+     (see the pointer-capture gotcha). */
+  pointer-events: none;
+}
+.tour-map[hidden] { display: none; }
+body.tour-map-on .compass { display: none; }
+/* inline-block so it shrink-wraps the image exactly; line-height:0 kills the inline
+   baseline gap that would otherwise make this box taller than the image and push every
+   dot's y% slightly off. */
+.tour-map-inner { position: relative; display: inline-block; line-height: 0; }
+/* The <img> defines the box the dots are positioned in, so it must keep its true aspect
+   ratio — a dot at 0.5/0.5 has to land exactly at the image's centre, with no letterbox
+   offset to correct for. Don't switch this to object-fit/cover. Sized by max-width AND
+   max-height (both intrinsic, width/height auto) so it fits whichever runs out first;
+   that's what keeps a tall map from eating the screen on a short landscape phone.
+   drop-shadow (not box-shadow) follows the PNG's alpha silhouette, so a transparent
+   render gets a shadow around the BUILDING rather than around an invisible rectangle. */
+.tour-map-inner img {
+  display: block; width: auto; height: auto;
+  max-width: 100%; max-height: 46vh;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, .55));
+}
+.tour-map-dots { position: absolute; inset: 0; }
+/* View cone ("radar") on the room the visitor is standing in, rotated live by
+   updateTourMapCone as they pan. A conic-gradient wedge on a circle, masked so it fades
+   out with distance instead of ending on a hard arc — `from -32deg` centres the ~64°
+   wedge on "up", so the element's own rotate(--rot) is the whole aiming story.
+   Sized in % of the map so it scales with it rather than being a fixed px blob on a
+   small phone map. */
+.tour-map-cone {
+  position: absolute; width: 22%; aspect-ratio: 1; pointer-events: none;
+  transform: translate(-50%, -50%) rotate(var(--rot, 0deg));
+  border-radius: 50%;
+  /* Black, not white (2026-09-17, on request) — it reads as a cast shadow over a bright
+     isometric render, which is what the reference does; white washed out against the
+     render's own light interiors. */
+  background: conic-gradient(from -32deg,
+    rgba(0, 0, 0, .58), rgba(0, 0, 0, .32) 26deg, rgba(0, 0, 0, 0) 64deg,
+    rgba(0, 0, 0, 0) 360deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
+  /* Deliberately NO transition on left/top (2026-09-17, on request): animating those made
+     the cone glide across the plan from the old room to the new one, which reads as the
+     visitor sliding through walls. It closes and reopens instead — the position change is
+     instant and this fade is restarted from updateTourMapActive on every room change. */
+  animation: tour-cone-in .18s ease-out;
+}
+@keyframes tour-cone-in { from { opacity: 0; } to { opacity: 1; } }
+.tour-map-cone[hidden] { display: none; }
+.tour-map-dot {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 14px; height: 14px; padding: 0;
+  border-radius: 50%; cursor: pointer;
+  pointer-events: auto;                  /* the one part of the map that takes input */
+  background: #2f7df6;
+  border: 2px solid rgba(255, 255, 255, .95);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .55);
+  transition: transform .15s ease, background-color .15s ease;
+}
+.tour-map-dot:hover { transform: translate(-50%, -50%) scale(1.25); }
+/* The room the visitor is actually standing in. */
+.tour-map-dot.is-here {
+  background: var(--gold, #d4af37);
+  box-shadow: 0 0 0 4px rgba(212, 175, 55, .32), 0 1px 6px rgba(0, 0, 0, .55);
+}
+/* Phone sizing — deliberately placed AFTER the base rules above, not up with the other
+   landscape overrides earlier in this file. A media query carries no extra specificity, so
+   an override declared before these single-class rules loses to them outright; that's
+   exactly what happened to the first attempt at this, leaving the map at its full desktop
+   size (~49% of a 390px-tall viewport) on a phone, which is what "takes a lot of space"
+   actually was. On a landscape phone the binding constraint is HEIGHT, not width, so both
+   are capped: the map can't exceed ~24% of the height or ~26% of the width, whatever
+   aspect ratio the uploaded image happens to be. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .tour-map { max-width: min(140px, 26vw); }
+  .tour-map-inner img { max-height: 24vh; }
+  .tour-map-dot { width: 10px; height: 10px; border-width: 1.5px; }
+}
+
+/* ── Tour map editor (admin modal) ── */
+.tourmap-modal-body { display: flex; gap: 14px; padding: 16px; background: var(--panel); align-items: flex-start; }
+.tourmap-stage { flex: 1 1 auto; min-width: 0; max-height: 62vh; overflow: auto; }
+.tourmap-canvas { position: relative; width: 100%; cursor: crosshair; user-select: none; }
+.tourmap-canvas img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.tourmap-editdots { position: absolute; inset: 0; }
+/* Editor preview of the same cone — faint for every room, brighter for the selected one,
+   so "which rooms are still aimed straight up (the default)" is visible at a glance. */
+.tourmap-cone {
+  position: absolute; width: 120px; aspect-ratio: 1; pointer-events: none;
+  transform: translate(-50%, -50%) rotate(var(--rot, 0deg));
+  border-radius: 50%; opacity: .45;
+  background: conic-gradient(from -32deg,
+    rgba(0, 0, 0, .58), rgba(0, 0, 0, .32) 26deg, rgba(0, 0, 0, 0) 64deg,
+    rgba(0, 0, 0, 0) 360deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
+}
+.tourmap-cone.is-armed { opacity: 1; }
+/* Drag handle that aims the selected room's cone. Parked at the cone's outer edge via a
+   rotate→translate pair, so it always sits in the direction the cone points — and never
+   overlaps the dot itself, which would make "move" and "aim" ambiguous. */
+.tourmap-rot {
+  position: absolute; width: 16px; height: 16px; margin: -8px;
+  transform: rotate(var(--rot, 0deg)) translateY(-52px);
+  border-radius: 50%; cursor: grab; z-index: 2;
+  background: var(--gold, #d4af37); border: 2px solid #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .6);
+}
+.tourmap-rot:active { cursor: grabbing; }
+.tourmap-dot {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 15px; height: 15px; border-radius: 50%;
+  background: #2f7df6; border: 2px solid #fff; cursor: grab;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .55);
+}
+.tourmap-dot.is-armed { background: var(--gold, #d4af37); }
+.tourmap-dot-lbl {
+  position: absolute; left: 50%; top: calc(100% + 4px); transform: translateX(-50%);
+  white-space: nowrap; font-size: 10px; font-weight: 700; letter-spacing: .3px;
+  color: #fff; background: rgba(12, 16, 24, .82); padding: 1px 6px; border-radius: 4px;
+  pointer-events: none;
+}
+.tourmap-side { flex: 0 0 240px; display: flex; flex-direction: column; gap: 8px; }
+.tourmap-side-h { margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-mute); }
+.tourmap-nodes { display: flex; flex-direction: column; gap: 5px; max-height: 56vh; overflow-y: auto; }
+.tourmap-noderow {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 7px 9px; border-radius: 7px;
+  border: 1px solid var(--line-soft); background: var(--bg);
+}
+.tourmap-noderow:hover { border-color: var(--line); }
+.tourmap-noderow.is-armed { border-color: var(--gold, #d4af37); background: rgba(212, 175, 55, .1); }
+.tourmap-noderow-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--line); }
+.tourmap-noderow.is-placed .tourmap-noderow-dot { background: #2f7df6; }
+.tourmap-noderow-name { flex: 1; min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tourmap-noderow-state { font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-mute); flex: none; }
+.tourmap-noderow.is-armed .tourmap-noderow-state { color: var(--gold, #d4af37); }
+
+/* ── Admin tour-map row (Tour tab) ── */
+.ax-tour-map { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.ax-tour-maprow { display: flex; align-items: center; gap: 8px; }
+.ax-tour-mapthumb { width: 46px; height: 32px; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); flex: none; }
+.ax-tour-mapmeta { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .4px; }
+.ax-tour-mapadd, .ax-tour-mapopen { width: 100%; justify-content: center; font-size: 12px; }
+
 /* A nav hotspot: a ring on the doorway it leads through + a label under it.
    pointer-events:auto so admin drags work; the client's TAP is routed through
    pick() instead, because #pano grabs pointer capture (same trap as am-pins). */
@@ -2999,21 +3491,65 @@ body.is-admin .cat-drawer { display: none !important; }
   background: none; border: 0; padding: 0; font: inherit; color: inherit;
   pointer-events: auto; cursor: pointer;
 }
-.tour-hs-ring {
-  width: 38px; height: 38px; border-radius: 50%;
-  border: 2px solid var(--gold); background: rgba(212,175,55,.16);
-  display: grid; place-items: center; color: var(--gold); font-size: 16px;
-  box-shadow: 0 2px 10px rgba(0,0,0,.5); backdrop-filter: blur(3px);
-  transition: transform .16s ease, background .16s ease;
+/* Marker icons (2026-09-18). The wrapper carries the aim + the floor tilt; the span inside
+   it carries the animation, so an arrow's bounce runs along the direction it points rather
+   than straight up the screen. Never put a transform on .tour-hs itself — renderTourHotspots
+   writes left/top there every frame. */
+.tour-hs-ico {
+  width: 46px; height: 46px; display: grid; place-items: center;
+  transform: rotate(var(--rot, 0deg));
+  transition: transform .16s ease;
 }
-.tour-hs:hover .tour-hs-ring,
-.tour-hs:focus-visible .tour-hs-ring { transform: scale(1.16); background: rgba(212,175,55,.34); }
+/* "Lying on the floor" arrows: a fixed perspective tilt, applied BEFORE the aim rotation so
+   the rotation happens within the tilted plane (i.e. the arrow spins on the ground rather
+   than cartwheeling toward the camera). A fixed tilt can't know where in frame the hotspot
+   sits, so one near the edge reads slightly less grounded than one dead centre — the
+   reference tour has exactly the same limitation and it holds up fine in practice. */
+.tour-hs.is-floor .tour-hs-ico {
+  width: 58px; height: 44px;
+  transform: perspective(160px) rotateX(46deg) rotate(var(--rot, 0deg));
+}
+.tour-hs-ico svg { width: 100%; height: 100%; overflow: visible; display: block; }
+/* Chevron/stairs: white strokes with a drop shadow, matching the reference's painted-on-
+   the-floor look. drop-shadow (not box-shadow) so it follows the stroke, not a box. */
+.tour-hs-ico svg path {
+  fill: none; stroke: #fff; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .65));
+}
+.tour-hs-ico svg .hs-ring { fill: rgba(12, 14, 20, .42); stroke: #fff; stroke-width: 2.4; }
+.tour-hs-ico svg rect { fill: none; stroke: #fff; stroke-width: 2.4; }
+.tour-hs-ico svg .hs-dot { fill: #fff; stroke: none; }
+.tour-hs-ico svg > * { filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .55)); }
+.tour-hs:hover .tour-hs-ico,
+.tour-hs:focus-visible .tour-hs-ico { transform: perspective(160px) rotateX(46deg) rotate(var(--rot, 0deg)) scale(1.14); }
+.tour-hs:not(.is-floor):hover .tour-hs-ico,
+.tour-hs:not(.is-floor):focus-visible .tour-hs-ico { transform: rotate(var(--rot, 0deg)) scale(1.14); }
+
+/* Idle motion — a nudge along the arrow's own axis, a soft pulse for the round markers.
+   Both are inside the rotated wrapper, so "up" here means "the way this icon points". */
+.tour-hs-ico-in { display: block; width: 100%; height: 100%; }
+.tour-hs--chevron .tour-hs-ico-in,
+.tour-hs--stairs .tour-hs-ico-in { animation: tour-hs-nudge 1.9s ease-in-out infinite; }
+.tour-hs--door .tour-hs-ico-in,
+.tour-hs--ring .tour-hs-ico-in { animation: tour-hs-pulse 2.4s ease-in-out infinite; }
+@keyframes tour-hs-nudge { 0%, 100% { transform: translateY(6%); } 50% { transform: translateY(-10%); } }
+@keyframes tour-hs-pulse { 0%, 100% { transform: scale(1); opacity: .92; } 50% { transform: scale(1.09); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .tour-hs-ico-in { animation: none !important; }
+}
 .tour-hs-lbl {
   font-size: 11px; letter-spacing: .03em; white-space: nowrap; color: #fff;
   background: rgba(12,12,14,.78); padding: 3px 9px; border-radius: 999px;
   box-shadow: 0 2px 8px rgba(0,0,0,.45);
 }
-.tour-hs.is-sel .tour-hs-ring { box-shadow: 0 0 0 3px var(--gold), 0 2px 10px rgba(0,0,0,.5); }
+/* Admin: which hotspot is currently selected for editing. Targets the icon wrapper (the
+   old .tour-hs-ring it used to mark was replaced by the icon set, 2026-09-18) and uses a
+   gold halo rather than a hard ring, so it reads the same on a floor-tilted arrow as on an
+   upright round marker. */
+.tour-hs.is-sel .tour-hs-ico {
+  outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 8px;
+  background: rgba(212, 175, 55, .18);
+}
 body.tour-open.is-admin .tour-hs { cursor: grab; }
 body.tour-open.is-admin .tour-hs:active { cursor: grabbing; }
 
@@ -3056,6 +3592,20 @@ body.tour-open .lm-overflow-hint { display: none !important; }
   margin-bottom: 8px;
 }
 .ax-tour-hsrow.is-sel { outline: 1px solid var(--gold); outline-offset: 2px; border-radius: 6px; }
+/* Marker + aim controls, on their own line because the row above is already four controls
+   wide in a sidebar this narrow. */
+.ax-tour-hsrow2 { display: flex; flex-direction: column; gap: 5px; margin: -4px 0 10px; }
+.ax-tour-hsico { width: 100%; min-width: 0; }
+.ax-tour-hsaim { display: flex; align-items: center; gap: 4px; }
+.ax-tour-hsdir {
+  width: 22px; height: 22px; flex: none; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 5px;
+  background: var(--panel-2); color: var(--text-dim); font-size: 11px; line-height: 1;
+}
+.ax-tour-hsdir:hover { border-color: var(--gold); color: var(--text); }
+.ax-tour-hsdir.is-on { background: var(--gold); border-color: var(--gold); color: #111; font-weight: 700; }
+.ax-tour-hsrot { flex: 1; min-width: 0; accent-color: var(--gold); }
+.ax-tour-hsdeg { flex: none; width: 30px; text-align: right; font-size: 10px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
 .ax-tour-hslabel { grid-area: label; min-width: 0; }
 .ax-tour-hsarrow { grid-area: arrow; color: rgba(255,255,255,.4); font-size: 12px; }
 .ax-tour-hsto { grid-area: select; min-width: 0; width: 100%; }

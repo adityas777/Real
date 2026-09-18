@@ -5,6 +5,1134 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-18 ("Keep open" toggle in every menu level that holds a choice)
+
+On request: a small toggle controlling whether picking an item auto-collapses the drawer,
+offered in any menu/submenu with multiple items — the auto-collapse only gets in the way
+when you're comparing several items in a row.
+
+`addKeepMenuToggle(container, itemCount)` prepends the control when a level has 2+ rows,
+wired into all three render paths (root `#catNavL1`, the landmark category picker `#catNav`,
+and the generic submenu). `collapseClientDrawer` returns early when the pref is set, so
+every existing call site inherits it without touching any of them.
+
+**One shared preference, not one per menu.** A visitor pinning the menu open in the landmark
+picker means "stop closing on me", not "stop closing in this list only" — per-level state
+would have them re-pinning it at every level. Persisted in `localStorage`
+(`b91-keep-menu-open`) like the other client toggles; default off, so existing behaviour is
+unchanged until someone opts in.
+
+**Toggling syncs the other copies in place rather than re-rendering** (`syncKeepMenuToggles`)
+— `renderClientSidebar`'s root branch hides `#catLevel2`, so re-rendering from the toggle
+would have slammed the landmark picker shut the moment anyone used it from inside there.
+Styled deliberately quieter than a `.cat-btn`: it's a preference *about* the menu, not a
+destination *in* it, and at the 140px mobile drawer width it shrinks its own tracking to
+stay on one line. Verified in Node: the pref gates `collapseClientDrawer` both ways, the
+toggle is withheld at 1 row and added at 3, and a null container is a no-op.
+Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-18 (Client: idle auto-pan holds still while the cursor is on a plot)
+
+On request. The camera's idle drift kept turning while a visitor hovered a plot to read its
+tooltip, sliding the thing they were reading out from under them.
+
+`renderLoop`'s idle branch gained `!state.hoverId` (the hovered-plot id the raycast already
+tracks). Deliberately the hover STATE rather than bumping `state.lastUserTouch` on hover
+events: a pointer resting motionless on a plot stops producing events, so the 2.2s idle
+timer would expire and the drift would resume mid-read. Gating on the state holds the camera
+for exactly as long as the cursor is actually on a plot, and leaving it resumes on the usual
+idle delay. Verified by exercising the real gate expression across the states that matter —
+idle/nothing hovered pans; cursor resting on a plot doesn't; leaving resumes; and auto-pan
+off, admin view and the idle-delay window are all unaffected. Files: `app.js`.
+
+---
+
+## 2026-09-18 (Fix: hovering un-dimmed plots that an area band had filtered out)
+
+Reported: with a band selected the highlight looked right, but moving the cursor across the
+map "started enabling the colour" of plots outside the band — and they stayed that way, so
+the filter visibly eroded as you moved around.
+
+Cause: three styling paths each re-derived "normal" as the status colour at
+`state.overlayOpacity`, with no idea a band was active. `setEmphasis` brightened on hover
+and then reset to FULL opacity on the way out (the erosion), and `restorePlotStyle`
+(deselect) did the same. Only `colorPlots` knew about dimming, and it only runs when the
+data or filter changes.
+
+Introduced one source of truth — `plotBaseStyle(id, status)` returns a plot's resting look
+(status colour normally, band colour when it's in the band, faded when a band is active and
+it isn't) with `paintPlot` applying it. `colorPlots`, `restorePlotStyle` and `setEmphasis`'s
+hover-off all go through it, and `setEmphasis` now skips the brighten entirely for a
+filtered-out plot. **Anything that restores a plot's appearance must ask `plotBaseStyle`
+rather than assuming `overlayOpacity` + status colour** — that assumption is exactly what
+broke here.
+
+Verified in Node against the real functions: with a 1000–1200 band, an in-band plot paints
+the band colour and an out-of-band plot paints dimmed; hovering the out-of-band plot leaves
+it dimmed both during and after; the in-band plot still brightens on hover and returns to
+the band colour (not its status colour); and with no band active hover behaves exactly as
+before. Files: `app.js`.
+
+---
+
+## 2026-09-18 (Fix: admin plot edits were silently discarded when a Google Sheet was on)
+
+Reported as "changes to plot size in the admin aren't reaching the client". They weren't —
+and it was worse than not reaching it: **they were being destroyed at save time.**
+
+Two independent mechanisms, both from `data.source === 'sheet'`:
+1. **`exportSite` rebuilt `plots.csv` from a fresh sheet snapshot** whenever a sheet was
+   configured, throwing away `state.rows` — so editing a size and hitting Save wrote the
+   *sheet's* value over it.
+2. **`loadData` replaced `state.rows` with the sheet wholesale**, so even a correct
+   `plots.csv` would have been ignored on the client. Plots with no row in the sheet (9 of
+   this project's 18) got no status/size/price at all and rendered as unknown.
+
+New rule, per the request — sheet for bulk data, **admin edits are the truth**:
+- `loadData` precedence is now committed `plots.csv` (base: covers every plot, including
+  ones the sheet omits) < **live sheet** (bulk, always current) < **`state.plotOverrides`**
+  (the admin's own edits).
+- `exportSite` writes `plots.csv` from `state.rows` again. It still re-fetches the sheet,
+  but only to compute WHICH fields differ from it (`computePlotOverrides`) — those are
+  stored in `alignment.json` as `plotOverrides` and re-applied on every load.
+
+Deriving overrides by **diffing at save time** rather than tracking keystrokes falls out of
+how the data already flows: the admin's rows were seeded from the sheet, so anything no
+longer matching it is by definition an edit. It's therefore self-cleaning — set a value back
+to what the sheet says and the override vanishes — and it survives later sheet edits, unlike
+a one-time snapshot. Blanks are never recorded, since `""` can't be distinguished from
+"never filled in" and would let an empty admin field permanently mask a real sheet value.
+Stored in `alignment.json` rather than a new file specifically to avoid adding a sixth entry
+to the five separate places project data files are enumerated (save list, `loadProjectFile`,
+`BUNDLE_DATA_FILES`, offline collector, warm cache) — each one a documented
+silently-dropped trap. `parseAlignment` whitelists the fields per plot so a round-tripped
+file can't inject arbitrary keys into a row.
+
+Verified with a Node run of the real `computePlotOverrides`/`applyPlotOverrides`: only the
+changed fields are recorded (not whole rows), a client starting from the sheet ends up with
+the admin's size and status, fields the admin never touched still come from the sheet, a
+plot absent from the sheet keeps its admin data, reverting a value to the sheet's clears the
+override, and blanks are never recorded. Files: `app.js`.
+
+---
+
+## 2026-09-18 (Trace editor: plot list gets its own column; two help texts removed)
+
+**Plot list moved out of the tools sidebar.** It sat at the bottom of `.trace-tools`,
+below the mode buttons, sliders and the whole Plot Data block, sharing that column's single
+scroll container — so it rendered as a sliver, and since each row expands into an inline
+editor (status, price, area, media), editing a plot meant scrolling the entire sidebar to
+reach it. `.tracewin-body` is now a three-column grid — tools, plots, stage — with the list
+in its own full-height `.trace-plots` column immediately right of the sidebar. Its column
+uses `clamp(230px, 22vw, 330px)` rather than a fixed width so it gives space back on a
+smaller screen; the stage keeps the remainder. `.trace-list` gained `flex: 1; min-height: 0`
+— without the `min-height` its `overflow-y` would silently do nothing and the list would
+push past the column instead of scrolling (the flex-child trap CLAUDE.md documents).
+
+**Two standing help texts removed** from the Plot Data block, both on request: the area-unit
+explainer added earlier the same day, and the "sheet must be public / header row must
+match plots.csv…" paragraph. `#axSheetMsg` is **kept as an empty span** — `setSheetMsg()`
+writes Test results and errors into it, so deleting the element would have broken the Test
+button's feedback; only its static prose is gone. The same guidance remains reachable
+through the **Download sample sheet** button sitting right next to it.
+Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-18 (Area unit moved into Plot Data, and now normalises every plot's area)
+
+On request, and it resolves the caveat the original area-filter work shipped with. The
+unit was in the Area-filters panel and was a pure display label, because each plot's area
+is free text carrying its own unit ("1200 sq.ft") and there was no project-wide statement
+of what unit the data is in.
+
+Declaring it **on the plot data** removes that ambiguity: the unit now sits in the Plot
+Data section and means "every plot's area is expressed in this". So changing it does
+something real — `applyAreaUnitToPlots` rewrites each plot's Area text to the new unit,
+across both `state.rows` (the committed data) and, when the tracer is open, its live
+`trace.plots` copy. That second half matters: this control lives *inside* Import & Trace,
+so the tracer is open by definition, and updating only `state.rows` would look like the
+edit did nothing and then be overwritten by the next commit.
+
+**It relabels; it does not convert.** `1200 sq.ft` becomes `1200 sq.m`, not `111.48 sq.m`.
+Rewriting figures the admin typed is a far bigger and less reversible action than
+restating which unit they were always in — and in practice a project's plots are entered
+in one unit, so switching reads as "I mis-stated the unit", not "convert my measurements".
+The admin note under the picker says exactly this rather than leaving it to be discovered.
+
+Verified with a Node run of the real `applyAreaUnitToPlots` over every data shape in play:
+`"1200 sq.ft"` → `"1200 sq.m"`, `"1,500 sq ft"` → `"1500 sq.m"` (comma stripped), a bare
+`"2000"` gains the unit, blank and unparseable (`"N/A"`) values are left untouched, the
+tracer's copy is rewritten and refreshed alongside the committed rows, and switching a
+second time replaces the unit rather than stacking it. Files: `index.html`, `app.js`,
+`styles.css`.
+
+---
+
+## 2026-09-18 (Legend: "Unknown" chip removed, Filter dropdown takes its slot)
+
+On request. `renderLegend` no longer emits a chip for `unknown` at all (it previously
+appeared whenever any plot had no readable status), and the area Filter dropdown is
+adopted into `#legend` as its last item so it sits directly after **Sold** — the position
+Unknown used to hold — rather than being pushed to the far edge of the header.
+
+**`unknown` remains a real internal status**: a plot with no status data still renders grey
+and stays visible, and it's still in `STATUS_ORDER`/`state.activeFilters` and the admin's
+per-plot status picker. Only the client-facing chip is gone — it's an artefact of missing
+data, not a category a visitor meaningfully filters by. Dropping it from `STATUS_ORDER`
+instead would have made those plots disappear from the map entirely, which is not what was
+asked for.
+
+The dropdown is **moved, not recreated** (`appendChild` relocates the live element, so its
+change listener and current selection survive), which means the adoption has to repeat on
+every legend rebuild — `renderLegend` clears its own children first. Verified with a
+stub-DOM run of the real `renderLegend`: only available/reserved/sold chips render even
+when `counts.unknown` is non-zero, the dropdown lands last, and it's still last after a
+re-render. Files: `index.html`, `app.js`.
+
+---
+
+## 2026-09-18 (Area filters moved into Import & Trace, as a collapsible corner panel)
+
+Follow-up to the entry below: the admin panel shipped in the Align tab, which is already a
+crowded column, and it sat far from the plot data it actually filters. Moved into the
+**Import & Trace** window, floating over the top-right of the stage just under the
+toolbar — where the admin is already looking at the plots whose sizes these bands slice up.
+
+`index.html`: the `.ax-area` block moved out of `#axTabAlign` into `#traceStage` (which is
+already `position: relative`, so no layout groundwork needed), gaining a header button that
+collapses it so it never permanently covers the plan. `styles.css`: restyled from a stacked
+sidebar section into an absolutely-positioned translucent panel with its own scroll area.
+`app.js`: only the collapse wiring is new — every element id is unchanged, so the editor
+logic is untouched. Added `refreshAreaAdminUI()` calls in `openTrace` and `finishTrace`,
+because the panel's "N plots" / "readable on N of M" counts read `state.geom`/`state.rows`,
+and those move exactly when plots are traced or committed — without it the counts would
+show whatever was true at admin boot.
+
+Panel events can't reach the trace canvas (it's a sibling, and the canvas's pointer handler
+is bound to the canvas itself), so clicking in the panel can't start drawing a plot.
+Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-18 (Area filters: admin-defined size bands + client "Filter" dropdown)
+
+On request. Admin sets an area unit and defines named size bands (min/max + colour); the
+client gets a Filter dropdown that recolours the plots inside the chosen band.
+
+**The obstacle, checked before designing anything:** `plots.csv` stores area as free text
+(`size` = `"1200 sq.ft"` — number and unit in one string), so there was nothing numeric to
+compare a range against. `plotAreaValue(row)` resolves it: an explicit numeric `area`
+column wins where a project has one, otherwise the leading number is parsed out of `size`
+(commas stripped). **This is also why the unit dropdown is a LABEL, not a converter** —
+each row carries its own unit inside that text, so converting would be guesswork; the
+admin's min/max are simply read in whatever unit the data already uses, and the picker
+says so.
+
+Because a band that matches nothing looks identical to one configured wrongly, the admin
+panel is explicit about it: a per-project readout ("Area readable on 6 of 6 plots", amber
+when some can't be read) plus a live "N plots" count on every band as its range is typed.
+
+Data: `alignment.json` gains `area: { unit, filters:[{id,name,color,min?,max?}] }`
+(`areaData`/`parseAreaConfig`, restored at boot next to the sheet config). **Omitted
+entirely when a project has no bands and the default unit**, so every other project's
+alignment.json is byte-identical through a save. A blank min or max round-trips as `null`
+("open-ended"), deliberately not `0` — otherwise "up to 1200" would silently become
+"exactly 0 to 1200" and match almost nothing.
+
+Client: `colorPlots` gained the band pass — matching plots take the band's colour,
+non-matching are **dimmed to ~22% rather than hidden**, so the layout still reads as a whole
+and you can see where the matches sit in it. Status filters still apply on top (a plot must
+pass both), since "Type 1 AND available" is the actual question. The dropdown is rendered
+twice from one list (`renderAreaFilterUI`) — the topbar copy plus a floating twin in
+`.zoom-controls`, because **the whole topbar is collapsed on a landscape phone** and the
+filter would otherwise be desktop-only; the twin's show-rule spells out
+`:not([hidden]):not(.is-hidden)` so a later `display:block` can't resurrect it on projects
+with no bands or inside a tour (the specificity trap this file keeps hitting). Both follow
+`updateLegendVisibility`, so the filter disappears off the plot map exactly like the legend.
+
+Verified via `node --check`, a CSS brace-balance check, an id-existence check, and Node
+tests driving the real `plotAreaValue`/`plotMatchesAreaFilter`/`areaData`/`parseAreaConfig`:
+parsing across `"1200 sq.ft"` / `"1,500 sq ft"` / `"2000"` / `"1500.5 sq.m"` / blank / `"N/A"`,
+explicit-column override, inclusive boundaries, open-ended bands in both directions,
+unreadable area never matching, untouched projects emitting no key, round-trip stability,
+junk colour fallback and blank-stays-null. Also replayed against the project's real
+`plots.csv` (6 plots, all readable at 1200). The visuals need a real browser.
+Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-18 (Tour hotspots: pickable icon set, aimable arrows, idle animation)
+
+On request, from reference crops of a 3DVista tour (a floor-painted "^" arrow labelled
+Reception; a circled door glyph labelled Kitchen). Hotspots were a single fixed gold ring
+with a `↗` glyph in it.
+
+**Per-hotspot, not per-node** — a room can have several exits and each wants its own
+marker, so the controls live in the existing "HOTSPOTS IN <room>" panel.
+
+`app.js`: new `TOUR_HS_ICONS` map (`chevron`, `stairs`, `door`, `ring`) following the
+`AM_ICONS`/`LM_ICONS` pattern, but **SVG rather than emoji** — these have to be rotatable
+and animated, neither of which a platform-font glyph can do. Each entry declares
+`rotatable` (gates the aim control; a rotated door just looks broken) and `floor` (whether
+it reads as painted on the ground). Links gained **`icon`** and **`rot`**, threaded through
+all three serialisation paths — `parseTours` (validates the icon against the whitelist,
+normalises the angle into 0..359), `buildToursData`, **and `buildSession`**, which rebuilds
+links field-by-field and would otherwise silently drop both on every autosave (the same
+whitelist trap `cleanNodeForSave` is documented for). Links written before this default to
+`chevron` at 0°, which is why the project's 17 existing hotspots change appearance without
+any data migration — an un-aimed arrow pointing "up" already reads as "through here".
+
+Admin: each hotspot row gained a second line with an icon `<select>` plus, for aimable
+icons, four cardinal preset buttons (↑ → ↓ ←) and a fine slider with a degree readout.
+The slider writes the CSS var on the live marker directly while dragging (rather than
+rebuilding the hotspot DOM per input event) so aiming feels continuous. `tourHsDom` entries
+now carry the `idx` its own declaration comment already claimed, which is what makes that
+live lookup possible.
+
+`styles.css`: the aim rotation and the floor tilt ride on a `.tour-hs-ico` wrapper and the
+animation on a `.tour-hs-ico-in` inside it — **never on `.tour-hs` itself, which
+`renderTourHotspots` writes `left`/`top` to every frame**. Because the animation sits inside
+the rotated wrapper, an arrow's nudge runs along the direction it points rather than up the
+screen. Floor icons get `perspective(160px) rotateX(46deg)` applied *before* the aim
+rotation, so aiming spins them on the ground instead of cartwheeling them toward the camera.
+Round markers pulse instead of nudging; both honour `prefers-reduced-motion`. The admin
+"selected hotspot" highlight was retargeted from the removed `.tour-hs-ring` to the new
+wrapper. Known trade-off, shared with the reference: a fixed tilt can't account for where in
+frame a hotspot sits, so one near the edge reads slightly less grounded than one dead centre.
+
+Verified via `node --check`, a CSS brace-balance check, a stale-selector sweep for the
+removed ring, an icon/CSS/SVG consistency check (every icon key has a matching rule, every
+SVG's tags balance, the order list covers the map), and a round-trip test driving the real
+`parseTours`/`buildToursData`: legacy links default to chevron/0°, an authored icon+angle
+survives save→load, and junk input falls back safely (`icon:'banana'` → chevron, `rot:-90`
+→ 270). The look itself needs a real browser. Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Tour minimap: actually responsive on phones — the override was dead CSS)
+
+Reported as "takes a lot of space" on mobile. The map did have a phone rule from the day it
+shipped — it just **never applied**: it sat in the landscape media query at line ~599, while
+`.tour-map`'s own base rules are declared at ~3200. **A media query adds no specificity**, so
+between two equal single-class selectors the LATER one wins, and the base desktop size won
+outright. Phones were rendering the map at `min(380px, 34vw)` — ~287px wide and ~191px tall
+on an 844×390 screen, **about half the viewport height**. That's the fifth time this exact
+trap has hit this file (see the gotcha entry in CLAUDE.md).
+
+Fixed by moving the phone rules into their own media query placed immediately AFTER the
+base block, with a note left at the old location explaining why they're not there.
+
+Also made the sizing genuinely responsive rather than width-only: on a landscape phone the
+binding constraint is HEIGHT, so the image is now capped by **both** `max-width` and
+`max-height` (`24vh` phone / `46vh` elsewhere) with `width/height: auto`, so it fits
+whichever runs out first regardless of the uploaded image's aspect ratio. That required two
+supporting changes to keep the dots aligned, since dots are positioned in % of their
+container: `.tour-map` switched from `width` to `max-width` and `.tour-map-inner` to an
+`inline-block` (`line-height: 0`) so the box shrink-wraps the rendered image instead of
+staying at the full width while a height-capped image renders narrower inside it; plus
+`text-align: right` on `.tour-map`, because shrink-to-fit resolves from the image's
+intrinsic width and can't see the max-height cap, which would otherwise let the map drift
+inward from the screen edge.
+
+Measured across real viewports (with the project's actual 1600×1066 map): phone landscape
+now 16–20% of width and exactly 24% of height at 844×390, 667×375 and 740×320; desktop
+unchanged at ~380px. A square map on a phone correctly becomes height-bound at 24% and the
+container shrink-wraps to it. Files: `styles.css`.
+
+---
+
+## 2026-09-17 (Tour minimap: cone no longer glides between rooms)
+
+Reported: switching rooms made the cone travel across the plan from the old dot to the new
+one — it read as the visitor sliding through walls. Cause was a `transition: left, top` on
+`.tour-map-cone` (added with the cone itself, on the assumption a smooth move would look
+better; it doesn't, because the two dots aren't connected by anything walkable).
+
+Removed that transition so the position change is instant, and replaced it with a short
+`tour-cone-in` fade that `updateTourMapActive` **restarts** on every room change (clear
+`animation`, force a reflow, hand it back — the element is reused rather than recreated, so
+the animation won't re-fire on its own). Net effect is the requested "closes and reopens on
+the next dot". Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Tour minimap: view cone recoloured black)
+
+On request: the cone shipped white and washed out against the isometric render's own
+bright interiors. Both cone rules (`.tour-map-cone` client, `.tourmap-cone` admin preview)
+now use black at the same alpha ramp, so it reads as a cast shadow over the plan — which is
+what the reference does. Files: `styles.css`.
+
+---
+
+## 2026-09-17 (Tour minimap: live view cone / "radar" on the room you're standing in)
+
+On request, from a reference crop: the active room's dot now carries a translucent view
+cone that rotates live as the visitor pans, so the map shows not just *where* they are but
+*which way they're facing*.
+
+**Anchored to the MAP, not to real-world north — a deliberate call made from the data.**
+The obvious route was the existing per-room compass calibration (`defaultView.facingDir` →
+`state.northDeg`, which `updateCompass` already turns into a heading). Checked first:
+**all 9 rooms of the only tour with a map (anandman MODERN VILLA) have `facingDir: null`**,
+and calibration is optional by design, so that route would have aimed every cone
+arbitrarily unless the admin first went and set a compass direction per room by eye. So
+each dot instead stores its own **`rot`** — the on-map direction (degrees clockwise from
+"up") the camera faces *at that room's saved start view*. Live angle is
+`rot - (currentLon - defaultView.lon)`; the minus sign is the camera-yaw convention (same
+`-view.lon` `updateCompass` uses — see the two-lon-conventions note), so the cone and the
+compass always turn together. Independent of `northDeg`, so it stays correct whether or not
+the compass is ever calibrated.
+
+`app.js`: `rot` added to the map points (parse/build/session, normalised into 0..359,
+defaulting to 0 so the 9 already-placed dots keep working and simply point "up" until
+aimed); `updateTourMapCone()` called every frame from `renderLoop` **right after
+`updateCompass()`** — it tracks a free-panning camera for exactly the same reason;
+`updateTourMapActive()` parks the single cone element on whichever dot is current.
+Admin: every dot previews its cone in the map editor (faint; bright for the selected room)
+so "which rooms are still at the default 0°" is visible at a glance, and the selected room
+gets a gold **drag handle** parked at the cone's outer edge — dragging it aims the cone
+(`atan2` bearing from the dot), with a live degree readout in that room's row. The handle
+deliberately sits away from the dot so "move the dot" and "aim the cone" can't be confused.
+`styles.css`: the cone is a `conic-gradient` wedge (`from -32deg`, ~64° wide, centred on
+"up" so the element's own `rotate(var(--rot))` is the whole aiming story) on a circle,
+radial-masked so it fades out with distance instead of ending on a hard arc. Sized in **%**
+of the map on the client so it scales with it rather than being a fixed blob on a small
+phone map.
+
+Verified via `node --check`, a CSS brace-balance check, and Node tests driving the REAL
+`updateTourMapCone`/`parseTours`/`buildToursData` extracted from `app.js`: the cone reads
+exactly the authored angle at the saved start view, turns clockwise when panning right and
+counter-clockwise when panning left, survives a full 360 and wraps into 0..359; and `rot`
+round-trips through save/load, defaults to 0 for existing dots that predate it, and
+normalises out-of-range input (-90 → 270, 725 → 5). The drag-to-aim gesture needs a real
+browser. Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Tour minimap: flush to the corner, + recovered anandman's map transparency)
+
+Reported with a side-by-side: our map still showed a **solid black rectangle** behind the
+render, and sat inset from the corner rather than flush like the reference.
+
+**Diagnosed rather than guessed.** Sampled the already-saved
+`projects/anandman/tour-t20-map.web.jpg` directly: every corner and edge pixel was
+**exactly `(0,0,0)`**, with ~44% of the frame near-black. Pure mathematical black right
+around the border is the signature of *transparency flattened into JPEG* — a canvas's
+transparent pixels encode as black, since JPEG has no alpha (`resizeImageToBlob` draws onto
+an unfilled canvas, so this is inherent to the old `image/jpeg` call, not the source file).
+A genuinely black-backgrounded render essentially never measures as pure 0,0,0 everywhere.
+So the source PNG's transparency was real and had simply been destroyed on import — already
+fixed going forward by the PNG switch in the entry below.
+
+**Recovered the existing map instead of making the admin redo it.** The 9 dots were already
+placed, and they're keyed by `nodeId` with 0..1 coordinates — completely independent of the
+image file — so only the image needed repairing: flood-filled the CONNECTED background from
+the corner (`ImageDraw.floodfill`, tolerance 34) rather than knocking out a colour globally,
+so dark pixels *inside* the render can't be punched into holes, then intersected that mask
+with a near-black test as a second guard against a flood leak erasing anything visible.
+Result: 44.7% transparent, all four corners alpha 0, centre still opaque — written as
+`tour-t20-map.web.png` (resized to the same 1600px cap new uploads use) with `tour.json`
+repointed at it. Previous `tour.json` backed up to `_originals/tour.json.bak-before-mappng`;
+the old `.jpg` is left on disk untouched.
+⚠️ **The admin's IndexedDB session still holds the old JPEG blob**, so the next Save from
+that already-open admin tab would write the black `.jpg` back — re-uploading the original
+transparent PNG in the Tour tab is what makes it durable (and is a single action).
+
+**Positioning:** `.tour-map` moved from `top:14px; right:16px` to flush `top:0; right:0`
+(and `min(380px, 34vw)`, `min(190px, 36vw)` on phones). The render's own transparent margin
+supplies the visual breathing room; an extra CSS inset is what made it read as a rectangle
+parked near the corner instead of part of the scene. Files: `styles.css`,
+`projects/anandman/{tour.json, tour-t20-map.web.png}`.
+
+---
+
+## 2026-09-17 (Tour minimap: dots now actually navigate, and it's drawn bare in the compass's slot)
+
+Three follow-ups to the minimap below, all from a side-by-side with the reference tour.
+
+**1. Clicking a blue dot did nothing — the pointer-capture trap, for the FIFTH time.**
+`#pano` calls `setPointerCapture` on every pointerdown, so a tap on any DOM overlay inside
+it retargets its `click` to `#pano` and the overlay's own handler never runs. This is
+exactly why amenity pins and `.tour-hs` hotspots are hit-tested inside `pick()` instead of
+relying on their click handlers — and the new dots had the same bug for the same reason.
+Fixed by hit-testing `.tour-map-dot` in `pick()`'s tour branch (checked BEFORE `.tour-hs`,
+since the map is drawn over the scene) and calling `tourGoTo(nodeId)` from there, which
+gives the room switch the same crossfade every other tour navigation already uses. The
+dots' own click handlers stay for the admin case; `tourGoTo`'s existing `busy`/same-node
+guards make a double-fire a no-op. **If you add another clickable overlay inside `#pano`,
+it needs a `pick()` branch — a click handler alone will silently do nothing in the client.**
+
+**2. Moved into the compass's own top-right slot** (on request). `renderClientTourMap`
+toggles a `body.tour-map-on` class that hides `.compass` for as long as a map is shown, so
+the two never overlap; closing the tour restores it (`closePanoTour` now just calls
+`renderClientTourMap()` with `state.tourView` already null, rather than hiding the element
+by hand — one code path, so the class can't get stranded).
+
+**3. Restyled to match the reference: no panel.** The first version wrapped the image in a
+dark rounded card with a border, blur and shadow, plus a 🗺 collapse toggle — which reads
+as a widget bolted onto the scene rather than part of it. All of that is gone: the image is
+drawn bare, larger (`min(340px, 32vw)`, `min(180px, 34vw)` on phones), with a
+`drop-shadow` **filter** rather than `box-shadow` so the shadow follows the render's alpha
+silhouette instead of outlining an invisible rectangle. The container is
+`pointer-events: none` with only the dots taking input, so panning the panorama still works
+straight across the map area — and, just as importantly, that's what keeps the dots
+reachable by `document.elementFromPoint`, which is how `pick()` finds them.
+**Uploads are now PNG, not JPEG** (`setTourMapFromFile`, same call and reasoning as the
+brand logo): an isometric render normally arrives on a transparent background, and drawing
+it bare over the panorama only looks right if that transparency survives — JPEG would bake
+it into an opaque white rectangle. Existing `.web.jpg` maps keep working; re-upload to get
+transparency.
+
+Verified via `node --check`, a CSS brace-balance check, a stale-reference sweep for the
+removed toggle, and Node tests driving the REAL `pick` and `renderClientTourMap` extracted
+from `app.js`: a tap on a dot routes to `tourGoTo` with the right node id, a tap on empty
+panorama while touring navigates nowhere, the map shows with correct dot positions/active
+marking/PNG src and hides the compass, and closing the tour hides the map and gives the
+compass its corner back. Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Virtual tours: per-tour isometric/floor-plan map with a dot per room)
+
+On request, after looking at a 3DVista reference tour's top-right "radar": each tour can
+now carry ONE isometric / floor-plan image, with a dot placed on it per room, shown to the
+visitor as a corner minimap they can tap to jump between rooms. A room list has no spatial
+information in it at all; this is the "you are here, and here's what's around you" half.
+
+**Data** (`tour.json`) — each tour gains an optional
+`map: { file, points: [{ nodeId, x, y }] }`. Coordinates are **normalised 0..1**, not
+pixels, so the same map renders correctly in the admin editor (~900px) and the client
+minimap (~190px) with no rescaling. Absent ⇒ no map, and `buildToursData` emits no `map`
+key at all, so every existing tour.json is byte-identical through a save. `parseTours`
+drops dots whose room no longer exists (and `deleteTourNode` does the same live), clamps
+coordinates into 0..1, and carries a `blob` through exactly like `panoBlob` so an unsaved
+upload survives a session round-trip.
+
+**Admin** (`index.html`/`app.js`/`styles.css`) — the Tour tab's open tour gains a map row
+under "Add node": upload (`setTourMapFromFile`, resized to 2000px JPEG — the largest it's
+ever drawn is the editor), a thumbnail + "N/M rooms placed" readout, remove, and **🗺 Open
+map to place dots** → a new `#tourMapModal`. In it: click a room in the side list to arm
+it, then click the map to drop its dot; dots drag to fine-tune, and each room row shows
+placed / not-placed. Replacing the image keeps existing dots.
+
+**Client** — `#tourMap`, a collapsible corner panel below the compass (108px tall at
+top:14px, so the map starts at 132px — keep those in sync if either moves). Shown only
+while a tour that has BOTH a map and at least one placed dot is open; the room the visitor
+is in is gold, the rest blue; tapping one calls the existing `tourGoTo`. Starts collapsed
+on phones (it's a helper, not the content) and shrinks to ≤34vw there.
+
+Persisted through every path the node panoramas already use: `buildToursData`,
+`tourNodeBlobFiles` (export + `saveToursAs`), `buildSession`, `fetchReferencedImages`
+(save-as/clone) and `collectOfflineAssets` (a map is only fetched once its tour is opened,
+so runtime caching alone would never reach it — same gap that hid the room panoramas until
+2026-09-12). No standalone-bundle work needed: it's a plain `<img>`, not a WebGL texture,
+so it needs no `BUNDLE_IMAGES` embedding (same as the brand logo), and `do_bundle` already
+copies every top-level project file.
+
+Verified via `node --check`, a CSS brace-balance check, an id-existence check for all 13
+new element ids, a round-trip test driving the REAL `parseTours`/`buildToursData` extracted
+from `app.js` (map parsed, dots for deleted rooms dropped, `_ver` carried, parse→build→parse
+stable, no-map tours emit no `map` key, session blob preserved, out-of-range coords
+clamped), and a stub-DOM test of `renderClientTourMap` (hidden with no tour / no map / a
+map with zero dots; shown with correct dot percentages, active-room marking, nodeId wiring
+and a cache-busted image src). The admin editor's click/drag interaction needs a real
+browser — headless admin verification isn't reliable in this project (see CLAUDE.md).
+Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Fix: deleting a traced plot didn't free its auto-generated number)
+
+Reported: "if i cross [delete] A102 and then mark one more plot it starts from A103
+rather then starting from A102." Root cause: `nextPlotId()` read off a monotonic counter
+(`trace.seq`, incremented on every capture, never decremented on delete) — once A102 had
+ever been issued, that number was gone for good regardless of whether the plot holding it
+still existed.
+
+`app.js`: rewrote `nextPlotId()` to scan `trace.plots` for whatever "Ann" numbers are
+actually in use RIGHT NOW and return the lowest one that isn't — so deleting A102 makes
+it available again immediately, and duplicates are impossible by construction (a number
+is only ever "next" if nothing currently holds it). This made the `trace.seq` counter
+itself dead weight, so it — and its three reset points (`trace.seq: 0` in the initial
+state, the two "start a fresh trace" resets, and the "seed past the existing max" line in
+`loadCurrentLayoutIntoTrace`) — were removed rather than left as an unused, potentially
+misleading leftover. Verified via `node --check`, a standalone Node simulation of
+capture→capture→capture→delete-middle→capture (confirmed the freed number is reissued,
+not skipped), and confirming the live local server serves the updated logic. Files:
+`app.js`.
+
+---
+
+## 2026-09-17 (Fix: plot STATUS wasn't part of the sheet auto-fill)
+
+Reported right after the feature above shipped: "the available/sold/reserved is not
+getting fetched... make sure the status is fetched exactly in plots as well." Root
+cause: status is a dropdown that always holds SOME value (defaults to `'available'`), so
+the "only fill if the field is still empty" rule every other field uses can never fire
+for it — there's no such thing as an "empty" status to detect.
+
+`app.js`: `autofillPlotFromSheet` now has a separate status rule, gated on a new
+`p._statusTouched` flag instead of emptiness — set the first time the admin actually
+changes the status `<select>` themselves (its own `change` handler). Until that happens,
+a matching sheet row's status is free to keep overwriting the untouched default, on
+every match (first capture AND again on rename, same as the other fields) — so drawing a
+plot whose id is already `sold` in the sheet lands on Sold immediately, not the default
+Available. The moment the admin picks a status by hand, autofill stops touching it for
+that plot — same "never fight a manual edit" rule the text fields already follow.
+`styles.css`: a small green dot (`.trace-status-sheet-dot`, with the `[hidden]` override
+this codebase always needs alongside a new toggled-via-`.hidden` element — see the
+CLAUDE.md gotcha this has hit four times before) appears next to the status dropdown
+when its value came from the sheet, clearing the instant the admin changes it by hand.
+Verified via `node --check`, a CSS brace-balance check, a standalone Node re-run of the
+matching logic covering fresh-capture overwrite / manual-touch preserved / idempotent
+re-match (all passed), and confirming the live local server serves the updated code.
+Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Admin: newly-drawn plots auto-fill from the Google Sheet)
+
+On request: "when i draw plots on the layout it get fetched as well is it possible?" —
+previously, a plot already IN the layout picked up its price/facing/etc. from the sheet
+(via `state.rows`, joined at boot), but a plot drawn/renamed during THIS session was never
+part of that original join, so nothing filled in until a full page reload.
+
+`app.js`: new `autofillPlotFromSheet(p)` looks up a traced plot's sheet row (via the new
+`findSheetRowForId`, which tries an exact key match then falls back to the same tolerant
+canonical `plot_id` matching used everywhere else in this file — "A102"/"Plot-A102"/
+"plot_102" all count as the same plot) and fills only the fields still empty
+(`size, price, facing, dimensions, block, tour_url, notes` — deliberately not
+`video_url`/`image_url`/`media_json`, the multi-media fields meant to be authored via the
+trace editor's own picker, not typed into a spreadsheet) — it never overwrites something
+the admin already typed. Wired into the two places a plot's id becomes known: `addPlot`
+(right when a new polygon is captured — covers auto-trace, manual click, and DXF import,
+which really can supply a real matching id) and the plot-number `<input>`'s rename handler
+in `refreshTraceList` (the flow that actually matters most: draw a shape with a throwaway
+placeholder id, then type the real plot number — that's the moment a match becomes
+possible). `openTrace()` also now re-fetches the sheet FRESH the moment Import & Trace
+opens (`traceSheetRows`, checked before the boot-time `state.rows`) rather than only
+relying on whatever `loadData()` cached at page load — so a row added to the sheet after
+boot is usable in the same session without a reload. Kept strictly separate from
+`state.rows` itself (read-only lookup cache, never merged in) so a sheet fetch can never
+silently overwrite/blank a field on data that's already loaded.
+
+`styles.css`: each auto-filled field now shows a small green "✓ Sheet" badge next to its
+label (`.trace-field-sheet-badge`) so the fill is never silent/unexplained — it disappears
+the instant the admin edits that field by hand. Verified via `node --check`, a CSS
+brace-balance check, a standalone Node re-implementation of the matching/autofill logic
+run against 4 cases (exact-key sheet match, manually-typed field preserved, no-match
+no-op, fallback to `state.rows` when no fresh sheet fetch exists — all passed), and
+confirming the live local server serves the updated code. Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Admin: "Download sample sheet" button for the Google Sheet plot-data feature)
+
+Reported from a screenshot of the Test button's own error ("no plot_id column — the
+header row must match plots.csv") — nothing before that point ever showed the admin what
+the sheet's header row is actually supposed to look like, so they hit this error blind.
+
+`index.html`: added a **📥 Download sample sheet** button next to Test in the Plot Data
+section (Import & Trace tab), and reworded the helper note to point at it.
+`app.js`: `downloadSampleSheetCsv()` builds a small example CSV with the base
+`plots.csv` columns (`plot_id,status,facing,size,dimensions,price,block,tour_url,notes` —
+deliberately NOT the extra `video_url`/`image_url`/`media_json` columns `buildPlotsCSV`
+also writes, since those are multi-media fields meant to be authored via the trace
+editor's own picker UI, not hand-typed into a spreadsheet) filled with plausible example
+values (mixed statuses/facings/sizes/prices). Uses the current project's REAL plot ids
+when any exist (`state.geom`), so pasting the download straight into a fresh Google Sheet
+and hitting Test shows every id already matching the layout, rather than a generic
+template the admin then has to find-and-replace. Downloaded as a plain `.csv` (opens
+directly in Excel, and is exactly what Google Sheets' File → Import expects) rather than
+a real `.xlsx` — matches the project's zero-dependency philosophy (no new library needed)
+and is the literal same format `plots.csv` already uses, so there's no format mismatch to
+explain. `styles.css`: `.ax-data-actions` gained `flex-wrap: wrap` so the two buttons +
+note text don't overflow a narrow sidebar now that there are two buttons instead of one.
+Verified via `node --check`, a standalone dry-run of the CSV-generation logic in Node
+(confirmed correct header + rows), a CSS brace-balance check, and confirming the live
+local server serves the updated markup/logic. Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-17 (Fix: AERIAL VIEW not highlighted after backing out of a picker)
+
+Reported from a screenshot: leaving LANDMARKS (via the drawer's BACK button) returns the
+visitor to the plain aerial pano, but no row in the root menu showed that — every row
+looked equally unselected even though the visitor had visibly "landed" back on AERIAL
+VIEW.
+
+`app.js`'s `renderClientSidebar()` (root-menu branch): whenever the root list is what's
+on screen, the pano behind it IS the aerial view — every other content type either opens
+a modal on top of it or drills into its own picker level, none of which leave the root
+list visible. The one exception is an open tour (`state.tourView`), which really does
+replace the pano with a tour room while still showing the root list (the
+single-tour/single-room case). So the node with `contentType === 'aerial'` now gets the
+existing `.cat-btn.is-active` class (already used for landmark-category buttons — no new
+CSS needed) whenever the root menu renders AND no tour is open; `null` otherwise, so nothing
+is falsely marked active mid-tour. Since LANDMARKS' own BACK button (`catBackBtn`, a
+separate legacy DOM level from the generic submenu system) only toggles `hidden` and never
+re-renders `#catNavL1`, this one change at render time is enough to cover it — the markup
+already carries the correct highlight from whenever it was last built (boot, or any
+`renderClientSidebar()` call), it just wasn't marking AERIAL at all before. Verified via
+`node --check` and confirming the live local server serves the updated logic. Files: `app.js`.
+
+---
+
+## 2026-09-17 (Fix: back-arrow not centered in its circle — swapped text glyph for SVG)
+
+Reported from a screenshot: the `‹` character inside the round `.cat-back-btn` sat
+visibly off-center despite the button using flex `align-items`/`justify-content: center`.
+Root cause: a text glyph carries its own built-in side-bearing (asymmetric spacing baked
+into the font), which flex-centering centers the character's *box*, not its visible ink —
+so no amount of CSS centering fixes it. The existing gallery lightbox prev/next buttons
+already avoid this with an inline SVG chevron, so the back buttons now use the same
+pattern instead of a font character.
+
+`index.html`: both `#catBackBtn` and `#catSubMenuBackBtn` replaced their `‹` text with a
+14×14 `<svg>` (`viewBox="0 0 24 24"`, `<polyline points="15 18 9 12 15 6">`), identical
+shape to the gallery's chevron. `styles.css`: `.cat-back-btn` dropped its now-unneeded
+`font-size`/`line-height`, added `.cat-back-btn svg { display: block; width: 14px; height:
+14px; }`; the mobile override (`.cat-drawer .cat-back-btn`, in the landscape media query)
+dropped its own now-dead `font-size` and gained `.cat-drawer .cat-back-btn svg { width:
+12px; height: 12px; }` so the icon scales down proportionally in the smaller 22px mobile
+circle instead of staying pinned at the desktop 26px circle's icon size. Verified via
+`node --check`, a CSS brace-balance check, and confirming the live local server serves the
+updated markup/CSS. Files: `index.html`, `styles.css`.
+
+---
+
+## 2026-09-16 (Visible scrollbar wherever client content can actually overflow)
+
+On request: a scrollable client list relied entirely on the platform's own default
+scrollbar, which on mobile Safari/Chrome only flashes briefly on scroll and gives no
+standing signal that there's more content below the fold.
+
+`styles.css`: added a thin, gold-accented scrollbar (matching `#adminMenuTreeContainer`'s
+existing style, and the app's gold accent generally) to `.cat-nav` (the drawer menu
+itself — root menu, landmark categories, and tour/room pickers all share this one
+element), `.brochure-canvas` (the PDF viewer on mobile Android), and `.contact-modal-right`
+(the Contact card) — the three places client content can genuinely run long enough to
+scroll. Uses both `scrollbar-width`/`scrollbar-color` (Firefox) and the
+`::-webkit-scrollbar-*` pseudo-elements (Chrome/Safari), since neither alone covers every
+browser. Deliberately not touched on the admin side — desktop browsers already show a
+native scrollbar by default, and the admin menu tree already has its own matching one.
+Verified: CSS brace balance intact, confirmed live on the running server.
+
+Two rounds on the same button, same day. First report: both pause/play icons showed at
+once — patched with a defensive `[hidden] { display: none !important; }` override.
+Second report, right after: the underlying pause/resume worked (confirmed by the
+slideshow actually stopping/starting), but the icon never visually swapped on click —
+meaning the per-icon `hidden`-attribute toggling itself wasn't reliable, not just
+losing to a CSS conflict.
+
+Rebuilt on a sturdier pattern instead of chasing the `hidden` attribute further: a single
+`.is-paused` class toggled on the BUTTON (`updateGalleryAutoplayBtn`, `classList.toggle`),
+exactly like `.cat-drawer.is-collapsed` / `.cat-btn.is-active` already do elsewhere in
+this file, with plain CSS descendant selectors picking which icon shows
+(`.gallery-lightbox-autoplay.is-paused .gallery-autoplay-pause { display: none }` etc.)
+instead of toggling `hidden` on two sibling elements individually. Removed the now
+redundant static `hidden` attribute from the play icon in `index.html` and the
+`[hidden]`-based CSS rule from the first patch. Verified live on the server.
+
+Also worth ruling out if this resurfaces: `sw.js` serves `app.js` stale-while-revalidate
+on mobile (cache-first, refreshes in the background for the NEXT load) — a hard
+refresh/clear-site-data is worth trying before assuming a fresh code change hasn't taken
+effect on a phone that already had the page open.
+
+---
+
+## 2026-09-16 (Gallery slideshow autoplay, with a pause/play toggle)
+
+On request: photo galleries (both the `contentType:'gallery'` array form and a folder of
+individual `image` items, e.g. anandman's 25 "GALLERY N" rows — both already share the
+same viewer) now auto-advance every 4s (`GALLERY_AUTOPLAY_MS`) while open, wrapping via
+`updateGallerySlide`'s existing modulo.
+
+Added a play/pause toggle button (`#galleryAutoplayBtn`, `index.html`, styled to match
+the existing close button) rather than shipping silent forced autoplay — a real estate
+gallery is something a visitor may want to actually read, not have snapped away from
+every few seconds. `startGalleryAutoplay`/`stopGalleryAutoplay`/`toggleGalleryAutoplay`
+(`app.js`, next to `updateGallerySlide`): starts on open (`openClientGalleryModal`),
+stops on close (`closeClientGalleryModal`), hidden entirely for a single-image "gallery"
+(nothing to advance to). A manual Prev/Next/swipe/arrow-key calls
+`restartGalleryAutoplayIfRunning()` — resets the countdown so a manual click isn't
+immediately followed by an autoplay tick, without touching the visitor's own play/pause
+choice (`galleryAutoplayOn`), which only the toggle button changes. Verified: `node
+--check`, confirmed both the button markup and the JS are live on the running server.
+Files: `app.js`, `index.html`, `styles.css`.
+
+---
+
+## 2026-09-16 (Compass: smaller on mobile landscape, more see-through)
+
+Reported: the compass eats too much screen space on mobile. The existing landscape rule
+sized it at a flat 74px — fine measured against viewport WIDTH, but this project's own
+reference measurement for a real phone in landscape (~552x225 inner) means 74px is a
+third of the available HEIGHT, which is what actually reads as "too much space."
+
+`styles.css`: mobile compass size changed to `min(52px, 20vh)` (caps it at 20% of
+viewport height on any landscape screen, so it keeps scaling down on an even shorter
+window rather than landing on one fixed number that was only ever tuned for one phone).
+Also lightened it globally (desktop included): `.cp-face` fill 0.16→0.09, `.cp-cone`
+fill 0.20→0.12, backdrop blur 5px→3px and saturate 140%→125%, so more of the pano is
+visible through the glass face. Ring/needle/labels untouched — they need to stay legible
+over an unpredictable live sky. Files: `styles.css`.
+
+---
+
+## 2026-09-16 (Predictive caching: cross-tour LRU window + gallery neighbor prefetch)
+
+On request, generalizing the existing same-tour room prefetch to two more places:
+
+**Cross-tour prefetch** (`app.js`): added `prefetchNeighbourTours(tourId)`, next to the
+existing `prefetchTourNeighbours` (one-hop rooms within an open tour). Warms the START
+node of the next TWO tours and the previous ONE tour over `state.tours`' own order (the
+same order the tour-list picker shows) — an explicit, requested asymmetric +2/-1 window,
+not a general one-hop cache, since forward is the direction a visitor browsing a tour
+list actually goes. Shares the same `tourTex` LRU as room prefetch; `TOUR_CACHE_MAX`
+bumped 3→5 so the two prefetch kinds don't immediately evict each other (now ~895 MB VRAM
+at the cap — flagged in `CLAUDE.md` as worth reconsidering if it turns out too heavy for
+a lower-end mobile GPU). Called once per tour entry/switch from `openClientPanoTour`, not
+per room move, since the window only depends on which tour you're in.
+
+**Gallery neighbor prefetch** (`updateGallerySlide`, `app.js`): Prev/Next in a photo
+gallery now prefetches the two adjacent images as plain `<img>` requests, so the browser's
+own HTTP cache already has them by the time the visitor taps — no VRAM concern here (not
+a WebGL texture), so no cap needed.
+
+Verified: `node --check`, boundary-tested the +2/-1 window logic in Node (first/last tour
+in a list correctly omit the out-of-range side, no wraparound), confirmed both live on
+the running server. Files: `app.js`, `CLAUDE.md` (virtual tours code map + VRAM gotcha).
+
+---
+
+## 2026-09-16 (Client drawer auto-collapses after a real selection, not a menu navigation)
+
+On request: the drawer stayed open after every selection, eating screen space over
+content the visitor just chose to look at. Added `collapseClientDrawer()` (`app.js`, next
+to `openLandmarksCategoryPicker`) — collapses `.cat-drawer` to its thin rail, same visual
+state as tapping the toggle.
+
+Wired at exactly the points that show real content, not menu structure: a landmark
+category click (`renderLandmarkCategoryNav`'s `.cat-btn` handler), the folder-of-images
+gallery action (`activateMenuNode`'s `'images'` branch), and every content type in
+`openNodeContent` (video/pdf/gallery/contact/aerial/panotour/panotourroom/exittour/tour/
+image/link) EXCEPT `'landmarks'` and `'virtualtour'` — both of those open a picker list
+the visitor still needs to choose from (`openLandmarksCategoryPicker` explicitly
+re-opens the drawer itself; `'virtualtour'`'s tour-list relies on the drawer staying
+open), so collapsing there would hide the very list they need next. Deliberately NOT
+wired to folder drill-down (`'menu'` action) or BACK — those are pure menu browsing, not
+a real selection. Verified: `node --check`, confirmed live on the running server. Files:
+`app.js`.
+
+---
+
+## 2026-09-16 (Virtual tour: seamless crossfade between tours, no more loading screen)
+
+Reported: switching between tours in the client (e.g. MANDIR → GAZEBO, each its own
+single-room tour) showed a jarring loading screen instead of a smooth transition.
+
+Root cause: `openClientPanoTour` fully exited then re-entered on every tour-to-tour
+switch — `closePanoTour` restored the aerial pano texture SYNCHRONOUSLY and disposed the
+texture cache, then the function tore the plot map back down and waited on the new tour's
+first texture, with the whole gap hidden behind a reused `#bootCurtain` (originally added
+2026-09-09 to hide a worse "aerial view flashes" bug). Same-tour room navigation never had
+this problem — it already crossfades via `tourGoTo`.
+
+Fix (`app.js`, `openClientPanoTour`): stopped calling `closePanoTour` when switching
+tours. Tour A's last frame now stays on screen, the ORIGINAL pre-tour `saved{}` snapshot
+(aerial view/texture/northDeg) is carried forward unchanged instead of being re-derived
+from whatever's currently on screen (which would otherwise corrupt "Exit Tour"), and
+`tourGoTo` is called with `instant:false` so its existing crossfade dissolves tour A
+directly into tour B's first room — the same mechanism same-tour navigation already uses.
+A fresh entry from the plot map (no prior tour texture to fade from) still hard-cuts.
+Removed `showBootCurtain()` and its call sites entirely (dead code once this was the only
+caller) — `hideBootCurtain` now serves boot only, as originally intended. Verified:
+`node --check`, confirmed live via the running server that the function and both former
+call sites are gone. Files: `app.js`, `CLAUDE.md` (virtual tours code map).
+
+---
+
+## 2026-09-16 (Mobile drawer: BACK moved into the brand-row corner)
+
+On request: the "‹ BACK" button used to take its own row below the logo/brand block on
+every non-root menu level, wasting a full row in the already-tight ~140px landscape
+drawer while the brand row itself had empty space to the right of a short tagline.
+`styles.css` (same landscape media query): `.cat-drawer-inner` gets `position:relative` as
+the positioning context; `.cat-back-btn` is pulled out of normal flow with
+`position:absolute; top:2px; right:0` and overlaid on the brand row instead, with
+`.cat-drawer-brand` given `padding-right:30px` so it has reserved space rather than
+overlapping the name/tagline text (which varies in length per project). The submenu head
+(`#catLevelSubMenu`'s head, previously BACK + title sharing one row — see the entry below)
+now holds only the title, which gets the full drawer width to itself instead of a
+squeezed half. Files: `styles.css`.
+
+---
+
+## 2026-09-16 (Fix: BACK button overlapping the menu — dropped absolute positioning)
+
+Reported right after the redesign below: BACK was now overlapping the first row of the
+Landmarks category list ("ALL LANDMARKS"). Root cause of BOTH this and the earlier
+right-side collision: anchoring it to `.cat-drawer-inner` with `position:absolute`
+placed it relative to the WHOLE drawer, independent of how tall the brand block above it
+actually rendered at a given width — safe by luck at some sizes, not guaranteed at all
+of them, and this time it wasn't.
+
+Dropped the absolute-positioning approach entirely (two attempts, right corner then left
+corner, both eventually collided with something) in favor of plain normal document flow,
+which can't overlap what follows it by construction. `index.html`: both back buttons
+simplified to just `‹` (dropped the "BACK" label entirely — a plain arrow is enough,
+`aria-label="Back"` still names it for screen readers). `styles.css`: `.cat-back-btn` is
+now a small 26px round icon button (22px on the tight mobile drawer) sitting in
+`.cat-drawer-head`'s normal flow, above the nav list, one unified rule for every size
+instead of separate mobile/desktop treatments. Removed all the padding reservations
+(`.cat-drawer-brand`'s left/right padding) that existed only to keep the overlay clear of
+the logo — no longer needed now that BACK isn't overlaying anything.
+
+Verified: CSS brace balance intact, `node --check`, confirmed the simplified markup and
+styles are live on the running server. Files: `index.html`, `styles.css`.
+
+---
+
+## 2026-09-16 (Menu: "more below" scroll hint + BACK button redesign, both sizes)
+
+Two separate UX fixes requested together:
+
+**Scroll hint.** A cut-off menu list gave no signal there was more below it — mobile
+Safari/Chrome's own scrollbar is an ephemeral overlay that only flashes during an active
+drag, never sitting there as a standing cue, and the custom thin scrollbar added earlier
+this session doesn't change that platform behavior. Added a fade-to-drawer-tint hint at
+the bottom of `.cat-menu-level` (`styles.css`, `.has-more-below::after`), toggled by real
+scroll metrics (`updateNavScrollHint`, `app.js`) rather than a static decoration — it's
+never shown once a visitor is genuinely at the bottom. Wired once at boot
+(`wireNavScrollHints`, called from `wireViewControls`) via a `MutationObserver` +
+`ResizeObserver` per nav container (`catNavL1`/`catNav`/`catSubMenuNav`) instead of
+hand-calling it from every render site — three different functions replace these
+containers' content across several branches/early-returns, and hooking each one by hand
+is exactly the kind of thing that goes stale the next time a render path changes.
+
+**BACK button.** Previously a plain bordered row below the brand on desktop, and a
+right-corner overlay on mobile (from a few messages back) that collided with the
+since-enlarged, since-centered logo. Both replaced with one unified design: BACK is now
+a small pill-style button (a real background/border, not bare floating text — legible
+over an unpredictable live pano) absolutely positioned in the top-**LEFT** corner of
+`.cat-drawer-inner` on every size, matching the near-universal "back = top-left"
+convention this was fighting before. Mobile shows the icon only (`.cat-back-txt` hidden
+via CSS — no room for the word at 140px width); desktop keeps the label. The submenu
+title, freed from sharing its row with BACK, now gets the row's full width on desktop
+too (previously only fixed for mobile), wrapping a long title instead of truncating it.
+
+Verified: CSS brace balance intact, `node --check`, confirmed all three files
+(`index.html`/`app.js`/`styles.css`) serve the new markup/functions/rules on the running
+server. Files: `index.html`, `app.js`, `styles.css`.
+
+---
+
+## 2026-09-16 (Fix: loading-screen image took seconds to appear — now preloaded)
+
+Reported right after shipping the feature below: the loading-screen image itself took a
+few seconds to appear — the thing meant to cover the loading wait was itself part of it.
+Root cause: it was only discovered by the browser once app.js had loaded AND fetched
+`alignment.json`, both of which had to happen before `applyBootImage()` even ran.
+
+Fix, two parts:
+1. **`index.html`**: a static `<link rel="preload" as="image" fetchpriority="high">` in
+   `<head>`, built by a tiny inline script that parses `?project=` from the URL (mirrors
+   `sanitizeProjectId`/`BOOT_PROJECT` closely enough to agree on the same path, can't
+   reuse that code directly since it must run before app.js exists). Discovered by the
+   browser's HTML preloader during the initial parse — before any JS runs — so the
+   download starts immediately instead of waiting on the whole JS/data chain. Fires
+   speculatively even for a project with no custom image (a same-origin 404, cheap and
+   invisible); waiting to know for sure would reintroduce the delay.
+2. This only works because the filename is fixed and predictable ahead of time — which
+   meant giving up the usual `_ver` cache-busting query string this asset had (a static
+   preload can't target a URL it doesn't know in advance). `bootImageSrc()` (`app.js`) now
+   resolves the committed path bare. The staleness risk `_ver` normally guards against
+   (an admin's replacement image sticking around in a visitor's cache) is covered instead
+   by a short server-side cache lifetime specific to this one filename:
+   `deploy_s3.py`'s new `BOOT_IMAGE_CACHE` (5 min, vs. the usual day-long `MEDIA_CACHE`).
+   Local `server.py` already sends `no-cache` for project images regardless, so this only
+   matters for the deployed S3/CloudFront path.
+
+Also tightened the image's own compression while in there — 2000px/JPEG 0.85 (matching
+the pano) down to 1600px/JPEG 0.78, since this is glanced at for a couple of seconds
+while real content loads behind it, not studied up close.
+
+Verified: `node --check`, `python -c "import ast..."` on `deploy_s3.py`, the inline
+project-id-parsing logic tested directly in Node against real/missing/malicious inputs
+(correctly extracts the id, defaults to "sample", and rejects a path-traversal attempt
+rather than injecting it into the preload URL), confirmed live on the running server.
+Files: `index.html`, `app.js`, `deploy_s3.py`, `CLAUDE.md`.
+
+---
+
+## 2026-09-16 (New feature: admin-uploaded loading-screen image)
+
+On request: admin can now upload an image to show as the `#bootCurtain` background while
+the client boots, instead of a plain dark screen — new "🖼 Loading page image…" control
+in the Project Settings popover, next to Logo and Audio.
+
+Built as a close mirror of the existing brand-logo pattern rather than something new:
+`state.bootImage` (file/blob/name/_url/_ver, same shape as `state.audio`),
+`setBootImage`/`clearBootImage` (image resized via the existing `resizeImageToBlob` at
+2000px/JPEG 0.85 — the pano's own cap, since this is a full-screen background rather than
+a small icon like the logo), `bootImageData`/`bootImageSrc`/`hasBootImage`
+(serialize/resolve), `updateBootImageAdminUI`. `applyBootImage()` (`app.js`) sets
+`background-image` + a `.has-image` class straight on `#bootCurtain` — no new DOM
+element needed; `styles.css`'s `#bootCurtain.has-image::before` adds a darkening
+gradient overlay so the "Loading…" label and progress bar stay legible over an
+arbitrary photo (`position:relative` added to the label so it paints above the
+overlay — an absolutely-positioned `::before` otherwise paints on top of ordinary
+in-flow siblings).
+
+Timing matters here: `applyBootImage()` is called in `init()` right alongside
+`applyBrand()`/`applySiteAudio()`, deliberately as early as the alignment JSON is known —
+well before the much larger pano/ground-image downloads the curtain is actually waiting
+on — so the custom image covers most of the real loading window rather than flashing in
+moments before the curtain hides.
+
+Wired into every persistence path the brand logo/site audio already use, so it survives
+a reload, a save-as/clone, and a server export the same way those do:
+`alignmentData()`/`parseAlignment()`, `buildSession()` (IndexedDB — an unsaved upload
+survives a page reload before Save), the manual "Load alignment file" admin control,
+`fetchReferencedImages` (save-as clones it from the source project), the actual
+`/api/save` file list, and `collectOfflineAssets()` (so it's included in the mobile
+offline download). No standalone-bundle special-casing needed, unlike `panoImage`/
+`groundImage` — this is a plain CSS `background-image`, not a WebGL texture, so it isn't
+subject to the `file://` texture-tainting restriction those two need base64 embedding
+for.
+
+Verified: `node --check`, CSS brace balance intact, confirmed all three files
+(`index.html`/`app.js`/`styles.css`) serve the new markup/functions/rules on the running
+server. Not interactively click-tested in a real browser (this project's own convention:
+admin-facing changes need a real human check, headless screenshot testing of admin mode
+is documented as unreliable here) — try uploading an image via Project Settings, Save,
+then reload the client to confirm the loading screen shows it. Files: `index.html`,
+`app.js`, `styles.css`, `CLAUDE.md` (site branding code map + `alignment.json` schema).
+
+---
+
+## 2026-09-16 (Mobile drawer logo: centered + sized up again)
+
+Follow-up to the entry below, same day: logo grown further (54x36px → 78x52px) and
+centered within the brand row. Centering needed a real layout change, not just
+`text-align` — the base row is a 2-column grid (`auto 1fr`, logo | name/tagline), and
+since `.has-logo` only hides the name/tagline TEXT (not the grid track itself), the
+empty `1fr` column still claimed space and kept the grid spanning the full row width,
+so `justify-content:center` on the grid wouldn't have centered anything. Added
+`.cat-drawer .cat-drawer-brand.has-logo { display: flex; justify-content: center; }` to
+switch to a simple centered flex row for that specific state. Verified: CSS brace
+balance intact, confirmed live on the running server.
+
+---
+
+## 2026-09-16 (Mobile drawer logo enlarged — was too small to read)
+
+`styles.css`: mobile landscape `.cat-drawer-logo img` sized up from 24x18px to 54x36px.
+Safe to grow without crowding anything else — `.cat-drawer-brand.has-logo` already hides
+the project name/tagline text entirely whenever a logo is present, so the logo is the
+only brand element on screen there; nothing competes with it for space. Verified: CSS
+brace balance intact, confirmed live on the running server.
+
+---
+
+## 2026-09-16 (Mobile menu row spacing widened to stop mis-taps)
+
+Reported: menu rows on mobile were close enough together to cause mis-clicks. Root
+cause was the earlier drawer-compaction pass (same media query) that had tightened
+`.cat-nav`'s row gap to 1px and `.cat-btn`'s padding to 4px — adjacent rows were
+practically touching, well under safe touch-target sizing.
+
+`styles.css`: gap 1px→6px, button padding 4px 5px→7px 6px. `.cat-nav` is shared by the
+root menu, the landmark category list, AND the tour/feature submenu (all three render
+into the same element), so this one change reaches everywhere the request covers
+("menu and submenu"). Trades back some of the row density the earlier compaction pass
+optimized for — a real mis-tap is worse than a bit more scrolling. Verified: CSS brace
+balance intact, confirmed live on the running server.
+
+---
+
+## 2026-09-16 (Fix: submenu header broke at the new narrower drawer width)
+
+Follow-up to the drawer-narrowing change below, same day: the room-picker/submenu header
+(BACK button + a title like "VIRTUAL TOUR") is hardcoded inline in `index.html`
+(`max-width:120px; white-space:nowrap`, sized for the old 250px drawer) — squeezed
+side-by-side into a ~140px drawer, the title truncated to "VIRTUAL TO…" and the row
+looked broken (reported as "the alignment is off"). Fixed in the same landscape media
+query: `#catLevelSubMenu .cat-drawer-head` now stacks BACK above the title instead of
+sharing one row, and `#catSubMenuTitle` gets `!important` overrides (max-width/white-space/
+text-overflow — the only way to beat an inline `style=""` from an external stylesheet) so
+a long title wraps onto its own line(s) instead of being cut off. Files: `styles.css`.
+
+---
+
+## 2026-09-16 (Mobile client menu: narrower drawer + smaller rows to reduce scrolling)
+
+Reported: on mobile the client nav drawer covers ~30% of the screen. Real phone visitors
+only ever see the drawer in LANDSCAPE (a portrait phone is blocked by `#rotateHint` until
+turned), so the number that mattered was the landscape-scoped `.cat-drawer` width
+(`min(250px, 78vw)`, ~30% of an 844px-wide phone) — the base/portrait rule (`min(282px,
+82vw)`) is effectively only ever seen by a tablet.
+
+`styles.css` (`@media (orientation:landscape) and (max-height:500px)` block): narrowed
+`.cat-drawer` to `min(140px, 15vw)` — a hard ≤15% of viewport width on any landscape
+screen. Shrank `.cat-btn` (13.5px→9.5px font, tighter padding), `.cat-drawer-inner`
+padding, and the brand logo/name/tagline block so more menu rows fit on screen before
+scrolling. Trade-off, inherent to the width cut: a long title ("LOCATION INTELLIGENCE")
+now wraps to 2-3 lines instead of fitting one. Files: `styles.css`, `CLAUDE.md` (client
+drawer gotcha).
+
+---
+
+## 2026-09-16 (Tour room compass: 4 directions → full 8-point compass)
+
+Admin's "Compass facing" control on a tour room's start view (VIRTUAL-TOUR feature)
+previously offered only N/E/S/W. Added the four diagonals (NE/SE/SW/NW at 45/135/225/315°)
+so an admin can calibrate a room whose camera faces a diagonal wall/doorway instead of
+picking the nearest cardinal and living with up to 45° of compass error.
+
+Introduced `COMPASS_DIRS` (`app.js`, just above the Virtual Tours section) as the single
+`[key, label, degrees]` source of truth, with `COMPASS_DIR_KEYS`/`COMPASS_DIR_DEG`/
+`COMPASS_DIR_LABEL` derived from it — replaced four separate hardcoded N/E/S/W literals
+(the `parseTours` validation whitelist, the admin `<select>` options, the `northDeg`
+degree lookup in `tourGoTo`, and the save-confirmation label in
+`setTourNodeDefaultView`) that would otherwise need editing in lockstep. Verified: all 8
+keys/degrees/labels extracted and checked in Node, `node --check`. Files: `app.js`,
+`CLAUDE.md` (compass-calibration gotcha).
+
+---
+
+## 2026-09-15 (Menu Builder tree polish + uncapped trace/site-plan image upload)
+
+**Menu Builder admin tree** (`app.js`, `styles.css`): fixed a real pre-existing bug where
+`.gallery-card:hover img {` was missing its closing brace — under native CSS nesting
+(most current browsers), every rule after it, including all the tree/menu row styles,
+was silently scoped as a descendant of that unrelated selector and never applied. Also
+fixed `.tree-overflow-menu` missing a `.tree-overflow-menu[hidden] { display: none; }`
+override (same `[hidden]`-vs-class-selector specificity trap logged elsewhere in this
+file) — every row's `⋯` menu was rendering open simultaneously, stacked on top of each
+other. Added drag-to-reorder (a `⠿` handle per row, HTML5 drag/drop restricted to
+siblings under the same parent — `reorderNode()`) and double-click inline rename on the
+title text, both wired into `renderAdminMenuTree()`.
+
+**Trace/site-plan image upload, uncapped** (`traceLoadImage`, `app.js`): replaced the
+flat `TRACE_MAX=4096` downscale with the same dynamic `min(PANO_TEX_CAP,
+gpuMaxTexSize())` ceiling the pano already uses. An admin-uploaded site-plan image at or
+under that size (device-dependent, commonly 8192) now passes through at full original
+resolution — no resize, no resampling softness — where it previously always hit the
+4096px cap regardless of the device's real capability. The cap itself isn't removable
+entirely: it's a real WebGL texture-size constraint (the image becomes the ground drape
+texture), not a discretionary quality setting, so an oversized source still clamps to
+avoid a silently broken/blank ground plane. Also updated the file-too-large error message
+to reference the real computed cap instead of a hardcoded "4096". Files: `app.js`,
+`CLAUDE.md` (code map entry for `traceLoadImage`).
+
+---
+
 ## 2026-09-12 (S3 + CloudFront deploy script for the client view)
 
 `deploy_s3.py` (new). Deploys the CLIENT view of one project to an S3 bucket behind

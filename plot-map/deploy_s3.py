@@ -73,6 +73,13 @@ NO_CACHE = "no-cache, must-revalidate"
 IMMUTABLE = "public, max-age=31536000, immutable"
 MEDIA_CACHE = "public, max-age=86400"      # images/video/audio/pdf — a day
 CONFIG_CACHE = "public, max-age=60"        # plots/landmarks/alignment — re-uploads should show up quickly
+# The boot-curtain loading image (app.js's setBootImage, always saved as "loading.web.jpg")
+# is the one media file NOT cache-busted with a `?v=` token — it has to be, so index.html's
+# static <link rel="preload"> can target a fixed URL known before app.js even runs (see that
+# comment for why). A short lifetime here is what stands in for the version token instead:
+# an admin's replacement image shows up within a few minutes rather than potentially the
+# full day MEDIA_CACHE would otherwise allow.
+BOOT_IMAGE_CACHE = "public, max-age=300"   # 5 min
 
 SHELL_FILES = ["index.html", "app.js", "styles.css", "sw.js", "manifest.webmanifest"]
 SHELL_DIRS = ["vendor", "icons"]
@@ -111,6 +118,8 @@ def cache_control_for(rel: str, path: Path) -> str:
         return NO_CACHE
     if rel.startswith(("vendor/", "icons/")):
         return IMMUTABLE
+    if path.name == "loading.web.jpg":
+        return BOOT_IMAGE_CACHE
     if path.suffix.lower() in CONFIG_EXT:
         return CONFIG_CACHE
     return MEDIA_CACHE

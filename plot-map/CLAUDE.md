@@ -307,6 +307,29 @@ Top-down, by section header:
   text wipes the icon (it did).
 - **Data join:** `colorPlots`, `applyData`, legend/`toggleFilter`, `applySelectStyle`
   (selection keeps status colour + gold outline), `applyLabelVisibility` (# toggle).
+  **Area filters** (2026-09-18, `alignment.json`'s `area` block): admin-defined size bands
+  shown to the client as one dropdown. `plotAreaValue(row)` is the single place a plot's
+  area becomes a NUMBER — an explicit numeric `area` column wins, else the leading number is
+  parsed out of the free-text `size` ("1200 sq.ft"). **`area.unit` is declared once for the
+  whole project** and lives in the **Plot Data** section (it describes the data, not the
+  filters): every plot's area is read in it, and the admin's band min/max are too. Changing
+  it runs `applyAreaUnitToPlots`, which **relabels** each plot's Area text — across both
+  `state.rows` AND the tracer's live `trace.plots` copy, since the control sits inside
+  Import & Trace and updating only the former would be silently undone by the next commit.
+  **It deliberately does not CONVERT** (`1200 sq.ft` → `1200 sq.m`, not `111.48`): rewriting
+  entered figures is far less reversible than restating the unit they were always in. If
+  real conversion is ever wanted, it needs to be an explicit, separately-confirmed action —
+  don't quietly fold it into this. `plotMatchesAreaFilter`/`activeAreaFilter` drive
+  `colorPlots`, which recolours matches to the band's colour and **dims** (not hides)
+  everything else, ANDed with the existing status filter. `renderAreaFilterUI` builds BOTH
+  dropdowns — the topbar one and the floating twin in `.zoom-controls` — from one list,
+  because the topbar is collapsed on a landscape phone; `areaFilterMatchCount`/
+  `areaReadableCount` feed the admin's "N plots" / "readable on N of M" readouts, which
+  exist because a band matching nothing is otherwise indistinguishable from a misconfigured
+  one. The admin editor (`refreshAreaAdminUI`) is a collapsible panel floated over the
+  **Import & Trace** stage's top-right — not in the Align sidebar, which was already
+  crowded — and is refreshed from `openTrace`/`finishTrace` as well as its own edits,
+  since its counts read `state.geom`/`state.rows` and those change as plots are traced.
 - **Tooltip/popover:** `esc`, `showTooltip` (hover info card), `openPanel`/`placePanel`
   (click → compact popover anchored at the plot, blank fields hidden, caret),
   `restorePlotStyle`, `closePanel`; **modal:** `openModal` (3DVista iframe).
@@ -343,6 +366,45 @@ Top-down, by section header:
   `Interactive Plot Map`), `updateBrandAdminUI`, `setBrandLogo`/`clearBrandLogo`
   (logo resized to a ≤512px `.web.png` to keep transparency). Admin controls live in the
   Align tab; the logo blob rides the working session and ships via Export.
+- **Loading-screen image** (`#bootCurtain` background, added 2026-09-16, on request —
+  admin Project Settings popover, alongside Logo/Audio): `state.bootImage` (same
+  file/blob/name/_url/_ver shape as `state.audio`), `bootImageData`/`bootImageSrc`/
+  `hasBootImage` (serialise/resolve, mirroring the brand logo — fresh blob > committed
+  path), `setBootImage`/`clearBootImage` (resized via `resizeImageToBlob` at 1600px/JPEG
+  0.78, tighter than the pano's own 2000px/0.85 — this is glanced at for a couple of
+  seconds, not studied up close, so it's worth trading sharpness for a faster download on
+  exactly the asset that most needs to arrive fast) / `updateBootImageAdminUI`.
+  `applyBootImage()` sets `background-image` + a `.has-image` class directly on
+  `#bootCurtain` (no new DOM element — `styles.css`'s `#bootCurtain.has-image::before`
+  adds a darkening gradient so the "Loading…" label/progress bar stay legible over an
+  arbitrary photo) and is called in `init()` right alongside `applyBrand()`/
+  `applySiteAudio()` — as early as the alignment is known, well before the much larger
+  pano/ground-image fetches.
+  **Preloaded from `index.html`'s `<head>` (same day, follow-up fix)** — even called that
+  early, `applyBootImage()` still only runs once app.js has loaded AND fetched
+  `alignment.json`, which was reported as "takes a few seconds to load" (the image meant
+  to cover the wait was itself part of the wait). A static `<link rel="preload" as="image"
+  fetchpriority="high">`, built by a tiny inline script mirroring `sanitizeProjectId`/
+  `BOOT_PROJECT`'s own `?project=` parsing closely enough to agree on the same URL (but
+  necessarily separate code — it has to run before app.js exists), is discovered by the
+  browser's HTML preloader during the initial parse, before any JS runs at all. Fires
+  speculatively even for a project with no custom image — a same-origin 404 is cheap and
+  invisible, and waiting to know for sure would reintroduce the exact delay this removes.
+  **This is why `bootImageSrc` is the one asset here that does NOT cache-bust with
+  `_ver`** — a static preload has to target a fixed URL, which a version query string
+  would break. The staleness risk that `_ver` normally guards against is covered instead
+  by giving `loading.web.jpg` specifically a short server-side cache lifetime
+  (`deploy_s3.py`'s `BOOT_IMAGE_CACHE`, 5 min, vs the usual day-long `MEDIA_CACHE`) —
+  local `server.py` already sends `no-cache` for project images regardless, so this only
+  matters for the deployed S3/CloudFront path.
+  Persisted through every path the brand
+  logo/site audio already use: `alignmentData()`/`parseAlignment()`, `buildSession()`
+  (IndexedDB, for an unsaved upload to survive a reload), the manual "Load alignment
+  file" handler, `fetchReferencedImages` (save-as/clone), the server-save file list, and
+  `collectOfflineAssets()`. No standalone-bundle special-casing needed — like the logo,
+  this is a plain `background-image` on a DOM element, not a WebGL texture, so it isn't
+  subject to the `file://` texture-tainting restriction that `panoImage`/`groundImage`
+  need `BUNDLE_IMAGES` base64-embedding for.
 - **Working session (IndexedDB):** `idbOpen/Put/Get/Del`, `buildSession`,
   `saveSession`(debounced+explicit), `clearSession`, `applySessionGeometry`.
 - **Server-side save:** `blobToBase64`, `serverSave` (POST `/api/save`), `downloadFiles`
@@ -357,7 +419,10 @@ Top-down, by section header:
 - **Trace editor** (PNG/DXF → polygons): `trace` state, flood-fill/`traceBoundary`/
   `douglasPeucker`, `refreshTraceList` (inline per-plot data & media attachment editing), `parseMediaType`
   (detects & handles 3D Walkthroughs, YouTube embeds, and Image URLs/files), `traceLoadImage`
-  (downscale ≤`TRACE_MAX=4096`), `finishTrace`, `openTrace`/`loadCurrentLayoutIntoTrace`
+  (downscales only past `min(PANO_TEX_CAP, gpuMaxTexSize())` — the same device texture
+  ceiling the pano uses, **2026-09-15**, replacing a flat `TRACE_MAX=4096`; an upload at or
+  under that size is a lossless passthrough, not a deliberate quality cut — see gotchas),
+  `finishTrace`, `openTrace`/`loadCurrentLayoutIntoTrace`
   (pre-loads the live layout for editing), `wireTrace`; **`parseDXF`**.
 - **Landmarks:** `LM_ICONS`, `dirFromLonLat`/`lonLatFromDir`, `lmBannerHTML`,
   `rebuildLandmarkDOM` (marks `.has-render` banners interactive + wires hover/tap card),
@@ -426,19 +491,48 @@ Top-down, by section header:
   **Viewer (D-11 takeover):** `openClientPanoTour(tourId,title)` hides plots/drape/
   landmarks/amenities and swaps the *existing* pano sphere's texture (one WebGL context);
   `closePanoTour` restores the saved view + texture and disposes the tour's textures.
+  **Switching from an already-open tour straight to another (2026-09-16 rewrite)** no
+  longer calls `closePanoTour` at all — it used to fully exit-then-reenter (restoring the
+  aerial texture synchronously, then waiting on the new tour's first texture behind a
+  reused `#bootCurtain`, which read as a jarring loading screen, not a smooth switch).
+  Now it keeps tour A's last frame on screen, carries the ORIGINAL `saved{}` snapshot
+  forward unchanged (`priorTourView.saved` — re-deriving it from `three.pano.material.map`
+  here would wrongly capture tour A's OWN texture, corrupting a later "Exit Tour" into
+  landing back in tour A instead of the aerial map), and calls `tourGoTo(...,
+  {instant:false})` so the SAME crossfade below dissolves tour A directly into tour B's
+  first room. A fresh entry from the plot map still hard-cuts (`instant:true` — no prior
+  tour texture to fade from). `showBootCurtain`/its re-show counterpart are gone; only
+  `hideBootCurtain` (boot only) remains.
   `tourGoTo(nodeId,{instant})` crossfades via a second sphere at 0.985× **sharing
   `three.pano.geometry`** (dispose the material only — never the shared geometry);
   `tourTween` is the easing helper. **Every arrival (not just `instant`) now snaps to the
   room's own saved `defaultView`** (2026-09-11 — heading is no longer carried across
   nodes, a deliberate reversal of the original design) — the snap runs BEFORE the texture
   swap/crossfade, not after, so the fade plays out at one stable angle instead of the old
-  angle then a jarring cut. **Texture lifecycle:** `tourTex` LRU (`TOUR_CACHE_MAX = 3`) +
-  `tourTouch`/`tourEvict`/`loadTourNodeTex`/`prefetchTourNeighbours` (one hop) —
-  download weight and GPU residency are separate problems (see gotchas).
+  angle then a jarring cut. **Texture lifecycle:** `tourTex` LRU (`TOUR_CACHE_MAX = 5`,
+  bumped from 3 on 2026-09-16 — see gotchas for the VRAM trade-off) +
+  `tourTouch`/`tourEvict`/`loadTourNodeTex`/`prefetchTourNeighbours` (one hop, within the
+  open tour's own room graph) — download weight and GPU residency are separate problems
+  (see gotchas). **`prefetchNeighbourTours(tourId)`** (2026-09-16, on request) does the
+  same one level up: an asymmetric +2/-1 window over `state.tours`' own order (the exact
+  order the tour-list picker shows), warming just the START node of each neighbour tour,
+  called once per tour entry/switch from `openClientPanoTour` (not per room move — the
+  window only depends on which TOUR you're in). Shares the same `tourTex` LRU as room
+  prefetch.
   **Hotspots:** `rebuildTourHotspotDOM`/`renderTourHotspots` (projected each frame from
   `#tourHotspots`, same model as landmarks), `startTourHsDrag`/`onTourHsDragMove`/
   `endTourHsDrag` (drag-to-place), `addTourHotspot`/`deleteTourHotspot`/
-  `setTourNodeDefaultView`. **Room navigation lives in the drawer** (2026-09-11,
+  `setTourNodeDefaultView`.
+  **Each link carries `icon` + `rot`** (2026-09-18) — which marker it draws as
+  (`TOUR_HS_ICONS`: chevron/stairs/door/ring, **SVG not emoji**, since these must rotate and
+  animate) and which way an aimable one points. Entries declare `rotatable` (gates the admin
+  aim control) and `floor` (tilted into perspective so it reads as painted on the ground).
+  **The aim/tilt go on the `.tour-hs-ico` wrapper and the animation on `.tour-hs-ico-in`
+  inside it — never on `.tour-hs`, which `renderTourHotspots` rewrites `left`/`top` on every
+  frame.** Keeping the animation inside the rotated wrapper is also what makes an arrow
+  nudge ALONG the way it points; and the floor tilt must stay ahead of the aim rotation in
+  the transform list, or aiming cartwheels the arrow toward the camera instead of spinning
+  it on the floor. Adding a fifth icon = one entry in the map plus its animation rule. **Room navigation lives in the drawer** (2026-09-11,
   replacing the old floating `#tourBar`/`refreshTourBar`): `tourRoomPickerNode(tour)`
   builds a synthetic parent (rooms + a trailing "Exit Tour" row) rendered by the generic
   submenu system; `refreshTourRoomMenu()` just toggles `.is-active`/`.is-busy` on its
@@ -462,6 +556,29 @@ Top-down, by section header:
   dispatches to `openClientPanoTour` — distinct from `tour`, which iframes an *external*
   3DVista/Kuula URL/file. Wizard: 🧭 card + `renderWizardTourPicker` (warns on a tour with
   no nodes / no links) + `wizardState.tourId`.
+  **Tour map / minimap (2026-09-17, modelled on the reference tour's top-right "radar"):**
+  one isometric-or-floor-plan image per tour (`t.map`, see the `tour.json` contract below)
+  with a dot per room. `tourMapSrc(t)` (blob > cache-busted committed path, mirroring
+  `renderSrc`), `tourHasMap`, `setTourMapFromFile`/`clearTourMap`; admin editor
+  `openTourMapEditor`/`renderTourMapEditor`/`setTourMapPoint`/`clearTourMapPoint` +
+  `tourMapNorm` (pointer → 0..1) driving the `#tourMapModal` — click a room to arm it, click
+  the map to drop its dot, drag to fine-tune. Client `renderClientTourMap()` (rebuilds
+  `#tourMap`, called from `openClientPanoTour`) + `updateTourMapActive()` (re-marks the
+  current room only, called from `tourGoTo` — same cheap-update split as
+  `refreshTourRoomMenu`). **The minimap OWNS the compass's top-right slot while it's up** —
+  `renderClientTourMap` toggles `body.tour-map-on`, whose only job is
+  `body.tour-map-on .compass { display: none }` (revised 2026-09-17 from an earlier
+  below-the-compass position, on request, matching the reference tour which shows a map
+  there and no compass). It renders nothing unless the tour has a map AND at least one
+  placed dot. **The `<img>` must stay `width:100%; height:auto`** (no `object-fit`): the
+  dots are positioned in % of that box, so a letterboxed image would silently offset every
+  dot. It is drawn **bare** — no panel/border/background, `drop-shadow` filter (not
+  `box-shadow`, which would outline the transparent rectangle instead of the render), and
+  the map image is imported as **PNG** precisely to keep that transparency (JPEG would bake
+  an opaque white box behind it). The container is `pointer-events: none` so drags pan the
+  panorama straight through it; **the dots must keep `pointer-events: auto`** or `pick()`'s
+  `elementFromPoint` hit-test can't see them — see the pointer-capture gotcha below, which
+  is also why a dot's own click handler is not what navigates in the client.
 - **Brochure PDF viewer** — `openClientBrochureModal` (iframe on iOS/desktop; pdf.js
   canvases on Android, which has no inline PDF viewer — see **Conventions & gotchas**),
   `loadPdfJs` (on-demand classic-script load of the vendored UMD build; sets
@@ -696,6 +813,25 @@ real mute query param, only when true. If any other content type ever needs to k
 "opened with no gesture behind it," it already has this flag threaded all the way down —
 extend its handling there rather than adding a parallel mechanism.
 
+**The drawer auto-collapses on a real selection, not on menu navigation** (2026-09-16):
+`collapseClientDrawer()` shrinks `.cat-drawer` to its rail (same state as the toggle)
+whenever a click actually shows the visitor content — wired into `openNodeContent` for
+every content type except `'landmarks'`/`'virtualtour'` (both open a picker LIST the
+visitor still needs, so collapsing would hide it), into `activateMenuNode`'s `'images'`
+action, and into the landmark category `.cat-btn` click handler. Deliberately NOT wired
+to the `'menu'` action (folder drill-down) or BACK — those are still just browsing the
+menu, nothing to look at yet. If a future content type is added to `openNodeContent`,
+it collapses automatically unless explicitly excluded — extend the exclusion check
+there, not with a new parallel call site.
+**The visitor can switch that auto-collapse off** (2026-09-18): `addKeepMenuToggle` prepends
+a "KEEP OPEN" control to any menu level with 2+ rows (root, landmark categories, generic
+submenu), and `collapseClientDrawer` early-returns when it's set — so every call site
+inherits the pref for free. It is ONE shared preference (`localStorage`
+`b91-keep-menu-open`), not one per menu, and toggling it calls `syncKeepMenuToggles` to
+update the other copies **in place**: re-rendering instead would run
+`renderClientSidebar`'s root branch, which hides `#catLevel2` and would slam the landmark
+picker shut on anyone toggling it from in there.
+
 `index.html` mirrors these as markup (admin bar with **Align/Landmarks tabs**, the
 `#landmarks` overlay inside `#pano`, zoom-controls with `#` and `📍` toggles).
 `styles.css` holds all styling (dark theme, gold accent `var(--gold)`).
@@ -711,6 +847,17 @@ sizes (a deliberate reversal of the older desktop-hidden rule — see the commen
 `styles.css`), and `.cat-nav` uses `justify-content: safe center`, where `safe` is
 load-bearing: plain `center` would push a long menu's first items past the unreachable start
 edge on a short window.
+
+**Drawer width on a real phone is set in the LANDSCAPE media query, not the base rule**
+(2026-09-16) — a portrait phone never reaches the base `.cat-drawer { width: min(282px,
+82vw) }` at all, since `#rotateHint` blocks all interaction until it's turned landscape
+(see the boot-time gotchas above). So the number that actually governs what a real visitor
+sees is the `@media (orientation:landscape) and (max-height:500px)` override, narrowed from
+`min(250px, 78vw)` (~30% of an 844px-wide phone, reported as covering "30% of the screen")
+to `min(140px, 15vw)` — a hard ≤15% of viewport width on any landscape screen — with
+`.cat-btn` font/padding shrunk to match (9.5px, tighter padding) so more rows fit before
+scrolling. Trade-off: a long title ("LOCATION INTELLIGENCE") now wraps to 2-3 lines instead
+of one — expected at this width, not a bug.
 
 ## PWA identity (per project)
 
@@ -742,7 +889,19 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   when a Google Sheet is configured but unreachable (admin Save snapshots the sheet into it).
 - **`alignment.json`** — `{ transform{tx,ty,scale,rotationDeg}, view{lonDeg,latDeg,fov},
   opacity, groundImage?{file,opacity}, panoImage?{file}, brand?{name,tagline,logo?{file}},
-  data?{source:'sheet'|'file', sheet:{url,gid?}} }`.
+  bootImage?{file}, data?{source:'sheet'|'file', sheet:{url,gid?}},
+  area?{unit, filters:[{id,name,color,min?,max?}]},
+  plotOverrides?{ "<plotId>": { status?, size?, price?, … } } }`.
+  **`plotOverrides`** (added 2026-09-18) holds the per-field admin edits that outrank the
+  live Google Sheet — see the merge-precedence gotcha below. Absent ⇒ the sheet (or
+  `plots.csv`) stands unmodified.
+  **`area`** (added 2026-09-18) is the admin's area unit + named size bands, surfaced to the
+  client as one "Filter" dropdown (see the area-filter notes in the code map). Absent ⇒ no
+  filter UI at all, and it is omitted whenever a project has no bands AND the default unit,
+  so untouched projects round-trip byte-identically. A band's `min`/`max` may each be
+  absent, meaning open-ended on that side — they parse to `null`, never `0`.
+  **`bootImage`** (added 2026-09-16) is the admin-uploaded `#bootCurtain` background shown
+  while the client boots — absent ⇒ the plain dark curtain (today's default look).
   Client reproduces the saved view (WYSIWYG) and paints the title bar from `brand`
   (name/tagline/logo → `#brandMark`/`#brandName`/`#brandTagline`; falls back to the
   built-in `Build91` defaults when absent). Image paths are always `sample/…` (never a
@@ -780,11 +939,30 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   lightbox. Client reads it view-only; missing file = pin with no thumbnail.
 - **`tour.json`** (added 2026-09-08, VIRTUAL-TOUR Phase 1) — `{ version, tours:[{ id, name,
   startNode, nodes:[{ id, name, pano{file}, defaultView{lonDeg,latDeg,fov} }],
-  links:[{ from, to, hotspot{lonDeg,latDeg}, label }] }] }`. **Many independent tours per
+  links:[{ from, to, hotspot{lonDeg,latDeg}, label, icon, rot }],
+  map?:{ file, points:[{ nodeId, x, y }] } }] }`. **Many independent tours per
   project** (OQ-4); each node's `pano` is a texture-safe `.web.jpg` (basename-resolved, named
   `tour-<tourId>-<nodeId>.web.jpg` on import). Absent ⇒ no tours. `links` is the hotspot
   graph (authored in the viewer — next step); today it's written but empty. A menu item will
   reference a tour by id (`panotour` content type) to launch it.
+  A link's **`icon`** (`chevron`|`stairs`|`door`|`ring`) and **`rot`** (degrees clockwise
+  from "up", only meaningful for the aimable icons) were added 2026-09-18 — absent ⇒ an
+  unaimed chevron, so links written before it need no migration.
+  **`map`** (added 2026-09-17) is the tour's optional isometric / floor-plan image
+  (`tour-<tourId>-map.web.png` — **PNG, to keep the render's transparency**, see the
+  `resizeImageToBlob` gotcha) plus one dot per room. Each point also carries **`rot`**: the
+  on-map direction (degrees clockwise from "up") the camera faces at that room's SAVED
+  START VIEW, which drives the live view cone (`updateTourMapCone`). **It is anchored to
+  the map image, NOT to `northDeg`/`facingDir`** — compass calibration is optional and was
+  unset on every room of the only mapped tour when this shipped, so deriving the cone from
+  it would have aimed them all arbitrarily; don't "improve" this by routing it through the
+  compass unless every room is guaranteed calibrated. **`x`/`y` are NORMALISED 0..1, not
+  pixels** — deliberately, so the one stored position renders correctly in both the admin
+  editor (~900px wide) and the client minimap (~190px) with no rescaling step; keep any new
+  consumer reading them as fractions of the rendered image box. Absent ⇒ no minimap, and
+  `buildToursData` omits the key entirely so pre-existing tour.json files round-trip
+  unchanged. Dots whose `nodeId` no longer exists are dropped on load (`parseTours`) and on
+  delete (`deleteTourNode`) — a dot that jumps nowhere is worse than no dot.
 - **Images** — the pano (`panoImage.file`) and drape/plan PNG; auto-resized on import to
   texture-safe `.web.jpg`/`.web.png`. No pano ⇒ a generated `fallbackPanoTexture()` (plain
   sky) so the app still runs. The repo `.gitignore` ignores `*.png/*.jpg/*.jpeg`, so
@@ -812,6 +990,19 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
 
 ## Conventions & gotchas (learned the hard way)
 
+- **`resizeImageToBlob` to `image/jpeg` silently turns TRANSPARENCY into solid BLACK.** It
+  draws onto a fresh (transparent) canvas and calls `toBlob(mime)`; JPEG has no alpha, so
+  every transparent pixel encodes as `(0,0,0)`. Cost a round on the tour minimap
+  (2026-09-17): an isometric render supplied on a transparent background came out as a
+  black rectangle floating over the panorama. **Any image that will be drawn BARE over the
+  scene — logo, tour map, anything with alpha — must be imported as `image/png`** (as
+  `setBrandLogo` and now `setTourMapFromFile` do); JPEG is only right for full-bleed
+  photos/panoramas. Diagnosing this is easy and worth doing before assuming the source is
+  at fault: sample the saved file's corner pixels, and if they are *exactly* 0,0,0 all the
+  way round, it was flattened alpha, not a black background. Recoverable after the fact by
+  flood-filling the connected background from a corner (not a global colour knockout, which
+  punches holes in genuinely dark interior pixels) — see the CHANGELOG entry for the
+  anandman recovery.
 - **`resizeImageToBlob` returns `{ blob, W, H }`, NOT a Blob.** Storing the wrapper where
   a Blob is expected does not throw — it serialises to the string `"[object Object]"` and
   writes a **15-byte file** that looks saved and fails to decode. This destroyed every
@@ -819,10 +1010,15 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   checks a file *appeared* on disk will not catch it — check the byte size.
 - **Tour textures: download weight and GPU residency are different problems.** A node pano
   is ~2 MB over the wire (fine) but ~179 MB resident as an 8192×4096 RGBA texture with
-  mips, so a 15-node tour would be ~2.7 GB. Hence `TOUR_CACHE_MAX = 3` + one-hop prefetch.
-  **Do not "optimise" by keeping every node loaded** — that is the thing the cap exists to
-  prevent. Walking prefetched links is instant; a *jump* to a distant room is the one
-  navigation that must show it is loading.
+  mips, so a 15-node tour would be ~2.7 GB. Hence `TOUR_CACHE_MAX` (5, bumped from 3 on
+  2026-09-16 to give the new cross-tour prefetch window room alongside same-tour room
+  prefetch — ~895 MB at the cap now, genuinely worth reconsidering if a lower-end mobile
+  GPU turns out to choke on it) + one-hop prefetch. **Do not "optimise" by keeping every
+  node loaded** — that is the thing the cap exists to prevent; `prefetchNeighbourTours`'s
+  own window is deliberately small (+2/-1 tours) for the same reason, not "prefetch every
+  tour in the project." Walking prefetched links (or prefetched neighbour tours) is
+  instant; a *jump* to something outside that window is the one navigation that must show
+  it is loading.
 - **The crossfade sphere SHARES `three.pano.geometry`.** Dispose its material only.
   Disposing the geometry kills the main pano sphere with it.
 - **A tour "takes over" the viewer (D-11), so exit must restore everything it hid** —
@@ -862,14 +1058,22 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   the fade plays out at one stable, already-correct angle throughout — a single clean cut
   immediately followed by a smooth fade. If this ever needs touching again, keep the view-
   snap ahead of the swap/crossfade block — moving it back below is exactly this bug again.
-- **Per-room compass calibration (2026-09-10)**: `node.defaultView.facingDir` (`'N'|'E'|
-  'S'|'W'|null`, set via the "Compass facing" `<select>` next to "Set as this room's
-  start view") is a PER-NODE constant, independent of the main aerial pano's own
-  `state.northDeg` — each tour room's pano has its own arbitrary "lon 0." `tourGoTo`
+- **Per-room compass calibration (2026-09-10, extended to the full 8-point compass
+  2026-09-16)**: `node.defaultView.facingDir` (one of `COMPASS_DIR_KEYS` —
+  `'N'|'NE'|'E'|'SE'|'S'|'SW'|'W'|'NW'|null`, set via the "Compass facing" `<select>` next
+  to "Set as this room's start view") is a PER-NODE constant, independent of the main
+  aerial pano's own `state.northDeg` — each tour room's pano has its own arbitrary "lon 0."
+  **`COMPASS_DIRS`** (just above `newTourId`) is the single `[key, label, degrees]` table
+  every consumer reads from — the validation whitelist (`parseTours`), the admin `<select>`
+  options, the degree lookup below, and the save-confirmation label all derive from it, so
+  adding a 9th direction (or renaming a label) means editing one array, not four literals
+  that can drift apart (they did: this file's own diagonal-free formula below was one of
+  them, until the four cardinal-only directions were widened to all eight). `tourGoTo`
   recomputes `state.northDeg` on every arrival (not gated on `instant`, since this is a
   fixed property of the room, not of the live camera) as the algebraic inverse of
   `updateCompass()`'s own `rot = -view.lon*180/PI - northDeg` formula:
-  `northDeg = -(node.defaultView.lon) - {N:0,E:90,S:180,W:270}[facingDir]`. Uncalibrated
+  `northDeg = -(node.defaultView.lon) - COMPASS_DIR_DEG[facingDir]` (NE/SE/SW/NW sit at
+  45/135/225/315, clockwise from North same as N/E/S/W's 0/90/180/270). Uncalibrated
   ⇒ 0, never a leaked-over value from the aerial or a previous room. The aerial's own
   `northDeg` is snapshotted into `state.tourView.saved.northDeg` on entry and restored by
   `closePanoTour` on exit, same pattern as the saved camera view.
@@ -954,6 +1158,19 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   for gallery, `tourId` for panotour). A `panotour` item that lost its `tourId` still
   rendered in the menu and did nothing when clicked, which is why this cost a debugging
   round. Check this function whenever a content type gains a field.
+- **With a sheet configured, plot data is a 3-layer merge — and ADMIN EDITS WIN**
+  (2026-09-18). Precedence in `loadData`: committed `plots.csv` (base — covers every plot,
+  including any the sheet has no row for) < the **live sheet** (bulk, always current) <
+  **`state.plotOverrides`** (`alignment.json`'s `plotOverrides`). Before this the sheet
+  REPLACED `state.rows` outright and `exportSite` rebuilt `plots.csv` from a fresh sheet
+  snapshot — so an admin edit was invisible to the client AND destroyed on the next save,
+  and plots missing from the sheet lost all their data. Overrides are derived by
+  **diffing `state.rows` against the sheet at save time** (`computePlotOverrides`), not by
+  tracking edits: the rows were seeded from the sheet, so anything that no longer matches is
+  an edit. That makes it self-cleaning (revert a value and the override disappears) and
+  durable across later sheet changes. Blanks are deliberately never recorded — `""` is
+  indistinguishable from "never filled in" and would let an empty field mask a real sheet
+  value. **Don't "simplify" this back into `state.rows = snap`.**
 - **Google Sheet source is per-project & public-only.** `state.sheet` (from
   `alignment.json`'s `data`) drives **plots only** — landmarks/amenities stay file-based.
   The browser reads the sheet CSV **directly** (no server proxy), so the sheet must be
@@ -1137,7 +1354,15 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   `#pano`, *not* the marker (the marker's own click handler never fires in the client).
   So `openAmCard` is routed through **`pick()`** (the pano tap handler): it `elementFromPoint`
   hit-tests for a `.am-marker` **before** the plot raycast, so a pin takes precedence over
-  any plot beneath it. (The marker's `click` listener still handles the *admin* Amenities
+  any plot beneath it.
+  **This applies to EVERY clickable DOM overlay inside `#pano`, and has now caught three of
+  them** — amenity pins, `.tour-hs` nav hotspots, and (2026-09-17) the tour minimap's
+  `.tour-map-dot` room dots, which shipped with a plain click handler and silently did
+  nothing in the client until they were given their own `pick()` branch. **Adding a new
+  clickable overlay in `#pano`? It needs a `pick()` hit-test — a click listener alone will
+  not fire.** Note the corollary: such an element must keep `pointer-events: auto` (even
+  when its container is `pointer-events: none`) or `elementFromPoint` returns whatever is
+  behind it and the `pick()` branch never matches either. (The marker's `click` listener still handles the *admin* Amenities
   tab, where `startAmDrag`'s `stopPropagation` prevents pano capture.) A drag synthesizes a
   trailing `click` — `amSuppressClick` (set in `endAmDrag`, consumed in the marker click
   handler) stops that from toggling the selection off. Plot popover and amenity card are
@@ -1301,11 +1526,18 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   didn't land — it may be a second, unrelated bug wearing the same costume; (2) verify the
   assumption a fix rests on (here: "a direct navigation will preview") on the actual
   device before shipping it as the fix.
-- **A media query adds NO specificity — a later base rule still wins** (2026-09-03). The
+- **A media query adds NO specificity — a later base rule still wins** (2026-09-03, and
+  AGAIN 2026-09-17 with the tour minimap, whose phone sizing sat at line ~599 while its own
+  base rules are at ~3200: the override was dead CSS from the day it shipped, and phones
+  rendered the map at full desktop size — about half the viewport height — until someone
+  reported it as "takes a lot of space"). The
   mobile drawer overrides live around line 790 while `.cat-drawer`'s base rules are at
   ~1030+, so `.cat-btn { ... }` inside `@media (max-width: 720px)` lost outright to the
   plain `.cat-btn` declared later: the branding never appeared and the row spacing never
-  tightened, silently. Scope mobile overrides for the drawer with `.cat-drawer .cat-btn`
+  tightened, silently. **Adding a phone override for something whose base rules live far
+  down this file? Put the media query immediately AFTER that base block, not up with the
+  other landscape rules** — `.tour-map`'s does exactly that, with a pointer left at the
+  old location. Scope mobile overrides for the drawer with `.cat-drawer .cat-btn`
   etc. (or place them after the base block). Same family as the `[hidden]` trap below —
   when a rule "should" apply but doesn't, check declaration ORDER before anything else,
   and confirm with a screenshot: the CSS being present in the file proves nothing.

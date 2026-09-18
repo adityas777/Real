@@ -13,6 +13,30 @@
     <link rel="stylesheet" href="styles.css" />
   </noscript>
 
+  <!-- Speculative preload of the admin's loading-screen image (2026-09-16), so the
+       browser starts downloading it immediately on first paint instead of only once
+       app.js has loaded AND fetched alignment.json to learn it exists — that gap was
+       reported as "takes a few seconds to load" (the very thing meant to COVER the
+       loading wait was itself part of the wait). Deliberately BEFORE any JS/module
+       fetch: this is a static <link>, found by the browser's HTML preloader during the
+       initial parse, not something app.js has to run first. Always fires, even for a
+       project with no custom image set — a same-origin 404 here is cheap (one small
+       failed request, no visible effect, just an "unused preload" console note) and the
+       alternative (waiting to know for sure) reintroduces the exact delay this exists to
+       remove. The fixed, un-versioned filename ("loading.web.jpg", set by setBootImage
+       in app.js) is what makes this possible at all — see bootImageSrc's own comment for
+       why this one asset skips the usual `_ver` cache-busting. Mirrors sanitizeProjectId/
+       BOOT_PROJECT's own ?project= parsing (app.js) closely enough to agree on the same
+       URL, but can't reuse that code directly since it must run before app.js exists. -->
+  <script>
+    (function () {
+      var m = /[?&]project=([^&]+)/.exec(location.search);
+      var pid = m ? decodeURIComponent(m[1]).trim().toLowerCase() : '';
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(pid)) pid = 'sample';
+      document.write('<link rel="preload" as="image" fetchpriority="high" href="projects/' + pid + '/loading.web.jpg">');
+    })();
+  </script>
+
   <!-- PWA identity for the client (view-only) experience — see sw.js for the offline
        cache layer this supports and registerOfflineSupport() in app.js, which is the only
        thing that actually activates it (never registered on ?admin=1 pages). The tags
@@ -102,6 +126,17 @@
               <button class="btn btn-ghost ax-brand-logo-clear" id="axBrandLogoClear" type="button" title="Remove the logo"
                 hidden>Clear</button>
             </div>
+            <div class="ax-brand-logo">
+              <button class="btn btn-ghost" id="axBootImagePick" type="button"
+                title="Upload an image shown as the loading screen while the site boots">🖼 Loading page image…</button>
+              <input type="file" id="axBootImageFile" accept="image/png,image/jpeg,image/webp,image/*" hidden />
+              <span class="ax-brand-logo-name" id="axBootImageName">no loading page image</span>
+              <button class="btn btn-ghost ax-brand-logo-clear" id="axBootImageClear" type="button"
+                title="Remove the loading page image" hidden>Clear</button>
+            </div>
+            <p class="ax-audio-hint">Shown full-screen behind the "Loading…" text while the site is still
+              fetching the panorama and plot layout — replaces the plain dark background with a branded
+              image (e.g. a logo on a matching backdrop, or a render of the project).</p>
             <div class="ax-brand-logo ax-brand-audio">
               <button class="btn btn-ghost" id="axAudioPick" type="button"
                 title="Upload background music — an audio file, or a video whose sound track you want">🎵 Audio…</button>
@@ -131,6 +166,13 @@
       </div>
     </div>
 
+    <!-- Admin-defined area bands. Rendered by renderAreaFilterUI; hidden when the project
+         has none. Declared here but ADOPTED into #legend as its last item by renderLegend
+         (which wipes its own children, so the move has to repeat on every rebuild) — that
+         puts it right after the Sold chip, in the slot the removed "Unknown" chip used to
+         hold. The landscape twin lives in .zoom-controls, because the whole topbar is
+         collapsed on a landscape phone (see styles.css). -->
+    <select class="area-filter-sel" id="areaFilterSel" aria-label="Filter plots by area" hidden></select>
     <div class="legend" id="legend" role="group" aria-label="Status legend and filters">
       <!-- legend / filter chips injected by app.js -->
     </div>
@@ -150,6 +192,17 @@
       <!-- virtual-tour navigation hotspots, projected from the 3D scene each frame while a
            tour has taken over the viewer (VIRTUAL-TOUR.md Phase 1 / D-11) -->
       <div class="tour-hs-layer" id="tourHotspots" hidden></div>
+      <!-- virtual-tour minimap: the tour's isometric/floor-plan image with one dot per room,
+           drawn BARE (no panel/border — see styles.css) in the compass's own top-right slot,
+           which renderClientTourMap hides for the duration. Only shown while a tour that HAS
+           a map is open. Tapping a dot jumps to that room — routed through pick(), not the
+           dot's own click, because #pano eats it (see the pointer-capture gotcha). -->
+      <div class="tour-map" id="tourMap" hidden>
+        <div class="tour-map-inner" id="tourMapInner">
+          <img id="tourMapImg" alt="Tour map" />
+          <div class="tour-map-dots" id="tourMapDots"></div>
+        </div>
+      </div>
     </div>
 
     <!-- ─── Client Navigation Drawer (Left Panel Overlay) ────────────────────────── -->
@@ -181,7 +234,9 @@
              categories — same reasoning as #catNavL1 above. -->
         <div class="cat-menu-level" id="catLevel2" hidden>
           <div class="cat-drawer-head">
-            <button class="cat-back-btn" id="catBackBtn" type="button">‹ BACK</button>
+            <button class="cat-back-btn" id="catBackBtn" type="button" aria-label="Back">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
           </div>
           <nav class="cat-nav" id="catNav" aria-label="Landmark Categories"></nav>
         </div>
@@ -189,7 +244,9 @@
         <!-- Level 2 & 3: Custom Feature Sub-Menu (Videos, Tours, Brochures, Location Intel) -->
         <div class="cat-menu-level" id="catLevelSubMenu" hidden>
           <div class="cat-drawer-head" style="display:flex; align-items:center; justify-content:space-between; padding-bottom:8px;">
-            <button class="cat-back-btn" id="catSubMenuBackBtn" type="button">‹ BACK</button>
+            <button class="cat-back-btn" id="catSubMenuBackBtn" type="button" aria-label="Back">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
             <span class="cat-drawer-title" id="catSubMenuTitle" style="font-weight:700; font-size:11px; letter-spacing:0.5px; color:#f8fafc; text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">SUB MENU</span>
           </div>
           <nav class="cat-nav" id="catSubMenuNav" aria-label="Custom Sub Menu">
@@ -279,6 +336,9 @@
       <!-- landscape-only: the topbar's Available/Reserved/Sold legend is hidden in
            landscape (see styles.css) to free up vertical space on a short screen; this
            button takes over just the "Available" filter toggle, in the same spot -->
+      <!-- landscape twin of #areaFilterSel — the topbar it normally lives in is collapsed
+           at this size, so without this the area filter would be desktop-only -->
+      <select class="area-filter-sel is-floating" id="areaFilterSelMobile" aria-label="Filter plots by area" hidden></select>
       <div class="zoom-status-group" id="zoomStatusGroup">
         <button class="btn zoom-status-btn" id="zoomAvailableBtn" type="button" data-status="available" aria-pressed="true" aria-label="Toggle available plots">
           <span class="dot"></span>Available <span class="count">0</span>
@@ -456,6 +516,8 @@
       <p class="ax-lm-empty" id="axTourEmpty">No tours yet.</p>
       <div class="ax-tour-list" id="axTourList" aria-label="Tours"></div>
       <input type="file" id="axTourNodeFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+      <!-- one isometric / floor-plan image per tour (see setTourMapFromFile) -->
+      <input type="file" id="axTourMapFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
       <div class="adminbar-actions">
         <button class="btn btn-ghost" id="axTourLoad" type="button">Load…</button>
         <input type="file" id="axTourFile" accept="application/json,.json" hidden />
@@ -580,7 +642,14 @@
           <select id="traceLayerSel"></select>
         </p>
         <div class="ax-data">
-          <p class="ax-brand-head">Plot data <span>· live status from a Google Sheet</span></p>
+          <p class="ax-brand-head">Plot data <span>· area unit &amp; live status</span></p>
+          <!-- Project-wide area unit. Lives with the plot data (not the Area-filters panel)
+               because it describes the DATA, not the filters: it's the unit every plot's
+               area is expressed in, and changing it rewrites each plot's Area text to match
+               (see applyAreaUnitToPlots). -->
+          <label class="ax-unit-row">Area unit
+            <select id="axAreaUnit" aria-label="Area unit"></select>
+          </label>
           <label class="ax-data-toggle"><input type="checkbox" id="axSheetOn" /> Pull plot status &amp; details from a
             Google Sheet</label>
           <div class="ax-data-body" id="axSheetBody" hidden>
@@ -589,19 +658,43 @@
                 spellcheck="false" /></label>
             <div class="ax-data-actions">
               <button class="btn btn-ghost" id="axSheetTest" type="button" title="Fetch the sheet and check it">Test</button>
-              <span class="ax-data-note" id="axSheetMsg">The sheet must be public — Share → “Anyone with the link”, or
-                File → Share → Publish to web. Header row must match <code>plots.csv</code> (needs a
-                <code>plot_id</code> column).</span>
+              <button class="btn btn-ghost" id="axSheetSample" type="button" title="Download a sample sheet with the exact columns expected">📥 Download sample sheet</button>
+              <!-- Intentionally empty: setSheetMsg() fills this with Test results / errors.
+                   The standing how-to text that used to sit here was removed (2026-09-18,
+                   on request) — it was a wall of prose in a narrow sidebar, and the same
+                   guidance is reachable via the sample-sheet download beside it. -->
+              <span class="ax-data-note" id="axSheetMsg"></span>
             </div>
           </div>
         </div>
+      </aside>
+      <!-- The captured-plot list gets its own full-height column beside the tools sidebar
+           (2026-09-18). It used to sit at the BOTTOM of that sidebar, below the sliders and
+           the Plot Data block, so it was squeezed into a sliver and every plot's inline
+           editor had to be reached by scrolling the whole column. -->
+      <aside class="trace-plots" aria-label="Captured plots">
         <p class="trace-count" id="traceCount">0 plots</p>
-        <ul class="trace-list" id="traceList" aria-label="Captured plots"></ul>
+        <ul class="trace-list" id="traceList"></ul>
       </aside>
       <div class="trace-stage" id="traceStage">
         <canvas id="traceCanvas"></canvas>
         <p class="trace-empty" id="traceEmpty">Load a PNG/JPG site plan — or a DXF — to begin. Scroll to zoom · drag to
           pan.</p>
+        <!-- Area unit + admin-defined size bands, floated over the top-right of the stage
+             rather than stacked in the Align sidebar (2026-09-18: that column was already
+             crowded, and this belongs with the plot data it filters). The client shows
+             these as one "Filter" dropdown; picking a band recolours the plots inside it
+             (see colorPlots). Collapsible, so it never permanently covers the plan. -->
+        <div class="ax-area" id="axAreaPanel">
+          <button class="ax-area-head" id="axAreaToggle" type="button" aria-expanded="true">
+            <span>Area filters</span><span class="ax-area-chev">▾</span>
+          </button>
+          <div class="ax-area-body" id="axAreaBody">
+            <p class="ax-area-note" id="axAreaNote"></p>
+            <div class="ax-area-list" id="axAreaList" aria-label="Area filters"></div>
+            <button class="btn btn-ghost ax-area-add" id="axAreaAdd" type="button">＋ Add filter</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -799,6 +892,38 @@
     </div>
   </div>
 
+  <!-- Admin: place one dot per room on a tour's isometric / floor-plan image. Click a room
+       in the list to arm it, then click the image to drop (or move) that room's dot; dots
+       can also be dragged. Coordinates are stored 0..1 (see buildToursData) so the same
+       map renders at any size in the client minimap. -->
+  <div class="modal custom-feature-modal" id="tourMapModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog feature-modal-dialog" role="dialog" aria-label="Place rooms on the tour map" style="max-width: 980px; width: 95vw;">
+      <div class="modal-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <h3 class="modal-title" id="tourMapModalTitle" style="margin:0; font-size:15px; font-weight:700;">🗺 Place rooms on the map</h3>
+          <span style="font-size:11px; font-weight:500; color:#9aa5b1;" id="tourMapModalHint">Pick a room on the right, then click the map to place its dot. Drag a dot to fine-tune.</span>
+        </div>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body custom-modal-body tourmap-modal-body">
+        <div class="tourmap-stage" id="tourMapStage">
+          <div class="tourmap-canvas" id="tourMapCanvas">
+            <img id="tourMapEditImg" alt="Tour map" />
+            <div class="tourmap-editdots" id="tourMapEditDots"></div>
+          </div>
+        </div>
+        <div class="tourmap-side">
+          <p class="tourmap-side-h">Rooms in this tour</p>
+          <div class="tourmap-nodes" id="tourMapNodeList"></div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; padding:14px 18px; border-top:1px solid rgba(255,255,255,0.1);">
+        <button class="btn btn-primary" type="button" data-close style="font-size:12px;">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ─── Client Display Modals ──────────────────────────────────────────────── -->
 
   <!-- Client Video Modal (Location Intel & Walkthrough) -->
@@ -825,6 +950,17 @@
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+
+      <!-- Slideshow Autoplay Toggle (pause/play swap via is-paused; starts playing) -->
+      <button class="gallery-lightbox-autoplay" id="galleryAutoplayBtn" type="button" aria-label="Pause slideshow" aria-pressed="true">
+        <svg class="gallery-autoplay-ico gallery-autoplay-pause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="5" width="4" height="14" rx="1"></rect>
+          <rect x="14" y="5" width="4" height="14" rx="1"></rect>
+        </svg>
+        <svg class="gallery-autoplay-ico gallery-autoplay-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="7 4 20 12 7 20 7 4"></polygon>
         </svg>
       </button>
 

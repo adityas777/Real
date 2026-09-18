@@ -52,11 +52,15 @@ const els = {
   proj: $('proj'), projSelect: $('projSelect'), projTools: $('projTools'), projSave: $('projSave'), projSettingsBtn: $('projSettingsBtn'), projSettingsPopover: $('projSettingsPopover'), projSettingsClose: $('projSettingsClose'), projMenuBtn: $('projMenuBtn'), projMenu: $('projMenu'),
   projName: $('projName'), projNameInput: $('projNameInput'), projNameOk: $('projNameOk'), projNameCancel: $('projNameCancel'), projNameHint: $('projNameHint'),
   axBrandName: $('axBrandName'), axBrandTagline: $('axBrandTagline'), axBrandLogo: $('axBrandLogo'), axBrandLogoFile: $('axBrandLogoFile'), axBrandLogoName: $('axBrandLogoName'), axBrandLogoClear: $('axBrandLogoClear'),
-  axSheetOn: $('axSheetOn'), axSheetBody: $('axSheetBody'), axSheetUrl: $('axSheetUrl'), axSheetTest: $('axSheetTest'), axSheetMsg: $('axSheetMsg'),
+  axBootImagePick: $('axBootImagePick'), axBootImageFile: $('axBootImageFile'), axBootImageName: $('axBootImageName'), axBootImageClear: $('axBootImageClear'),
+  axSheetOn: $('axSheetOn'), axSheetBody: $('axSheetBody'), axSheetUrl: $('axSheetUrl'), axSheetTest: $('axSheetTest'), axSheetSample: $('axSheetSample'), axSheetMsg: $('axSheetMsg'),
   legend: $('legend'),
   tooltip: $('tooltip'), notice: $('notice'),
   zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), landmarkToggle: $('landmarkToggle'), amenityToggle: $('amenityToggle'),
   zoomStatusGroup: $('zoomStatusGroup'), zoomAvailableBtn: $('zoomAvailableBtn'),
+  areaFilterSel: $('areaFilterSel'), areaFilterSelMobile: $('areaFilterSelMobile'),
+  axAreaUnit: $('axAreaUnit'), axAreaNote: $('axAreaNote'), axAreaList: $('axAreaList'), axAreaAdd: $('axAreaAdd'),
+  axAreaPanel: $('axAreaPanel'), axAreaToggle: $('axAreaToggle'),
   zoomReservedBtn: $('zoomReservedBtn'), zoomSoldBtn: $('zoomSoldBtn'), rotateHint: $('rotateHint'),
   landmarks: $('landmarks'), amenities: $('amenities'),
   tourLayer: $('tourHotspots'),
@@ -70,6 +74,9 @@ const els = {
   axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'), axTabBtnTour: $('axTabBtnTour'),
   axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'), axTabTour: $('axTabTour'),
   axTourAdd: $('axTourAdd'), axTourList: $('axTourList'), axTourEmpty: $('axTourEmpty'), axTourNodeFile: $('axTourNodeFile'), axTourLoad: $('axTourLoad'), axTourFile: $('axTourFile'), axTourSaveBtn: $('axTourSaveBtn'),
+  axTourMapFile: $('axTourMapFile'), tourMapModal: $('tourMapModal'), tourMapModalTitle: $('tourMapModalTitle'), tourMapModalHint: $('tourMapModalHint'),
+  tourMapCanvas: $('tourMapCanvas'), tourMapEditImg: $('tourMapEditImg'), tourMapEditDots: $('tourMapEditDots'), tourMapNodeList: $('tourMapNodeList'),
+  tourMap: $('tourMap'), tourMapInner: $('tourMapInner'), tourMapImg: $('tourMapImg'), tourMapDots: $('tourMapDots'),
   axLmAdd: $('axLmAdd'), axLmList: $('axLmList'), axLmEmpty: $('axLmEmpty'), axLmCount: $('axLmCount'), axLmShowAll: $('axLmShowAll'), axLmHideAll: $('axLmHideAll'), axLmLoad: $('axLmLoad'), axLmFile: $('axLmFile'), axLmSave: $('axLmSave'),
   axAmAdd: $('axAmAdd'), axAmList: $('axAmList'), axAmEmpty: $('axAmEmpty'), axAmLoad: $('axAmLoad'), axAmFile: $('axAmFile'), axAmSave: $('axAmSave'),
   // amenity info card + full-render lightbox
@@ -179,9 +186,18 @@ const state = {
   viewVel: { lon: 0, lat: 0 },   // current camera angular velocity (rad/ms) — decays a drag's flick into coasting inertia
   brand: { name: '', tagline: '', logo: null, logoBlob: null, logoName: null, _url: null, _ver: '' }, // client title-bar branding (in alignment.json)
   audio: { file: null, blob: null, name: null, _url: null, _ver: '' },  // admin-uploaded background music (in alignment.json), played on loop for the client
+  bootImage: { file: null, blob: null, name: null, _url: null, _ver: '' },  // admin-uploaded #bootCurtain background (in alignment.json), shown while the site boots
   panoBlob: null, panoName: null,       // resized texture-safe pano JPEG kept for export / session restore
   plots: new Map(), selectedId: null, hoverId: null,
   activeFilters: new Set(STATUS_ORDER),
+  // Admin-defined area bands (alignment.json `area`). `unit` is a LABEL, not a conversion
+  // factor — see plotAreaValue for why. `areaFilterId` is the one currently picked in the
+  // client dropdown (null = show everything normally).
+  area: { unit: 'sq.ft', filters: [] },
+  areaFilterId: null,
+  // Per-plot fields the admin has edited away from what the live sheet says. These WIN over
+  // the sheet on both sides — see computePlotOverrides/applyPlotOverrides.
+  plotOverrides: {},
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
   showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
@@ -202,6 +218,9 @@ const state = {
     tree: []
   },
   menuNavStack: [],
+  // Visitor pref: does picking a menu item collapse the drawer? Default false = the
+  // existing auto-collapse behaviour. See buildKeepMenuToggle.
+  keepMenuOpen: (() => { try { return localStorage.getItem('b91-keep-menu-open') === '1'; } catch { return false; } })(),
 };
 let three = null, plotsDirty = false;
 const labelCache = new Map();           // id → reusable label Sprite (avoid texture churn on rebuild)
@@ -318,15 +337,59 @@ async function loadCommittedCSV() {                     // the committed project
 }
 // Populate state.rows from the LIVE sheet if one is configured & reachable, else the
 // committed CSV. Returns a short label describing the source (shown by setSync).
+// Fields an admin edit can pin. Mirrors buildPlotsCSV's columns minus plot_id.
+const OVERRIDE_FIELDS = ['status', 'facing', 'size', 'dimensions', 'price', 'block', 'tour_url', 'video_url', 'image_url', 'media_json', 'notes'];
+// Which fields differ between what the admin currently has and what the sheet says — i.e.
+// what the admin has deliberately changed. Derived by DIFFING at save time rather than by
+// tracking every keystroke: the admin's rows were themselves seeded from the sheet, so
+// anything that no longer matches it is by definition an edit. That also makes it
+// self-cleaning — set a value back to what the sheet says and the override disappears.
+//
+// A blank is never recorded: "" can't be told apart from "never filled in", and recording
+// it would let an empty admin field permanently mask a real sheet value.
+function computePlotOverrides(sheetRows) {
+  if (!sheetRows) return state.plotOverrides || {};
+  const out = {};
+  state.rows.forEach((row, id) => {
+    const s = sheetRows.get(id), diff = {};
+    OVERRIDE_FIELDS.forEach((k) => {
+      const mine = (row?.[k] ?? '').toString().trim();
+      const theirs = (s?.[k] ?? '').toString().trim();
+      if (mine && mine !== theirs) diff[k] = mine;
+    });
+    if (Object.keys(diff).length) out[id] = diff;
+  });
+  return out;
+}
+function applyPlotOverrides() {
+  const ov = state.plotOverrides || {};
+  for (const [id, fields] of Object.entries(ov)) {
+    const row = state.rows.get(id) || { plot_id: id };
+    Object.assign(row, fields);
+    row.plot_id = id;
+    state.rows.set(id, normalizeRow(row));   // status may have been overridden — re-lower-case it
+  }
+}
 async function loadData() {
   // A standalone bundle has no network to reach a live sheet with, and no server to fall
   // back through either — go straight to the embedded plots.csv instead of a doomed fetch.
+  //
+  // Precedence, when a sheet is configured: committed plots.csv (the base — covers every
+  // plot, including any the sheet has no row for) < the live sheet (bulk, always current)
+  // < the admin's own edits. The last of those is the rule this exists to enforce: the
+  // sheet used to REPLACE state.rows wholesale, so anything edited in the admin was
+  // invisible to the client, and plots missing from the sheet lost their data entirely.
   if (!BUNDLE && state.sheet.enabled && state.sheet.url) {
     const snap = await fetchSheetRows();
-    if (snap) { state.rows = snap; state.dataSource = 'live'; return 'live sheet'; }
-    await loadCommittedCSV(); state.dataSource = 'cached'; return 'cached · sheet unreachable';
+    if (snap) {
+      await loadCommittedCSV();
+      snap.forEach((row, id) => state.rows.set(id, row));
+      applyPlotOverrides();
+      state.dataSource = 'live'; return 'live sheet';
+    }
+    await loadCommittedCSV(); applyPlotOverrides(); state.dataSource = 'cached'; return 'cached · sheet unreachable';
   }
-  await loadCommittedCSV(); state.dataSource = 'file'; return `project “${state.projectId}”`;
+  await loadCommittedCSV(); applyPlotOverrides(); state.dataSource = 'file'; return `project “${state.projectId}”`;
 }
 
 // ─── Geometry (polygons in image-pixel space) + anchor ────────────────────────
@@ -510,6 +573,37 @@ function siteAudioSrc() {
   return assetUrl(a.file, a._ver);
 }
 function hasSiteAudio() { return !!(state.audio.blob || state.audio.file); }
+// #bootCurtain background image, resolved/serialised exactly like the brand logo (fresh
+// blob wins before export, otherwise the committed path — but, unlike every other
+// branding asset here, deliberately NOT cache-busted with `_ver` (2026-09-16). This one
+// needs to be visible before app.js has even fetched alignment.json (see the <link
+// rel="preload"> in index.html's <head>, which can only target a FIXED url), so its
+// committed path must be predictable ahead of time. The staleness risk that `_ver`
+// normally guards against is covered instead by giving this exact filename a short
+// server-side cache lifetime (deploy_s3.py's BOOT_IMAGE_CACHE) rather than a version
+// token — a brief window of possibly-stale is an acceptable trade for a loading screen
+// that would otherwise defeat its own purpose by taking seconds to appear.
+function bootImageData() {
+  return state.bootImage.file ? { file: state.bootImage.file } : null;
+}
+function bootImageSrc() {
+  const b = state.bootImage;
+  if (b.blob) { if (!b._url) b._url = URL.createObjectURL(b.blob); return b._url; }
+  return assetUrl(b.file);
+}
+function hasBootImage() { return !!(state.bootImage.blob || state.bootImage.file); }
+// Paints (or clears) #bootCurtain's background from state.bootImage. Called alongside
+// applyBrand()/applySiteAudio() as soon as the alignment is known — early enough in boot
+// that the custom image covers most of the loading window, since alignment.json is one
+// of the first things fetched (well before the much larger pano/ground-image downloads
+// the curtain is actually waiting on). Falls back to the plain dark background (the
+// existing #bootCurtain CSS default) when no image is set.
+function applyBootImage() {
+  if (!els.bootCurtain) return;
+  const src = hasBootImage() ? bootImageSrc() : '';
+  els.bootCurtain.style.backgroundImage = src ? `url("${src}")` : '';
+  els.bootCurtain.classList.toggle('has-image', !!src);
+}
 function brandLogoSrc() {
   const b = state.brand;
   if (b.logoBlob) { if (!b._url) b._url = URL.createObjectURL(b.logoBlob); return b._url; }
@@ -656,6 +750,31 @@ function clearBrandLogo() {
   state.brand.logo = null; state.brand.logoBlob = null; state.brand.logoName = null;
   applyBrand(); onAlignmentChanged();
 }
+async function setBootImage(file) {
+  if (!file) return;
+  // Tighter than the pano's own 2000px/0.85 cap (2026-09-16) — this is glanced at for a
+  // couple of seconds while the real content loads behind it, not something a visitor
+  // studies up close, so it's worth trading a bit of sharpness for a faster download on
+  // exactly the asset that most needs to arrive fast.
+  let out; try { out = await resizeImageToBlob(file, 1600, 'image/jpeg', 0.78); }
+  catch { setAxStatus('Could not read that image — use a PNG/JPG/WebP image.'); return; }
+  if (state.bootImage._url) { try { URL.revokeObjectURL(state.bootImage._url); } catch {} state.bootImage._url = null; }
+  state.bootImage.blob = out.blob; state.bootImage.file = 'sample/loading.web.jpg'; state.bootImage.name = 'loading.web.jpg';
+  applyBootImage(); updateBootImageAdminUI(); onAlignmentChanged();
+  setAxStatus(`Loading page image set (${out.W}×${out.H}). Click <strong>Save</strong> in the top bar to commit it.`);
+}
+function clearBootImage() {
+  if (state.bootImage._url) { try { URL.revokeObjectURL(state.bootImage._url); } catch {} state.bootImage._url = null; }
+  state.bootImage.file = null; state.bootImage.blob = null; state.bootImage.name = null;
+  applyBootImage(); updateBootImageAdminUI(); onAlignmentChanged();
+  setAxStatus('Loading page image removed. Click <strong>Save</strong> in the top bar to commit it.');
+}
+function updateBootImageAdminUI() {
+  const has = hasBootImage();
+  if (els.axBootImageName) { els.axBootImageName.textContent = has ? (state.bootImage.name || baseName(state.bootImage.file) || 'image') : 'no loading page image'; els.axBootImageName.classList.toggle('is-set', has); }
+  if (els.axBootImageClear) els.axBootImageClear.hidden = !has;
+  if (els.axBootImagePick) els.axBootImagePick.textContent = has ? '\u{1F5BC} Replace…' : '\u{1F5BC} Loading page image…';
+}
 
 // ─── Plot data source (admin: Google Sheet vs committed CSV) ───────────────────
 function updateSheetAdminUI() {
@@ -691,6 +810,35 @@ async function testSheet() {
     setSheetMsg(`✓ ${withId.length} row(s), plot_id column found${ids.size ? ` · ${matched}/${ids.size} match the layout` : ''}.`, ok ? 'ok' : 'err');
     onAlignmentChanged();
   } finally { if (els.axSheetTest) els.axSheetTest.disabled = false; }
+}
+// A concrete example of the exact header row this feature expects (the same fatal
+// error testSheet reports — "no plot_id column" — is the #1 way an admin hits this
+// blind, since nothing before this button ever showed them what the sheet is
+// supposed to look like). Uses the REAL plot ids from the current layout when any
+// exist, so pasting this straight into a fresh Google Sheet and hitting Test shows
+// every id already matching, rather than a generic template the admin then has to
+// find-and-replace. Deliberately keeps to the base plots.csv columns only
+// (plot_id/status/facing/size/dimensions/price/block/tour_url/notes) — the extra
+// video_url/image_url/media_json columns buildPlotsCSV also writes are advanced,
+// multi-media fields meant to be authored via the trace editor's own picker UI, not
+// hand-typed into a spreadsheet.
+function downloadSampleSheetCsv() {
+  const cols = ['plot_id', 'status', 'facing', 'size', 'dimensions', 'price', 'block', 'tour_url', 'notes'];
+  const statuses = ['available', 'reserved', 'sold'];
+  const facings = ['East', 'North', 'West', 'South'];
+  const sizes = ['1200 sq.ft', '1500 sq.ft', '1800 sq.ft', '2000 sq.ft'];
+  const dims = ['30x40', '30x50', '40x45', '40x50'];
+  const prices = ['1800000', '2250000', '2800000', '3200000'];
+  const blocks = ['A', 'A', 'B', 'B'];
+  const notesEx = ['Corner plot', '', 'Near clubhouse', 'Park facing'];
+  const ids = state.geom.length ? state.geom.slice(0, 5).map((g) => g.id) : ['Plot-101', 'Plot-102', 'Plot-103'];
+  const esc = (v) => { v = (v ?? '').toString(); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  const rows = ids.map((id, i) => [
+    id, statuses[i % statuses.length], facings[i % facings.length], sizes[i % sizes.length],
+    dims[i % dims.length], prices[i % prices.length], blocks[i % blocks.length], '', notesEx[i % notesEx.length],
+  ].map(esc).join(','));
+  const csv = cols.join(',') + '\n' + rows.join('\n') + '\n';
+  downloadFiles([['sample-plot-data.csv', csv, 'text/csv']]);
 }
 
 // ─── Header project menu (switch / new / duplicate / rename / delete) ─────────
@@ -739,6 +887,7 @@ function toggleProjSettings() {
     els.projMenuBtn.setAttribute('aria-expanded', 'false');
     closeProjName();
     updateBrandAdminUI();
+    updateBootImageAdminUI();
   }
 }
 function closeProjSettings() {
@@ -874,6 +1023,7 @@ async function loadGroundImage(src, opacity = 1, file = null) { // src = what to
   try {
     const tex = await new THREE.TextureLoader().loadAsync(src);
     tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false;
+    tex.anisotropy = 16;   // see the pano's identical line — default 1 blurs this drape badly
     buildGroundMesh(tex);
   } catch { state.groundImage = null; if (state.admin && els.axPlanRow) els.axPlanRow.hidden = true; } // missing image ⇒ skip the drape, don't break the app
   requestRender();
@@ -1020,7 +1170,12 @@ function renderLoop() {
   // With no category selected: free 360° spin (unchanged). With a category selected:
   // ping-pong between that category's rightmost and leftmost landmark instead
   // (increasing lon sweeps leftward — the pano is viewed from inside, so it's mirrored).
-  if (!steering && state.autoPan && !state.admin && !cameraAnimTimer && Date.now() - (state.lastUserTouch || 0) > 2200) {
+  // `!state.hoverId` holds the camera still for as long as the cursor rests on a plot
+  // (2026-09-18, on request). It has to be the hover STATE rather than a `lastUserTouch`
+  // bump, because a pointer resting motionless on a plot stops firing events — the idle
+  // timer would expire and the map would drift out from under whatever the visitor is
+  // reading. Leaving the plot resumes the drift on the usual idle delay.
+  if (!steering && state.autoPan && !state.admin && !cameraAnimTimer && !state.hoverId && Date.now() - (state.lastUserTouch || 0) > 2200) {
     const range = state.landmarkPanRange;
     if (range) {
       // Re-express the current lon as the equivalent value nearest the range so the
@@ -1044,6 +1199,7 @@ function renderLoop() {
 
   updateCamera();
   updateCompass();
+  updateTourMapCone();     // minimap view cone tracks the camera, same as the compass does
   three.renderer.render(three.scene, three.camera);
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
   if (els.landmarks && !els.landmarks.hidden) renderLandmarks();  // keep banners/pins/lines glued to the scene
@@ -1301,6 +1457,10 @@ function wireViewControls() {
     updateLegendVisibility();
   });
 
+  [els.areaFilterSel, els.areaFilterSelMobile].forEach((sel) => {
+    sel?.addEventListener('change', (e) => { e.stopPropagation(); touch(); setAreaFilter(sel.value); });
+    sel?.addEventListener('click', (e) => e.stopPropagation());   // don't let the pano steal the tap
+  });
   els.fsToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
   els.audioToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleAudio(); });
   els.autoPanToggle?.addEventListener('click', (e) => {
@@ -1311,6 +1471,7 @@ function wireViewControls() {
 
   updateAutoPanToggleUI();
   new ResizeObserver(debounce(onResize, 120)).observe(els.pano);
+  if (!state.admin) wireNavScrollHints();   // client drawer only — admin's is hidden entirely (wireAdmin)
 }
 
 function animateCameraTo(targetLon, targetLat, targetFov = null) {
@@ -1579,6 +1740,7 @@ function renderLandmarkCategoryNav() {
       e.stopPropagation();
       state.lastUserTouch = Date.now();
       applyCategoryFilter(btn.dataset.cat);
+      collapseClientDrawer();
     });
   });
   // Keep the active highlight correct across a rebuild mid-selection (e.g. a category
@@ -1586,6 +1748,97 @@ function renderLandmarkCategoryNav() {
   // trigger this while ALL/a category is already selected).
   els.catNav.querySelectorAll('.cat-btn').forEach((btn) => {
     btn.classList.toggle('is-active', btn.dataset.cat === (state.selectedCategory || 'ALL'));
+  });
+  addKeepMenuToggle(els.catNav, els.catNav.querySelectorAll('.cat-btn').length);
+}
+
+// Auto-collapses the drawer to its thin rail (same visual state as tapping the toggle)
+// whenever a visitor's selection actually shows them something to look at — a modal, a
+// landmark category framed on the pano, a tour room/tour switch, or the full aerial view
+// (2026-09-16, on request: the menu was left open and eating screen space over the very
+// thing the visitor just chose to see). Deliberately NOT used for pure menu navigation —
+// drilling into a folder or hitting BACK — since the visitor hasn't picked real content
+// yet and still needs the menu open to do so. `state.admin` guard is a cheap no-op safety
+// net: the client drawer is already `display:none` in admin (wireAdmin), so this would be
+// visually inert there regardless.
+function collapseClientDrawer() {
+  if (state.admin || !els.catDrawer) return;
+  if (state.keepMenuOpen) return;      // the visitor pinned the menu open — see buildKeepMenuToggle
+  els.catDrawer.classList.add('is-collapsed');
+  if (els.catToggleIco) els.catToggleIco.textContent = '›';
+}
+// "Keep open" — offered in every menu level that actually holds a choice (2+ rows), because
+// the auto-collapse is only ever annoying when you're comparing several items in a row.
+//
+// ONE shared preference rather than one per menu: a visitor who pins the menu open in the
+// landmark picker means "stop closing on me", not "stop closing in this list only", and a
+// per-level setting would leave them re-pinning it at every level. Persisted per browser
+// like the other client toggles.
+const KEEP_MENU_KEY = 'b91-keep-menu-open';
+function setKeepMenuOpen(on) {
+  state.keepMenuOpen = !!on;
+  try { localStorage.setItem(KEEP_MENU_KEY, state.keepMenuOpen ? '1' : '0'); } catch {}
+  syncKeepMenuToggles();
+}
+// Updates every copy in place. Deliberately NOT a re-render: renderClientSidebar's root
+// branch hides #catLevel2, so re-rendering from here would slam the landmark picker shut
+// the moment someone toggled this inside it.
+function syncKeepMenuToggles() {
+  document.querySelectorAll('.cat-keep').forEach((b) => {
+    b.classList.toggle('is-on', !!state.keepMenuOpen);
+    b.setAttribute('aria-pressed', String(!!state.keepMenuOpen));
+    b.title = state.keepMenuOpen ? 'Menu stays open when you pick an item' : 'Menu closes when you pick an item';
+  });
+}
+function buildKeepMenuToggle() {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'cat-keep' + (state.keepMenuOpen ? ' is-on' : '');
+  b.setAttribute('aria-pressed', String(!!state.keepMenuOpen));
+  b.title = state.keepMenuOpen ? 'Menu stays open when you pick an item' : 'Menu closes when you pick an item';
+  b.innerHTML = '<span class="cat-keep-box"></span><span class="cat-keep-lbl">KEEP OPEN</span>';
+  b.addEventListener('click', (e) => {
+    e.stopPropagation(); state.lastUserTouch = Date.now();
+    setKeepMenuOpen(!state.keepMenuOpen);
+  });
+  return b;
+}
+// Only worth offering where there's more than one thing to pick between.
+function addKeepMenuToggle(container, itemCount) {
+  if (!container || itemCount <= 1) return;
+  container.prepend(buildKeepMenuToggle());
+}
+
+// "There's more to scroll" hint (2026-09-16, on request — see the CSS comment on
+// .has-more-below for why a bare scrollbar isn't enough). Toggles the fade on whichever
+// `.cat-menu-level` wraps this nav, from real scroll metrics: only shown while there is
+// GENUINELY more content below AND the visitor hasn't already scrolled to see it, so it
+// can never lie by lingering once they're actually at the bottom.
+function updateNavScrollHint(nav) {
+  if (!nav) return;
+  const wrap = nav.closest('.cat-menu-level');
+  if (!wrap) return;
+  const canScroll = nav.scrollHeight > nav.clientHeight + 2;
+  const atBottom = nav.scrollTop + nav.clientHeight >= nav.scrollHeight - 2;
+  wrap.classList.toggle('has-more-below', canScroll && !atBottom);
+}
+// Wired once at boot rather than called from every render site: three different
+// functions (renderClientSidebar's two branches, renderLandmarkCategoryNav) replace
+// these containers' innerHTML, each with its own early returns for the empty/no-items
+// case — hooking every one of them by hand is exactly the kind of thing that quietly
+// goes stale the next time a new render path is added. A MutationObserver on each
+// container instead reacts to ANY content change automatically, present or future; a
+// ResizeObserver alongside it catches the cases content itself doesn't change but the
+// available space does (rotating the phone, the drawer's own collapse/expand).
+function wireNavScrollHints() {
+  ['catNavL1', 'catNav', 'catSubMenuNav'].forEach((id) => {
+    const nav = $(id);
+    if (!nav) return;
+    const check = () => updateNavScrollHint(nav);
+    nav.addEventListener('scroll', check, { passive: true });
+    new MutationObserver(check).observe(nav, { childList: true, subtree: true, characterData: true });
+    if (typeof ResizeObserver === 'function') new ResizeObserver(check).observe(nav);
+    check();
   });
 }
 
@@ -1957,6 +2210,11 @@ function pick(e) {
   // pins), so they are hit-tested here instead. Admin drags are handled by the element's
   // own pointerdown, which stops propagation before capture happens.
   if (state.tourView) {
+    // The minimap's room dots are the same trap again — they sit inside #pano, so their
+    // own click is eaten by its pointer capture. Checked BEFORE .tour-hs because the
+    // minimap is an overlay drawn on top of everything else in the scene.
+    const dot = hitEl?.closest?.('.tour-map-dot');
+    if (dot) { const nid = dot.dataset.nodeId; if (nid) tourGoTo(nid); return; }
     const hs = hitEl?.closest?.('.tour-hs');
     if (hs) { const i = tourHsDom.findIndex((h) => h.el === hs); if (i >= 0) hs.click(); }
     return;
@@ -1972,17 +2230,91 @@ function pick(e) {
 }
 function setEmphasis(id, on) {
   const p = state.plots.get(id); if (!p || id === state.selectedId) return;
+  els.pano.style.cursor = on ? 'pointer' : '';
+  // A plot filtered out by the active area band stays faded even under the cursor — the
+  // whole point of the band is that everything outside it recedes, and hover-brightening it
+  // (then resetting it to full opacity on the way out) was un-dimming plots one by one as
+  // the pointer crossed the layout.
+  if (isAreaDimmed(id)) { paintPlot(p, id, p.status); return; }
   p.fill.material.opacity = on ? Math.min(1, state.overlayOpacity + 0.3) : state.overlayOpacity;
-  p.line.material.opacity = on ? 1 : 0.95; els.pano.style.cursor = on ? 'pointer' : '';
+  p.line.material.opacity = on ? 1 : 0.95;
 }
 
 // ─── Data join → colour + legend ──────────────────────────────────────────────
+// ─── Area filters (admin-defined size bands) ─────────────────────────────────
+// Units offered to the admin. This is a LABEL ONLY — see plotAreaValue.
+const AREA_UNITS = ['sq.ft', 'sq.m', 'sq.yd', 'gaj', 'acre', 'hectare', 'cent', 'marla'];
+const DEFAULT_FILTER_COLORS = ['#4f9dfb', '#9b6cf6', '#28b7a6', '#f08a3c', '#e05b8a', '#7cc44a'];
+// A plot's area as a NUMBER, or null when it can't be read.
+//
+// The catch this whole feature has to live with: `size` is free text ("1200 sq.ft") — the
+// number and its unit are one string, and always have been. So an explicit numeric `area`
+// column wins where a project has one, and otherwise the leading number is parsed out of
+// `size`. That also means we can NOT convert between units (we'd be guessing each row's
+// source unit), which is why state.area.unit is only ever a display label and the admin's
+// min/max are read in whatever unit the data already uses.
+function plotAreaValue(row) {
+  if (!row) return null;
+  const explicit = parseFloat(String(row.area ?? '').replace(/,/g, ''));
+  if (isFinite(explicit)) return explicit;
+  const m = String(row.size ?? '').replace(/,/g, '').match(/\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+const activeAreaFilter = () => state.area.filters.find((f) => f.id === state.areaFilterId) || null;
+function plotMatchesAreaFilter(row, f) {
+  if (!f) return true;
+  const a = plotAreaValue(row);
+  if (a == null) return false;                      // unreadable area can't satisfy a range
+  return (f.min == null || a >= f.min) && (f.max == null || a <= f.max);
+}
+// How many plots this filter would actually match — drives the admin's per-filter readout,
+// so a band that silently matches nothing is visible at authoring time rather than being
+// discovered on the live site.
+function areaFilterMatchCount(f) {
+  let n = 0;
+  state.geom.forEach((g) => { if (plotMatchesAreaFilter(state.rows.get(g.id), f)) n++; });
+  return n;
+}
+// Plots whose area couldn't be read at all — the other half of that readout.
+function areaReadableCount() {
+  let n = 0;
+  state.geom.forEach((g) => { if (plotAreaValue(state.rows.get(g.id)) != null) n++; });
+  return n;
+}
+const hexToInt = (s) => { const n = parseInt(String(s || '').replace('#', ''), 16); return isFinite(n) ? n : 0x888888; };
+
+const AREA_DIM = 0.22;                                  // how far a plot outside the active band fades back
+const isAreaDimmed = (id) => { const f = activeAreaFilter(); return !!f && !plotMatchesAreaFilter(state.rows.get(id), f); };
+// A plot's RESTING appearance right now: its status colour normally, the active band's
+// colour when it falls in that band, faded when a band is active and it doesn't.
+//
+// Every styling path goes through this — initial paint, hover-off and deselect — because
+// they each used to re-derive "normal" as `state.overlayOpacity` + the status colour, which
+// meant simply moving the cursor across a filtered-out plot permanently un-dimmed it
+// (reported 2026-09-18). Anything that restores a plot's look must ask here, not assume.
+function plotBaseStyle(id, status) {
+  const st = STATUS_META[status] ? status : 'unknown';
+  const f = activeAreaFilter();
+  if (!f) return { color: STATUS_META[st].color, fill: state.overlayOpacity, line: 0.95 };
+  return plotMatchesAreaFilter(state.rows.get(id), f)
+    ? { color: hexToInt(f.color), fill: state.overlayOpacity, line: 0.95 }
+    : { color: STATUS_META[st].color, fill: state.overlayOpacity * AREA_DIM, line: AREA_DIM };
+}
+function paintPlot(p, id, status) {
+  const s = plotBaseStyle(id, status);
+  p.fill.material.color.setHex(s.color); p.fill.material.opacity = s.fill;
+  p.line.material.color.setHex(s.color); p.line.material.opacity = s.line;
+}
 function colorPlots() {
+  // While a band is picked, matching plots wear ITS colour and everything else fades back —
+  // non-matching plots are dimmed rather than hidden so the layout still reads as a whole
+  // and you can see where the matches sit within it. Status filtering still applies on top
+  // (a plot must pass both), since "Type 1 AND available" is the real question being asked.
   state.plots.forEach((p, id) => {
     const row = state.rows.get(id), status = STATUS_META[row?.status] ? row.status : 'unknown';
     p.status = status; p.group.visible = state.activeFilters.has(status);
     if (id === state.selectedId) applySelectStyle(p, status);
-    else { const c = STATUS_META[status].color; p.fill.material.color.setHex(c); p.fill.material.opacity = state.overlayOpacity; p.line.material.color.setHex(c); p.line.material.opacity = 0.95; }
+    else paintPlot(p, id, status);
   });
 }
 // Selection keeps the plot's STATUS colour (so availability stays readable) and
@@ -2004,7 +2336,11 @@ function applyData() {
 function renderLegend(counts) {
   els.legend.innerHTML = '';
   STATUS_ORDER.forEach((s) => {
-    if (s === 'unknown' && counts.unknown === 0) return;
+    // 'unknown' is still a real internal status — a plot with no status data keeps
+    // rendering in grey and stays visible — but it gets no legend chip (2026-09-18, on
+    // request): it's an artefact of missing data rather than something a visitor chooses
+    // between, and the area Filter dropdown now occupies that slot.
+    if (s === 'unknown') return;
     const chip = document.createElement('button');
     chip.className = 'chip'; chip.type = 'button'; chip.dataset.status = s;
     chip.setAttribute('aria-pressed', String(state.activeFilters.has(s)));
@@ -2012,6 +2348,11 @@ function renderLegend(counts) {
     chip.addEventListener('click', () => toggleFilter(s));
     els.legend.appendChild(chip);
   });
+  // Adopt the area dropdown as the row's last item, so it sits right after Sold instead of
+  // being pushed to the far edge of the header. MOVED, not recreated — appendChild relocates
+  // the live element, keeping its change listener and current selection intact, which also
+  // means it has to be re-adopted here on every legend rebuild (innerHTML='' above drops it).
+  if (els.areaFilterSel) els.legend.appendChild(els.areaFilterSel);
   // Landscape's compact stand-in for the header legend (hidden there, see styles.css) —
   // keep all three counts in sync the same way the header chips just were.
   syncZoomStatusButtons(counts);
@@ -2033,6 +2374,140 @@ function updateLegendVisibility() {
   const show = isAerialSectionActive();
   els.legend?.classList.toggle('is-hidden', !show);
   els.zoomStatusGroup?.classList.toggle('is-hidden', !show);
+  // The area dropdown follows the legend exactly: it only means anything on the plot map,
+  // so it goes away inside a tour / the landmark picker like every other plot-map control.
+  const hasFilters = (state.area.filters || []).length > 0;
+  [els.areaFilterSel, els.areaFilterSelMobile].forEach((s) => {
+    if (!s) return;
+    s.hidden = !hasFilters;
+    s.classList.toggle('is-hidden', !show);
+  });
+}
+// Both dropdowns are built from one list so they can't drift — same reasoning as
+// syncZoomStatusButtons for the status pills.
+function renderAreaFilterUI() {
+  const filters = state.area.filters || [];
+  [els.areaFilterSel, els.areaFilterSelMobile].forEach((sel) => {
+    if (!sel) return;
+    sel.innerHTML = '';
+    const all = document.createElement('option'); all.value = ''; all.textContent = 'Filter: All sizes';
+    sel.appendChild(all);
+    filters.forEach((f) => {
+      const o = document.createElement('option');
+      o.value = f.id;
+      const range = f.min != null && f.max != null ? `${f.min}–${f.max}`
+        : f.min != null ? `${f.min}+` : f.max != null ? `up to ${f.max}` : 'any';
+      o.textContent = `${f.name} (${range} ${state.area.unit})`;
+      sel.appendChild(o);
+    });
+    sel.value = state.areaFilterId || '';
+  });
+  updateLegendVisibility();
+}
+// ── Admin: project area unit ──
+// The unit is declared once for the whole project (it sits with Plot Data, since it
+// describes the data rather than the filters), and every plot's area is read in it.
+// Changing it rewrites each plot's free-text Area so the stored data actually says what
+// the project claims — otherwise "1200 sq.ft" rows would sit under a project labelled
+// sq.m and the client would show a unit the data contradicts.
+//
+// The NUMBER is preserved verbatim: this normalises the label, it does NOT convert
+// 1200 sq.ft into 111.48 sq.m. Rewriting figures the admin typed is a much bigger,
+// harder-to-undo action than relabelling, and a project's plots are realistically entered
+// in one unit already — so switching the unit is "I mis-stated which unit these are in",
+// not "convert my measurements".
+function applyAreaUnitToPlots(unit) {
+  const relabel = (s) => {
+    const m = String(s ?? '').replace(/,/g, '').match(/\d+(\.\d+)?/);
+    return m ? `${m[0]} ${unit}` : (s ?? '');     // blank / unparseable areas are left alone
+  };
+  state.rows.forEach((r) => { if (r && r.size) r.size = relabel(r.size); });
+  // While the tracer is open (which it always is — this control lives inside it) its own
+  // copy of each plot is the one on screen, so it has to be rewritten too or the edit
+  // would appear to do nothing and then be undone by the next commit.
+  if (trace.open && trace.plots.length) { trace.plots.forEach((p) => { if (p.size) p.size = relabel(p.size); }); refreshTraceList(); }
+  applyData();
+}
+function setAreaUnit(unit) {
+  const prev = state.area.unit;
+  state.area.unit = unit || 'sq.ft';
+  if (prev !== state.area.unit) applyAreaUnitToPlots(state.area.unit);
+  refreshAreaAdminUI(); renderAreaFilterUI(); onAlignmentChanged();
+}
+
+// ── Admin: area band editor ──
+function addAreaFilter() {
+  const n = state.area.filters.length;
+  state.area.filters.push({ id: `af${Date.now().toString(36)}${n}`, name: `Type ${n + 1}`, min: null, max: null,
+    color: DEFAULT_FILTER_COLORS[n % DEFAULT_FILTER_COLORS.length] });
+  refreshAreaAdminUI(); renderAreaFilterUI(); onAlignmentChanged();
+}
+function deleteAreaFilter(id) {
+  state.area.filters = state.area.filters.filter((f) => f.id !== id);
+  if (state.areaFilterId === id) setAreaFilter(null);
+  refreshAreaAdminUI(); renderAreaFilterUI(); onAlignmentChanged();
+}
+function refreshAreaAdminUI() {
+  if (!els.axAreaList) return;
+  // The unit picker lives in the Plot Data section, not this panel — populated here anyway
+  // since this is the one refresh both share.
+  if (els.axAreaUnit) {
+    if (!els.axAreaUnit.options.length) {
+      AREA_UNITS.forEach((u) => { const o = document.createElement('option'); o.value = u; o.textContent = u; els.axAreaUnit.appendChild(o); });
+    }
+    els.axAreaUnit.value = state.area.unit || 'sq.ft';
+  }
+  // The honest readout. A band matching nothing looks identical to a band configured
+  // wrongly, and area is parsed out of free text (see plotAreaValue), so say plainly how
+  // many plots actually yielded a number.
+  if (els.axAreaNote) {
+    const total = state.geom.length, ok = areaReadableCount();
+    els.axAreaNote.textContent = total
+      ? `Area readable on ${ok} of ${total} plots${ok < total ? ' — the rest have no number in their Area field.' : '.'}`
+      : 'No plots yet — import a layout first.';
+    els.axAreaNote.className = 'ax-area-note' + (total && ok < total ? ' is-warn' : '');
+  }
+
+  els.axAreaList.innerHTML = '';
+  state.area.filters.forEach((f) => {
+    const row = document.createElement('div'); row.className = 'ax-area-row';
+    const name = document.createElement('input'); name.className = 'ax-area-name'; name.value = f.name; name.title = 'Filter name';
+    name.addEventListener('input', () => { f.name = name.value; renderAreaFilterUI(); onAlignmentChanged(); });
+    const swatch = document.createElement('input'); swatch.type = 'color'; swatch.className = 'ax-area-color'; swatch.value = f.color; swatch.title = 'Highlight colour';
+    swatch.addEventListener('input', () => { f.color = swatch.value; if (state.areaFilterId === f.id) { colorPlots(); requestRender(true); } onAlignmentChanged(); });
+    const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete filter';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteAreaFilter(f.id); });
+    row.append(swatch, name, del);
+
+    const range = document.createElement('div'); range.className = 'ax-area-range';
+    const mk = (key, ph) => {
+      const i = document.createElement('input');
+      i.type = 'number'; i.className = 'ax-area-num'; i.placeholder = ph; i.inputMode = 'decimal';
+      i.value = f[key] == null ? '' : String(f[key]);
+      i.addEventListener('input', () => {
+        // Blank stays null ("open-ended"), never 0 — otherwise "up to 1200" silently
+        // becomes "exactly 0 to 1200" and matches almost nothing.
+        f[key] = i.value.trim() === '' ? null : (isFinite(+i.value) ? +i.value : null);
+        if (state.areaFilterId === f.id) { colorPlots(); requestRender(true); }
+        updateAreaCount(); renderAreaFilterUI(); onAlignmentChanged();
+      });
+      return i;
+    };
+    const count = document.createElement('span'); count.className = 'ax-area-count';
+    const updateAreaCount = () => { count.textContent = `${areaFilterMatchCount(f)} plots`; };
+    updateAreaCount();
+    range.append(mk('min', 'min'), document.createTextNode('–'), mk('max', 'max'),
+      Object.assign(document.createElement('span'), { className: 'ax-area-unit', textContent: state.area.unit }), count);
+
+    const wrap = document.createElement('div'); wrap.className = 'ax-area-item';
+    wrap.append(row, range);
+    els.axAreaList.appendChild(wrap);
+  });
+}
+function setAreaFilter(id) {
+  state.areaFilterId = id || null;
+  [els.areaFilterSel, els.areaFilterSelMobile].forEach((s) => { if (s) s.value = state.areaFilterId || ''; });
+  colorPlots(); requestRender(true);
 }
 
 // The landscape status chips mirror the header legend's state; kept in one place so the
@@ -2184,9 +2659,11 @@ function placePanel() {
   pop.dataset.side = side;
   if (side !== 'none') pop.style.setProperty('--caret-y', Math.max(18, Math.min(ph - 18, ay - y)) + 'px');
 }
+// Deselecting returns a plot to its resting look — which, with an area band active, means
+// the band's colour or the faded state, NOT an unconditional status colour at full opacity.
 function restorePlotStyle(id) {
-  const p = state.plots.get(id); if (!p) return; const c = STATUS_META[p.status || 'unknown'].color;
-  p.fill.material.color.setHex(c); p.fill.material.opacity = state.overlayOpacity; p.line.material.color.setHex(c); p.line.material.opacity = 0.95;
+  const p = state.plots.get(id); if (!p) return;
+  paintPlot(p, id, p.status || 'unknown');
 }
 function closePanel() {
   els.panel.classList.remove('open'); els.panel.setAttribute('aria-hidden', 'true');
@@ -2654,11 +3131,25 @@ function parseAlignment(d) {
   const b = d && d.brand;
   const brand = b ? { name: (b.name || '').toString(), tagline: (b.tagline || '').toString(), logo: (b.logo && b.logo.file) ? b.logo.file : null, _ver: savedAt } : null;
   const au = d && d.audio; const audio = (au && au.file) ? { file: au.file, _ver: savedAt } : null;
+  const bi = d && d.bootImage; const bootImage = (bi && bi.file) ? { file: bi.file, _ver: savedAt } : null;
   const northDeg = (d && isFinite(+d.northDeg)) ? +d.northDeg : null;   // which stored lon is true north (compass)
   const dc = d && d.data, sh = dc && dc.sheet;                       // plot-data source (Google Sheet | committed file)
   const data = { enabled: !!(dc && dc.source === 'sheet'), url: (sh && sh.url || '').toString(), gid: (sh && sh.gid != null ? String(sh.gid) : '') };
   const menuConfig = d && d.menuConfig ? d.menuConfig : null;
-  return { transform, view, opacity, groundImage, panoImage, brand, audio, northDeg, data, menuConfig, savedAt };
+  const area = parseAreaConfig(d && d.area);
+  // Admin edits that outrank the live sheet. Whitelisted per field so a hand-edited or
+  // round-tripped file can't inject arbitrary keys into a plot row.
+  const plotOverrides = {};
+  const po = d && d.plotOverrides;
+  if (po && typeof po === 'object') {
+    for (const [id, fields] of Object.entries(po)) {
+      if (!id || !fields || typeof fields !== 'object') continue;
+      const clean = {};
+      OVERRIDE_FIELDS.forEach((k) => { if (fields[k] != null && String(fields[k]) !== '') clean[k] = String(fields[k]); });
+      if (Object.keys(clean).length) plotOverrides[id] = clean;
+    }
+  }
+  return { transform, view, opacity, groundImage, panoImage, brand, audio, bootImage, northDeg, data, menuConfig, area, plotOverrides, savedAt };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
   try { const res = await loadProjectFile('alignment.json'); if (!res || !res.ok) return null; return parseAlignment(await res.json()); }
@@ -2674,14 +3165,42 @@ function alignmentData() {
     ...(state.panoImage ? { panoImage: { file: state.panoImage.file } } : {}),
     ...(brandData() ? { brand: brandData() } : {}),
     ...(audioData() ? { audio: audioData() } : {}),
+    ...(bootImageData() ? { bootImage: bootImageData() } : {}),
     ...(state.northDeg ? { northDeg: +(+state.northDeg).toFixed(2) } : {}),
     ...(sheetData() ? { data: sheetData() } : {}),
+    ...(areaData() ? { area: areaData() } : {}),
+    ...(Object.keys(state.plotOverrides || {}).length ? { plotOverrides: state.plotOverrides } : {}),
     ...(menuConfigData() ? { menuConfig: menuConfigData() } : {}) };
 }
 // Serialise the plot-data source (only when a sheet URL has been configured).
 function sheetData() {
   const url = (state.sheet.url || '').trim(); if (!url) return null;
   return { source: state.sheet.enabled ? 'sheet' : 'file', sheet: { url, ...(state.sheet.gid ? { gid: state.sheet.gid } : {}) } };
+}
+// Serialise the area unit + bands. Omitted entirely when a project has defined no filters
+// AND left the unit at its default, so alignment.json is byte-identical for every project
+// that never touches this feature.
+function areaData() {
+  const filters = (state.area.filters || []).filter((f) => f && f.name);
+  if (!filters.length && state.area.unit === 'sq.ft') return null;
+  return { unit: state.area.unit || 'sq.ft',
+    filters: filters.map((f) => ({ id: f.id, name: f.name, color: f.color,
+      ...(f.min == null ? {} : { min: +f.min }), ...(f.max == null ? {} : { max: +f.max }) })) };
+}
+function parseAreaConfig(a) {
+  const out = { unit: 'sq.ft', filters: [] };
+  if (!a || typeof a !== 'object') return out;
+  if (typeof a.unit === 'string' && a.unit.trim()) out.unit = a.unit.trim();
+  // A blank min or max means "open-ended on that side" — stored as null, not 0, or a band
+  // written as "up to 1200" would silently become "exactly 0 to 1200".
+  out.filters = (Array.isArray(a.filters) ? a.filters : []).map((f, i) => ({
+    id: (f?.id || `af${i + 1}`).toString(),
+    name: (f?.name || `Filter ${i + 1}`).toString(),
+    color: /^#[0-9a-f]{6}$/i.test(f?.color || '') ? f.color : DEFAULT_FILTER_COLORS[i % DEFAULT_FILTER_COLORS.length],
+    min: (f?.min == null || f.min === '') ? null : (isFinite(+f.min) ? +f.min : null),
+    max: (f?.max == null || f.max === '') ? null : (isFinite(+f.max) ? +f.max : null),
+  })).filter((f) => f.id);
+  return out;
 }
 function onAlignmentChanged() { if (!state.admin) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify(alignmentData())); } catch {} scheduleSessionSave(); setAxStatus('Unsaved changes — click <strong>Save</strong> in the top bar to apply.'); }
 function setAxStatus(msg) { if (els.axStatus) els.axStatus.innerHTML = msg; }
@@ -2727,11 +3246,13 @@ function buildSession() {                                // a complete snapshot 
     pano: state.panoBlob ? { name: state.panoName || 'pano.web.jpg', blob: state.panoBlob } : null,
     brandLogo: state.brand.logoBlob ? { name: state.brand.logoName || 'logo.web.png', blob: state.brand.logoBlob } : null,
     siteAudio: state.audio.blob ? { name: state.audio.name || 'audio.mp3', blob: state.audio.blob } : null,
+    bootImage: state.bootImage.blob ? { name: state.bootImage.name || 'loading.web.jpg', blob: state.bootImage.blob } : null,
     landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, category: l.category || null, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
     amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes, render: a.render, renderBlob: a.renderBlob || null, hotspot: { ...a.hotspot } })),
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null, defaultView: { ...n.defaultView } })),
-      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot } })) })),
+      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot }, icon: k.icon, rot: k.rot })),
+      map: t.map ? { file: t.map.file, blob: t.map.blob || null, points: (t.map.points || []).map((p) => ({ ...p })) } : null })),
   };
 }
 let sessionTimer = null;
@@ -2947,8 +3468,10 @@ async function fetchReferencedImages(haveNames) {
   if (!state.planBlob) add(state.groundImage?.file);
   if (!state.brand.logoBlob) add(state.brand.logo);
   if (!state.audio.blob) add(state.audio.file);
+  if (!state.bootImage.blob) add(state.bootImage.file);
   state.amenities.forEach((a) => { if (!a.renderBlob) add(a.render); });
   state.landmarks.forEach((l) => { if (!l.renderBlob) add(l.render); });
+  state.tours.forEach((t) => { if (t.map && !t.map.blob) add(t.map.file); });
   const out = [];
   for (const name of new Set(refs)) {
     try { const r = await fetch(`${state.assetBase}/${name}`); if (r.ok) out.push([name, await r.blob(), 'application/octet-stream']); } catch {}
@@ -3009,10 +3532,21 @@ async function exportSite() {
   const planBlob = trace.planBlob || state.planBlob || (trace.objURL ? await (await fetch(trace.objURL)).blob() : null);
   const planName = trace.srcName || state.planName || 'plan.web.png';
   const panoBlob = state.panoBlob, panoName = state.panoName || baseName(state.panoImage?.file || '');
-  // When a live sheet is the source, snapshot it into plots.csv so the committed file stays
-  // a current fallback (and is what a standalone bundle bakes in); fall back to state.rows.
-  let plotsCsv = hasGeom ? buildPlotsCSV() : '';
-  if (hasGeom && state.sheet.enabled && state.sheet.url) { const snap = await fetchSheetRows().catch(() => null); if (snap && snap.size) plotsCsv = buildPlotsCSV(snap); }
+  // plots.csv is always written from state.rows — the admin's working data, which already
+  // merges sheet + their own edits (see loadData). It used to be REBUILT FROM A FRESH SHEET
+  // SNAPSHOT here whenever a sheet was configured, which silently discarded every admin edit
+  // at the moment of saving: change a plot's size, hit Save, and the sheet's value was
+  // written instead. Fixed 2026-09-18 on report ("admin changes should be considered truth").
+  //
+  // The sheet is still re-fetched, but only to work out WHICH fields the admin has changed
+  // away from it; those are recorded as overrides in alignment.json and re-applied over the
+  // sheet on every load, so an edit survives later sheet updates instead of being a
+  // one-time snapshot.
+  if (hasGeom && state.sheet.enabled && state.sheet.url) {
+    const snap = await fetchSheetRows().catch(() => null);
+    if (snap && snap.size) state.plotOverrides = computePlotOverrides(snap);
+  }
+  const plotsCsv = hasGeom ? buildPlotsCSV() : '';
   const files = [
     ...(hasGeom ? [['plots.svg', buildPlotsSVG(), 'image/svg+xml'], ['plots.csv', plotsCsv, 'text/csv']] : []),
     ['alignment.json', JSON.stringify(alignmentData(), null, 2), 'application/json'],
@@ -3020,6 +3554,7 @@ async function exportSite() {
     ...(panoBlob && panoName ? [[panoName, panoBlob, 'image/jpeg']] : []),
     ...(state.brand.logoBlob && state.brand.logo ? [[baseName(state.brand.logo), state.brand.logoBlob, 'image/png']] : []),
     ...(state.audio.blob && state.audio.file ? [[baseName(state.audio.file), state.audio.blob, state.audio.blob.type || (/\.(mp4|m4v|mov|mkv|webm)$/i.test(state.audio.file) ? 'video/mp4' : 'audio/mpeg')]] : []),
+    ...(state.bootImage.blob && state.bootImage.file ? [[baseName(state.bootImage.file), state.bootImage.blob, 'image/jpeg']] : []),
     ['landmarks.json', JSON.stringify(buildLandmarksData(), null, 2), 'application/json'],
     ['amenities.json', JSON.stringify(buildAmenitiesData(), null, 2), 'application/json'],
     ...(hasTours ? [['tour.json', JSON.stringify(buildToursData(), null, 2), 'application/json'], ...tourNodeBlobFiles()] : []),
@@ -3184,13 +3719,26 @@ function wireAdmin() {
   els.axBrandLogo?.addEventListener('click', () => els.axBrandLogoFile.click());
   els.axBrandLogoFile?.addEventListener('change', () => { const f = els.axBrandLogoFile.files?.[0]; if (f) setBrandLogo(f); els.axBrandLogoFile.value = ''; });
   els.axBrandLogoClear?.addEventListener('click', clearBrandLogo);
+  els.axBootImagePick?.addEventListener('click', () => els.axBootImageFile.click());
+  els.axBootImageFile?.addEventListener('change', () => { const f = els.axBootImageFile.files?.[0]; if (f) setBootImage(f); els.axBootImageFile.value = ''; });
+  els.axBootImageClear?.addEventListener('click', clearBootImage);
   els.axAudioPick?.addEventListener('click', () => els.axAudioFile.click());
   els.axAudioFile?.addEventListener('change', () => { const f = els.axAudioFile.files?.[0]; if (f) setSiteAudioFile(f); els.axAudioFile.value = ''; });
   els.axAudioClear?.addEventListener('click', clearSiteAudio);
   updateBrandAdminUI();
+  updateBootImageAdminUI();
   els.axSheetOn?.addEventListener('change', () => { state.sheet.enabled = els.axSheetOn.checked; updateSheetAdminUI(); if (state.sheet.enabled && !state.sheet.url) setSheetMsg('Paste your Google Sheet link, then Test.', ''); onAlignmentChanged(); });
   els.axSheetUrl?.addEventListener('input', () => { state.sheet.url = els.axSheetUrl.value; state.sheet.gid = ''; onAlignmentChanged(); });
+  els.axAreaAdd?.addEventListener('click', addAreaFilter);
+  els.axAreaToggle?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const collapsed = els.axAreaPanel?.classList.toggle('is-collapsed');
+    els.axAreaToggle.setAttribute('aria-expanded', String(!collapsed));
+  });
+  els.axAreaUnit?.addEventListener('change', () => setAreaUnit(els.axAreaUnit.value));
+  refreshAreaAdminUI();
   els.axSheetTest?.addEventListener('click', testSheet);
+  els.axSheetSample?.addEventListener('click', downloadSampleSheetCsv);
   updateSheetAdminUI();
   els.axTabBtnAlign.addEventListener('click', () => setAdminTab('align'));
   els.axTabBtnLandmarks.addEventListener('click', () => setAdminTab('landmarks'));
@@ -3211,6 +3759,62 @@ function wireAdmin() {
   els.axTourLoad?.addEventListener('click', () => els.axTourFile?.click());
   els.axTourFile?.addEventListener('change', async () => { const f = els.axTourFile.files?.[0]; if (f) { try { setTours(parseTours(JSON.parse(await f.text()))); onToursChanged(); setAxStatus(`Loaded ${state.tours.length} tour(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that tour file (${err.message}).`); } } els.axTourFile.value = ''; });
   els.axTourNodeFile?.addEventListener('change', async () => { const f = els.axTourNodeFile.files?.[0]; if (f) await addTourNodeFromFile(f); els.axTourNodeFile.value = ''; });
+  els.axTourMapFile?.addEventListener('change', async () => { const f = els.axTourMapFile.files?.[0]; if (f) await setTourMapFromFile(f); els.axTourMapFile.value = ''; });
+  // Tour-map editor: a click anywhere on the image places the ARMED room's dot there.
+  // `tourMapEdit.drag` is checked first because a drag that ends over the canvas also
+  // fires a click — without the guard, releasing a dragged dot would place the armed
+  // room on top of wherever the drag happened to end.
+  els.tourMapCanvas?.addEventListener('click', (e) => {
+    if (tourMapEdit.dragJustEnded) { tourMapEdit.dragJustEnded = false; return; }
+    if (!tourMapEdit.armed) return;
+    const { x, y } = tourMapNorm(e);
+    const armed = tourMapEdit.armed;
+    tourMapEdit.armed = null;
+    setTourMapPoint(armed, x, y);
+  });
+  els.tourMapCanvas?.addEventListener('pointermove', (e) => {
+    // Aiming a cone: the angle is just the pointer's bearing from that dot's centre,
+    // measured clockwise from "up" to match the CSS rotation the cone uses.
+    if (tourMapEdit.rotDrag) {
+      const t = curTourMapTour(); const p = t && tourMapPointFor(t, tourMapEdit.rotDrag.nodeId);
+      if (!p) return;
+      const r = els.tourMapCanvas.getBoundingClientRect();
+      const dx = (e.clientX - r.left) - p.x * r.width;
+      const dy = (e.clientY - r.top) - p.y * r.height;
+      if (Math.hypot(dx, dy) < 6) return;            // too close to the centre to read an angle
+      p.rot = normDeg(Math.atan2(dx, -dy) * 180 / Math.PI);
+      els.tourMapEditDots?.querySelectorAll(`.tourmap-cone.is-armed, .tourmap-rot`)
+        .forEach((el) => el.style.setProperty('--rot', `${p.rot}deg`));
+      const readout = els.tourMapNodeList?.querySelector('.tourmap-noderow.is-armed .tourmap-noderow-state');
+      if (readout) readout.textContent = `${Math.round(p.rot)}°`;
+      return;
+    }
+    if (!tourMapEdit.drag) return;
+    tourMapEdit.drag.moved = true;
+    const { x, y } = tourMapNorm(e);
+    const t = curTourMapTour(); const p = t && tourMapPointFor(t, tourMapEdit.drag.nodeId);
+    if (!p) return;
+    p.x = x; p.y = y;
+    // Move the live element directly rather than re-rendering the whole editor on every
+    // pointermove — a full re-render would destroy the element mid-drag and drop the
+    // pointer capture with it.
+    const el = els.tourMapEditDots?.querySelector(`.tourmap-dot[data-node-id="${CSS.escape(p.nodeId)}"]`);
+    if (el) { el.style.left = `${x * 100}%`; el.style.top = `${y * 100}%`; }
+  });
+  const endTourMapDrag = () => {
+    if (tourMapEdit.rotDrag) {
+      tourMapEdit.rotDrag = null; tourMapEdit.dragJustEnded = true;
+      onToursChanged(); renderTourMapEditor(); renderClientTourMap();
+      return;
+    }
+    if (!tourMapEdit.drag) return;
+    const moved = tourMapEdit.drag.moved;
+    tourMapEdit.drag = null;
+    if (moved) { tourMapEdit.dragJustEnded = true; onToursChanged(); renderTourMapEditor(); renderClientTourMap(); }
+  };
+  els.tourMapCanvas?.addEventListener('pointerup', endTourMapDrag);
+  els.tourMapCanvas?.addEventListener('pointercancel', endTourMapDrag);
+  els.tourMapModal?.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeTourMapEditor));
   setAdminTab('align');
   els.axSave?.addEventListener('click', saveAlignmentAs);
   els.axExport?.addEventListener('click', exportSite);
@@ -3229,6 +3833,9 @@ function wireAdmin() {
       if (state.audio._url) { try { URL.revokeObjectURL(state.audio._url); } catch {} }
       state.audio = { file: a.audio?.file || null, blob: null, name: a.audio?.file ? baseName(a.audio.file) : null, _url: null, _ver: a.audio?._ver || '' };
       applySiteAudio();
+      if (state.bootImage._url) { try { URL.revokeObjectURL(state.bootImage._url); } catch {} }
+      state.bootImage = { file: a.bootImage?.file || null, blob: null, name: a.bootImage?.file ? baseName(a.bootImage.file) : null, _url: null, _ver: a.bootImage?._ver || '' };
+      applyBootImage(); updateBootImageAdminUI();
       if (a.data) { state.sheet = { url: a.data.url || '', gid: a.data.gid || '', enabled: !!a.data.enabled }; updateSheetAdminUI(); }
       computeHome(); Object.assign(state.view, a.view || state.home); clampView(); // restore saved view (kept off the pole)
       updateAdminUI(); colorPlots(); requestRender(true); onAlignmentChanged(); setAxStatus(`Loaded ${f.name}.`);
@@ -3246,7 +3853,7 @@ const trace = {
   open: false, bitmap: null, imgData: null, W: 0, H: 0, isRaster: false,
   objURL: null, planBlob: null, srcName: '', view: { zoom: 1, ox: 0, oy: 0 }, fit: 1,
   mode: 'auto', plots: [], draft: null, sel: -1, drag: null, down: null,
-  thresh: 36, simplify: 3, snap: true, seq: 0, dxf: null,
+  thresh: 36, simplify: 3, snap: true, dxf: null,
 };
 const hexColor = (n) => '#' + (n >>> 0).toString(16).padStart(6, '0').slice(-6);
 const traceCtx = () => els.traceCanvas.getContext('2d');
@@ -3343,14 +3950,89 @@ function drawDraft(g, pts) {
 }
 
 // — capture / edit —
-function nextPlotId() { const id = `Plot-A${101 + trace.seq}`; trace.seq++; return id; }
+// Lowest unused "Plot-Ann" number, computed fresh from what's actually in trace.plots
+// right now rather than a monotonic counter — reported 2026-09-17: deleting A102 and
+// capturing a new plot continued from A103 instead of reusing the now-free A102, because
+// a counter only ever goes up. Scanning the live list instead means a deleted number is
+// immediately available again, and duplicates are impossible by construction (a number
+// is only "next" if nothing currently holds it).
+function nextPlotId() {
+  const used = new Set();
+  trace.plots.forEach((p) => { const m = /A(\d+)\b/i.exec(p.id); if (m) used.add(+m[1]); });
+  let n = 101;
+  while (used.has(n)) n++;
+  return `Plot-A${n}`;
+}
 function snapTarget(p, exclude) {
   if (!trace.snap) return null; const rad = 10 / trace.view.zoom, r2 = rad * rad; let best = null, bd = r2;
   trace.plots.forEach((pl, pi) => pl.pts.forEach((v, vi) => { if (exclude && exclude.plot === pi && exclude.vert === vi) return; const dx = v.x - p.x, dy = v.y - p.y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = { x: v.x, y: v.y }; } }));
   return best;
 }
+// Auto-fill a traced plot's business fields from an already-loaded Google Sheet row —
+// on request 2026-09-17 ("when i draw plots... is it possible [to pull from the sheet]").
+// Deliberately excludes video_url/image_url/media_json — those are multi-media fields
+// meant to be authored via the trace editor's own upload/link picker, not typed into a
+// spreadsheet (same call made for the sample-sheet download button).
+const SHEET_AUTOFILL_FIELDS = ['size', 'price', 'facing', 'dimensions', 'block', 'tour_url', 'notes'];
+// Freshest sheet fetch, taken right when Import & Trace opens (see openTrace) — kept
+// SEPARATE from `state.rows` on purpose. `state.rows` is the authoritative plot data
+// (committed CSV or whatever loadData() last resolved) and merging a plain sheet fetch
+// into it would risk silently wiping a field a row happens not to carry. Read-only,
+// lookup-only cache; null whenever no sheet is configured.
+let traceSheetRows = null;
+// `state.rows`'/`traceSheetRows`' own keys are whatever indexRows() settled on when
+// fetched — the polygon's id for anything that already existed in the layout at that
+// moment, otherwise the sheet's raw (uncanonicalized) plot_id. A plot drawn/renamed AFTER
+// that fetch was never part of that join, so an exact `.get(id)` can miss a row that's
+// really there under a slightly different-looking key ("A102" vs "Plot-A102" vs
+// "plot_102"). Try the fast exact match first (both maps), then fall back to a canonical
+// scan (same tolerant matching indexRows/canonPlotId use everywhere else) so a rename
+// during THIS session still finds it.
+function findSheetRowForId(id) {
+  const k = canonPlotId(id);
+  if (!k) return null;
+  for (const rows of [traceSheetRows, state.rows]) {
+    if (!rows) continue;
+    const direct = rows.get(id);
+    if (direct) return direct;
+    for (const row of rows.values()) { if (canonPlotId(row.plot_id) === k) return row; }
+  }
+  return null;
+}
+// Fills only fields the plot doesn't already have a value for — never overwrites
+// something the admin already typed — and remembers which fields came from the sheet
+// (`p._sheetFilled`) so refreshTraceList can show a small "✓ Sheet" hint next to them.
+// Returns true if anything actually changed, so callers know whether to re-render.
+//
+// `status` needs its OWN rule, separate from the plain text fields above — it's a
+// dropdown that always has SOME value (defaults to 'available'), so "only fill if
+// empty" can never fire for it the way it does for a blank price/facing input. Reported
+// 2026-09-17: "the available/sold/reserved is not getting fetched... make sure the
+// status is fetched exactly in plots as well." Fixed by tracking whether the admin has
+// ever actually touched the status dropdown themselves (`p._statusTouched`, set by its
+// own change handler in refreshTraceList) — as long as they haven't, the sheet's status
+// is free to keep overwriting the untouched default every time a match is (re)found
+// (first capture, then again on rename once the real id matches); the moment they pick a
+// status by hand, this stops touching it for that plot, same "never fight a manual edit"
+// rule as every other field.
+function autofillPlotFromSheet(p) {
+  if (!p || !p.id) return false;
+  const row = findSheetRowForId(p.id);
+  if (!row) return false;
+  if (!p._sheetFilled) p._sheetFilled = new Set();
+  let changed = false;
+  SHEET_AUTOFILL_FIELDS.forEach((key) => {
+    if (!p[key] && row[key]) { p[key] = row[key]; p._sheetFilled.add(key); changed = true; }
+  });
+  if (!p._statusTouched && STATUS_META[row.status] && p.status !== row.status) {
+    p.status = row.status; p._sheetFilled.add('status'); changed = true;
+  }
+  return changed;
+}
 function addPlot(pts, id, status) {
-  trace.plots.push({ id: id || nextPlotId(), status: status || 'available', pts });
+  const p = { id: id || nextPlotId(), status: status || 'available', pts };
+  autofillPlotFromSheet(p);
+  trace.plots.push(p);
   trace.sel = trace.plots.length - 1; refreshTraceList(); drawTrace();
 }
 function pickVertex(sx, sy) { let best = null, bd = 64; trace.plots.forEach((pl, pi) => pl.pts.forEach((v, vi) => { const s = toScr(v.x, v.y), dx = s.x - sx, dy = s.y - sy, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = { plot: pi, vert: vi }; } })); return best; }
@@ -3419,11 +4101,26 @@ function refreshTraceList() {
 
     const li = document.createElement('li'); li.className = 'trace-li' + (i === trace.sel ? ' is-sel' : '');
     const idIn = document.createElement('input'); idIn.className = 'trace-id'; idIn.value = p.id.replace('Plot-', ''); idIn.title = 'Plot number';
-    idIn.addEventListener('change', () => { p.id = 'Plot-' + idIn.value.trim(); drawTrace(); });
+    idIn.addEventListener('change', () => {
+      p.id = 'Plot-' + idIn.value.trim();
+      // Typing/confirming the real plot number is the moment a freshly-drawn plot can
+      // finally be matched against an already-loaded sheet row (see autofillPlotFromSheet)
+      // — its placeholder id at capture time never matched anything. Only the fields that
+      // are still empty get filled, so re-render the whole row (not just redraw the
+      // canvas) when that actually happens.
+      if (autofillPlotFromSheet(p)) refreshTraceList();
+      drawTrace();
+    });
     
     const sel = document.createElement('select'); sel.className = 'trace-status';
     STATUS_ORDER.forEach((s) => { const o = document.createElement('option'); o.value = s; o.textContent = STATUS_META[s].label; if (s === p.status) o.selected = true; sel.appendChild(o); });
-    sel.addEventListener('change', () => { p.status = sel.value; drawTrace(); });
+    // Marks this plot's status as manually decided — once set, autofillPlotFromSheet
+    // stops touching it for this plot even if the sheet's value differs (same "don't
+    // fight a manual edit" rule the text fields already follow).
+    sel.addEventListener('change', () => { p.status = sel.value; p._statusTouched = true; p._sheetFilled?.delete('status'); refreshTraceList(); drawTrace(); });
+    const statusSheetDot = document.createElement('span');
+    statusSheetDot.className = 'trace-status-sheet-dot'; statusSheetDot.title = 'Status pulled from the Google Sheet';
+    statusSheetDot.hidden = !p._sheetFilled?.has('status');
 
     const editBtn = document.createElement('button');
     editBtn.className = 'btn btn-ghost btn-xs trace-edit-btn';
@@ -3451,9 +4148,9 @@ function refreshTraceList() {
       mediaBadge.className = 'trace-media-badge';
       mediaBadge.title = `${p.mediaList.length} media item(s) attached`;
       mediaBadge.textContent = `🎬 ${p.mediaList.length}`;
-      li.append(idIn, mediaBadge, sel, editBtn, del);
+      li.append(idIn, mediaBadge, sel, statusSheetDot, editBtn, del);
     } else {
-      li.append(idIn, sel, editBtn, del);
+      li.append(idIn, sel, statusSheetDot, editBtn, del);
     }
 
     li.addEventListener('click', (ev) => {
@@ -3467,10 +4164,22 @@ function refreshTraceList() {
       const ed = document.createElement('div'); ed.className = 'trace-edit';
       
       const field = (label, key, ph, onUpdate) => {
-        const w = document.createElement('label'); w.className = 'trace-field'; w.append(document.createTextNode(label));
+        const w = document.createElement('label'); w.className = 'trace-field';
+        const labelRow = document.createElement('span'); labelRow.className = 'trace-field-label-row';
+        labelRow.appendChild(document.createTextNode(label));
+        // Shows which fields got their value from the Google Sheet (autofillPlotFromSheet)
+        // rather than being typed by hand — so the fill is never a silent, unexplained
+        // change. Disappears the instant the admin edits that field themselves.
+        const sheetBadge = document.createElement('span');
+        sheetBadge.className = 'trace-field-sheet-badge'; sheetBadge.textContent = '✓ Sheet';
+        sheetBadge.hidden = !p._sheetFilled?.has(key);
+        labelRow.appendChild(sheetBadge);
+        w.appendChild(labelRow);
         const inp = document.createElement('input'); inp.type = 'text'; inp.value = p[key] || ''; if (ph) inp.placeholder = ph;
         inp.addEventListener('input', () => {
           p[key] = inp.value;
+          if (p._sheetFilled) p._sheetFilled.delete(key);
+          sheetBadge.hidden = true;
           if (onUpdate) onUpdate(inp.value);
         });
         w.appendChild(inp); return w;
@@ -3642,16 +4351,19 @@ function refreshTraceList() {
 // gigapixel image, and a >4096px texture exceeds the GPU limit, so we decode with
 // createImageBitmap (memory-efficient) and DOWNSCALE to a texture-/memory-safe
 // ceiling. The resized PNG is what we trace on, drape, and export.
-const TRACE_MAX = 4096;
 async function traceLoadImage(file) {
+  // Device's real texture ceiling (same one the pano uses) — only ever clamps when the
+  // GPU genuinely can't hold the image as a texture. Not a deliberate quality cut: any
+  // upload at or under this size passes through at full original resolution, lossless.
+  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
   let bmp, w, h, viaBitmap = false;
   try { bmp = await createImageBitmap(file); w = bmp.width; h = bmp.height; viaBitmap = true; }
   catch {
     try { const u = URL.createObjectURL(file); const im = new Image(); im.src = u; await im.decode(); URL.revokeObjectURL(u); bmp = im; w = im.naturalWidth; h = im.naturalHeight; }
-    catch { setTraceHint('Could not read that image — it may be corrupt, or too large for the browser to decode. Resize it to ≤ 4096 px and retry.', true); return; }
+    catch { setTraceHint(`Could not read that image — it may be corrupt, or too large for the browser to decode. Resize it to ≤ ${cap} px and retry.`, true); return; }
   }
   if (!w || !h) { setTraceHint('Could not read that image.', true); return; }
-  const sc = Math.min(1, TRACE_MAX / Math.max(w, h));
+  const sc = Math.min(1, cap / Math.max(w, h));
   const W = Math.max(1, Math.round(w * sc)), H = Math.max(1, Math.round(h * sc));
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const cx = c.getContext('2d', { willReadFrequently: true }); cx.drawImage(bmp, 0, 0, W, H);
@@ -3662,7 +4374,7 @@ async function traceLoadImage(file) {
   trace.W = W; trace.H = H; trace.imgData = cx.getImageData(0, 0, W, H);
   trace.isRaster = true; trace.objURL = blob ? URL.createObjectURL(blob) : null; trace.planBlob = blob; trace.dxf = null;
   trace.srcName = file.name.replace(/\.[^.]+$/, '') + '.web.png';   // saved/exported as the resized, texture-safe PNG
-  trace.plots = []; trace.draft = null; trace.seq = 0; trace.sel = -1;
+  trace.plots = []; trace.draft = null; trace.sel = -1;
   els.traceEmpty.hidden = true; els.traceDxfLayer.hidden = true;
   fitTrace(); refreshTraceList(); drawTrace();
   setTraceHint(sc < 1 ? `Loaded — resized to ${W}×${H} for the browser. Click inside each plot.` : 'Click inside each plot to auto-detect it.');
@@ -3678,7 +4390,7 @@ function traceLoadDXFText(text, name) {
 }
 function applyDXFLayer(layer) {
   const conv = dxfToPlots(trace.dxf, layer); if (!conv) { setTraceHint('No closed polylines on that layer.', true); return; }
-  trace.W = conv.W; trace.H = conv.H; trace.seq = 0; trace.draft = null; trace.sel = -1;
+  trace.W = conv.W; trace.H = conv.H; trace.draft = null; trace.sel = -1;
   trace.plots = conv.plots.map((p) => { const lbl = conv.labels.find((t) => pointInPoly(t, p.pts)); return { id: lbl && lbl.text ? 'Plot-' + lbl.text.replace(/\s+/g, '') : nextPlotId(), status: 'available', pts: p.pts }; });
   fitTrace(); refreshTraceList(); drawTrace();
 }
@@ -3705,11 +4417,20 @@ function finishTrace() {
   if (trace.isRaster && trace.objURL) { state.planBlob = trace.planBlob; state.planName = trace.srcName; loadGroundImage(trace.objURL, state.groundImage?.opacity ?? 1, `sample/${trace.srcName}`); els.axPlanRow.hidden = false; els.axPlanOpacity.value = 1; els.axPlanOpacityVal.textContent = '100%'; }
   else { state.planBlob = null; state.planName = null; removeGround(); els.axPlanRow.hidden = true; }
   applyData(); requestRender(true); onAlignmentChanged();
+  refreshAreaAdminUI(); renderAreaFilterUI();   // plot set just changed → refresh the band counts + client dropdown
   setAxStatus(`Imported ${state.geom.length} plots${trace.isRaster ? ' + plan image' : ''}. Align, fill data, then click <strong>Save</strong> in the top bar${trace.isRaster ? ' (saves the resized plan image too)' : ''}.`);
 }
 async function openTrace() {
   trace.open = true; els.traceWin.classList.add('open'); els.traceWin.setAttribute('aria-hidden', 'false');
   updateSheetAdminUI();
+  refreshAreaAdminUI();   // its per-band "N plots" counts read state.geom/state.rows, which move as plots are traced
+  // Re-fetch the sheet fresh right as tracing starts (rather than relying on whatever
+  // loadData() cached at page boot) — kept in `traceSheetRows`, never merged into
+  // `state.rows` directly, so a sheet row that's missing a field (or a row that isn't
+  // there at all) can never silently clobber data the admin already has. This is what
+  // makes drawing a plot whose id was only just added to the sheet actually work in the
+  // same session, instead of needing a full page reload first.
+  traceSheetRows = (state.sheet.enabled && state.sheet.url) ? await fetchSheetRows().catch(() => null) : null;
   if (state.geom.length) await loadCurrentLayoutIntoTrace();   // default to editing the live layout (price/status/retrace)
   if (trace.plots.length > 0 && (trace.sel === -1 || trace.sel >= trace.plots.length)) {
     let selIdx = 0;
@@ -3747,7 +4468,6 @@ async function loadCurrentLayoutIntoTrace() {
     };
   });
   trace.draft = null; trace.sel = -1;
-  trace.seq = Math.max(0, ...state.geom.map((g) => { const m = /A(\d+)\b/.exec(g.id); return m ? +m[1] - 100 : 0; })); // keep new ids past existing A1xx
   // rebuild the raster backdrop so Auto-trace works on the live plan. The raw blob is
   // kept in memory on import/session-restore; but when the site booted from committed
   // files only the drape *texture* exists (state.planBlob is null), so fetch the
@@ -4578,6 +5298,37 @@ async function saveAmenitiesAs() {
 // tours (today's behaviour). Loaded/saved/exported/sessioned exactly like landmarks/
 // amenities. The client crossfade viewer + hotspot authoring build on top of this (later
 // Phase-1 steps); this module is the data model + admin tour/node management.
+// The 8-point compass, ordered clockwise from North. Single source of truth for every
+// facingDir consumer below (validation, the admin <select>, the northDeg calibration, and
+// the save-confirmation label) — add a direction here once rather than in four places
+// that can drift apart.
+const COMPASS_DIRS = [
+  ['N', 'North', 0], ['NE', 'Northeast', 45], ['E', 'East', 90], ['SE', 'Southeast', 135],
+  ['S', 'South', 180], ['SW', 'Southwest', 225], ['W', 'West', 270], ['NW', 'Northwest', 315],
+];
+const COMPASS_DIR_KEYS = COMPASS_DIRS.map(([v]) => v);
+const COMPASS_DIR_DEG = Object.fromEntries(COMPASS_DIRS.map(([v, , deg]) => [v, deg]));
+const COMPASS_DIR_LABEL = Object.fromEntries(COMPASS_DIRS.map(([v, label]) => [v, label]));
+
+// Nav-hotspot icons. SVG rather than the emoji `AM_ICONS`/`LM_ICONS` use, because these
+// have to be ROTATABLE and animated — an emoji glyph can't be aimed at a doorway, and its
+// look is at the mercy of the platform font. `floor: true` marks the ones that read as
+// lying ON the ground (tilted into perspective by CSS) rather than facing the viewer;
+// `rotatable` gates the admin's aim control, since a rotated door just looks broken.
+const TOUR_HS_ICONS = {
+  chevron: { label: 'Arrow (aimable)', rotatable: true, floor: true,
+    svg: '<svg viewBox="0 0 48 32" aria-hidden="true"><path d="M4 26 L24 7 L44 26" /></svg>' },
+  stairs: { label: 'Stairs (aimable)', rotatable: true, floor: true,
+    svg: '<svg viewBox="0 0 48 32" aria-hidden="true"><path d="M6 27 h10 v-6 h10 v-6 h10 v-6 h6" /></svg>' },
+  door: { label: 'Door', rotatable: false, floor: false,
+    svg: '<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" class="hs-ring" /><rect x="14" y="11" width="13" height="18" rx="1.5" /><circle cx="17.5" cy="20" r="1.6" class="hs-dot" /></svg>' },
+  ring: { label: 'Ring (plain)', rotatable: false, floor: false,
+    svg: '<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" class="hs-ring" /><circle cx="20" cy="20" r="5" class="hs-dot" /></svg>' },
+};
+const TOUR_HS_ICON_ORDER = ['chevron', 'door', 'stairs', 'ring'];
+const TOUR_HS_ICON_DEFAULT = 'chevron';
+const tourHsIcon = (k) => TOUR_HS_ICONS[k?.icon] || TOUR_HS_ICONS[TOUR_HS_ICON_DEFAULT];
+
 let tourSeq = 0;
 function newTourId() { return 't' + (++tourSeq); }
 function nodeSeqFor(tour) { return (tour.nodes || []).reduce((m, n) => { const k = parseInt(String(n.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(k) ? k : 0); }, 0); }
@@ -4591,34 +5342,67 @@ function parseTours(d) {
       return { id: (n.id || 'n' + (j + 1)).toString(), name: (n.name || '').toString() || ('Node ' + (j + 1)),
         pano, panoBlob: n.panoBlob || null, _ver: ver, _url: null,
         defaultView: { lon: +(dv.lonDeg != null ? dv.lonDeg : dv.lon) || 0, lat: +(dv.latDeg != null ? dv.latDeg : dv.lat) || 0, fov: +dv.fov || 75,
-          facingDir: ['N', 'E', 'S', 'W'].includes(dv.facingDir) ? dv.facingDir : null } };
+          facingDir: COMPASS_DIR_KEYS.includes(dv.facingDir) ? dv.facingDir : null } };
     }).filter((n) => n.id);
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot) }))
+    // `icon`/`rot` (2026-09-18): which marker this exit draws as, and which way an aimable
+    // one points (degrees clockwise from "up"). Links written before this default to the
+    // arrow — it's the shape the reference tour uses for a doorway, and an un-aimed arrow
+    // pointing straight up already reads as "through here".
+    const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot),
+      icon: TOUR_HS_ICON_ORDER.includes(k.icon) ? k.icon : TOUR_HS_ICON_DEFAULT, rot: normDeg(+k?.rot || 0) }))
       .filter((k) => nodeIds.has(k.from) && nodeIds.has(k.to) && k.hotspot);   // drop links to deleted nodes
+    // Optional isometric / floor-plan image for this tour (at most one), plus one dot per
+    // room placed on it in NORMALISED 0..1 coordinates — so the same map renders correctly
+    // at any display size (admin editor at ~900px, client minimap at ~190px) without
+    // storing, or having to rescale, pixel positions. `blob` mirrors `panoBlob` above: it
+    // exists so an unsaved upload survives a session round-trip through IndexedDB.
+    const mSrc = t.map && typeof t.map === 'object' ? t.map : null;
+    const mFile = mSrc ? (mSrc.file || null) : null;
+    // `rot` = which way the view cone points ON THE MAP (degrees clockwise from "up")
+    // when standing in that room at its saved start view. Deliberately anchored to the map
+    // image rather than to real-world north: `state.northDeg`/`facingDir` compass
+    // calibration is optional and, in practice, unset on most rooms (all 9 of anandman's
+    // MODERN VILLA, 2026-09-17) — deriving the cone from it would have aimed every one of
+    // them arbitrarily. This way the admin aims it against the picture they're looking at,
+    // and it stays correct whether or not the compass is ever calibrated.
+    const points = (mSrc && Array.isArray(mSrc.points) ? mSrc.points : [])
+      .map((p) => ({ nodeId: (p && p.nodeId != null ? p.nodeId : '').toString(), x: clamp01(+p.x), y: clamp01(+p.y), rot: normDeg(+p?.rot || 0) }))
+      .filter((p) => nodeIds.has(p.nodeId) && isFinite(p.x) && isFinite(p.y));   // drop dots for deleted rooms
+    const map = (mFile || (mSrc && mSrc.blob)) ? { file: mFile, blob: (mSrc && mSrc.blob) || null, _ver: ver, _url: null, points } : null;
     return { id: (t.id || 't' + (i + 1)).toString(), name: (t.name || '').toString() || ('Tour ' + (i + 1)),
-      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links };
+      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links, map };
   }).filter((t) => t.id);
 }
+const clamp01 = (v) => Math.max(0, Math.min(1, +v || 0));
+const normDeg = (d) => ((+d || 0) % 360 + 360) % 360;
 function buildToursData() {
   return { version: 1, note: 'Build91 virtual tours', savedAt: new Date().toISOString(),
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, ...(n.pano ? { pano: { file: n.pano } } : {}),
         defaultView: { lonDeg: +(+n.defaultView.lon).toFixed(2), latDeg: +(+n.defaultView.lat).toFixed(2), fov: Math.round(+n.defaultView.fov || 75),
           ...(n.defaultView.facingDir ? { facingDir: n.defaultView.facingDir } : {}) } })),
-      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) } })) })) };
+      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) },
+        icon: k.icon || TOUR_HS_ICON_DEFAULT, rot: Math.round(normDeg(k.rot)) })),
+      ...(t.map && t.map.file ? { map: { file: t.map.file, points: (t.map.points || []).map((p) => ({ nodeId: p.nodeId, x: +(+p.x).toFixed(4), y: +(+p.y).toFixed(4), rot: Math.round(normDeg(p.rot)) })) } } : {}) })) };
 }
 // every node pano blob still in memory (fresh import / session restore), for Export + session
 function tourNodeBlobFiles() {
   const out = [];
-  state.tours.forEach((t) => t.nodes.forEach((n) => { if (n.panoBlob && n.pano) out.push([baseName(n.pano), n.panoBlob, 'image/jpeg']); }));
+  state.tours.forEach((t) => {
+    t.nodes.forEach((n) => { if (n.panoBlob && n.pano) out.push([baseName(n.pano), n.panoBlob, 'image/jpeg']); });
+    if (t.map?.blob && t.map.file) out.push([baseName(t.map.file), t.map.blob, 'image/png']);   // PNG keeps the render's transparency
+  });
   return out;
 }
 async function loadToursFile() {
   try { const r = await loadProjectFile('tour.json'); if (!r || !r.ok) return null; return parseTours(await r.json()); } catch { return null; }
 }
 function setTours(list) {
-  state.tours.forEach((t) => t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } }));
+  state.tours.forEach((t) => {
+    t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } });
+    if (t.map?._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
+  });
   state.tours = list || [];
   tourSeq = state.tours.reduce((m, t) => { const k = parseInt(String(t.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(k) ? k : 0); }, 0);
   state.tourSel = state.tours[0]?.id || null; state.tourNodeSel = null;
@@ -4634,7 +5418,11 @@ function addTour() {
   setAxStatus('Tour added — give it a name, then <strong>Add node</strong> to upload each 360° panorama.');
 }
 function deleteTour(id) {
-  const t = state.tours.find((x) => x.id === id); if (t) t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } });
+  const t = state.tours.find((x) => x.id === id);
+  if (t) {
+    t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } });
+    if (t.map?._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
+  }
   state.tours = state.tours.filter((x) => x.id !== id);
   if (state.tourSel === id) { state.tourSel = state.tours[0]?.id || null; state.tourNodeSel = null; }
   refreshTourList(); onToursChanged();
@@ -4661,6 +5449,9 @@ function deleteTourNode(tourId, nodeId) {
   const n = t.nodes.find((x) => x.id === nodeId); if (n && n._url) { try { URL.revokeObjectURL(n._url); } catch {} }
   t.nodes = t.nodes.filter((x) => x.id !== nodeId);
   t.links = t.links.filter((k) => k.from !== nodeId && k.to !== nodeId);   // drop links touching it
+  // ...and its dot on the tour map, or the minimap would keep drawing a dot that jumps
+  // nowhere. parseTours filters these out on load too; this is the live-edit half.
+  if (t.map) t.map.points = (t.map.points || []).filter((p) => p.nodeId !== nodeId);
   if (t.startNode === nodeId) t.startNode = t.nodes[0]?.id || null;
   if (state.tourNodeSel === nodeId) state.tourNodeSel = null;
   refreshTourList(); onToursChanged();
@@ -4668,6 +5459,249 @@ function deleteTourNode(tourId, nodeId) {
 async function saveToursAs() {
   const files = [['tour.json', JSON.stringify(buildToursData(), null, 2), 'application/json'], ...tourNodeBlobFiles()];
   await saveToProject(files, '<code>tour.json</code>');
+}
+
+// ─── Tour map (isometric / floor plan with one dot per room) ────────────────────────
+// One image per tour, plus a 0..1 coordinate per room on it. Authored in the admin modal
+// below (click a room, click the map) and shown to the visitor as a corner minimap while
+// that tour is open — the "you are here + jump anywhere" affordance a room list can't
+// give, since a list has no spatial information in it at all.
+//
+// This is a plain <img>, NOT a WebGL texture — so unlike panoImage/groundImage it needs no
+// BUNDLE_IMAGES base64 embedding for the standalone `file://` bundle (same reasoning as
+// the brand logo; see the file:// gotchas in CLAUDE.md).
+function tourMapSrc(t) {
+  if (!t || !t.map) return '';
+  if (t.map.blob) { if (!t.map._url) t.map._url = URL.createObjectURL(t.map.blob); return t.map._url; }
+  return assetUrl(t.map.file, t.map._ver);   // committed path → active project dir, cache-busted
+}
+const tourHasMap = (t) => !!(t && t.map && (t.map.file || t.map.blob));
+async function setTourMapFromFile(file) {
+  const t = curTour(); if (!t || !file) return;
+  // PNG, not JPEG — same call as the brand logo, and for the same reason: an isometric
+  // render is normally supplied on a TRANSPARENT background, and the client draws it bare
+  // over the panorama (no panel behind it). Re-encoding to JPEG would bake that
+  // transparency into an opaque white rectangle, which is exactly the "floating box" look
+  // this is meant to avoid. 1600px is plenty — the largest it's ever drawn is the admin
+  // editor (~900px wide); the client minimap is ~340px.
+  let out; try { out = await resizeImageToBlob(file, 1600, 'image/png'); } catch { setAxStatus('Could not read that image.'); return; }
+  if (t.map?._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
+  const keep = (t.map && Array.isArray(t.map.points)) ? t.map.points : [];   // replacing the image keeps existing dots
+  t.map = { file: `sample/tour-${t.id}-map.web.png`, blob: out.blob, _ver: '', _url: null, points: keep };
+  refreshTourList(); onToursChanged();
+  setAxStatus(`Map added to <strong>${esc(t.name)}</strong> — open it to place a dot for each room.`);
+}
+function clearTourMap(tourId) {
+  const t = state.tours.find((x) => x.id === tourId); if (!t || !t.map) return;
+  if (t.map._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
+  t.map = null;
+  if (tourMapEdit.tourId === tourId) closeTourMapEditor();
+  refreshTourList(); onToursChanged(); renderClientTourMap();
+}
+
+// ── Admin dot-placement editor ──
+// `armed` is the room whose dot the next click on the image will set. Clicking a room in
+// the side list arms it; clicking the image places/moves that room's dot and disarms, so
+// the common case (place every room once, in order) is click-room, click-map, repeat.
+const tourMapEdit = { tourId: null, armed: null, drag: null, dragJustEnded: false, rotDrag: null };
+let tourMapCone = null;   // the client minimap's single view-cone element (see updateTourMapCone)
+function openTourMapEditor(tourId) {
+  const t = state.tours.find((x) => x.id === tourId);
+  if (!t || !tourHasMap(t)) return;
+  tourMapEdit.tourId = tourId; tourMapEdit.armed = null; tourMapEdit.drag = null;
+  if (els.tourMapModalTitle) els.tourMapModalTitle.textContent = `🗺 ${t.name || 'Tour'} — place rooms on the map`;
+  if (els.tourMapEditImg) els.tourMapEditImg.src = tourMapSrc(t);
+  openCustomModal(els.tourMapModal);
+  renderTourMapEditor();
+}
+function closeTourMapEditor() {
+  tourMapEdit.tourId = null; tourMapEdit.armed = null; tourMapEdit.drag = null;
+  closeCustomModal(els.tourMapModal);
+}
+const curTourMapTour = () => state.tours.find((t) => t.id === tourMapEdit.tourId) || null;
+function tourMapPointFor(t, nodeId) { return (t.map?.points || []).find((p) => p.nodeId === nodeId) || null; }
+function setTourMapPoint(nodeId, x, y) {
+  const t = curTourMapTour(); if (!t || !t.map) return;
+  const existing = tourMapPointFor(t, nodeId);
+  if (existing) { existing.x = clamp01(x); existing.y = clamp01(y); }      // moving keeps its aim
+  else t.map.points.push({ nodeId, x: clamp01(x), y: clamp01(y), rot: 0 });
+  onToursChanged(); renderTourMapEditor(); renderClientTourMap();
+}
+function setTourMapPointRot(nodeId, deg) {
+  const t = curTourMapTour(); const p = t && tourMapPointFor(t, nodeId); if (!p) return;
+  p.rot = normDeg(deg);
+  onToursChanged(); renderClientTourMap();
+}
+function clearTourMapPoint(nodeId) {
+  const t = curTourMapTour(); if (!t || !t.map) return;
+  t.map.points = t.map.points.filter((p) => p.nodeId !== nodeId);
+  onToursChanged(); renderTourMapEditor(); renderClientTourMap();
+}
+function renderTourMapEditor() {
+  const t = curTourMapTour();
+  if (!t || !els.tourMapEditDots || !els.tourMapNodeList) return;
+  els.tourMapEditDots.innerHTML = '';
+  (t.map?.points || []).forEach((p) => {
+    const n = t.nodes.find((x) => x.id === p.nodeId); if (!n) return;
+    // Every dot previews its own view cone, so the admin can see at a glance which rooms
+    // are still aimed at the default (straight up) — but only the SELECTED room gets the
+    // drag handle, or nine overlapping handles would be unusable.
+    const cone = document.createElement('div');
+    cone.className = 'tourmap-cone' + (tourMapEdit.armed === p.nodeId ? ' is-armed' : '');
+    cone.style.left = `${p.x * 100}%`; cone.style.top = `${p.y * 100}%`;
+    cone.style.setProperty('--rot', `${normDeg(p.rot)}deg`);
+    els.tourMapEditDots.appendChild(cone);
+    if (tourMapEdit.armed === p.nodeId) {
+      const h = document.createElement('div');
+      h.className = 'tourmap-rot';
+      h.style.left = `${p.x * 100}%`; h.style.top = `${p.y * 100}%`;
+      h.style.setProperty('--rot', `${normDeg(p.rot)}deg`);
+      h.title = 'Drag to aim this room’s view cone';
+      h.addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        tourMapEdit.rotDrag = { nodeId: p.nodeId };
+        h.setPointerCapture?.(e.pointerId);
+      });
+      els.tourMapEditDots.appendChild(h);
+    }
+    const d = document.createElement('div');
+    d.className = 'tourmap-dot' + (tourMapEdit.armed === p.nodeId ? ' is-armed' : '');
+    d.style.left = `${p.x * 100}%`; d.style.top = `${p.y * 100}%`;
+    d.dataset.nodeId = p.nodeId;    // how the drag handler finds this element again — index
+    d.title = n.name;               // into the points array would desync if any dot is skipped
+    d.innerHTML = `<span class="tourmap-dot-lbl"></span>`;
+    d.querySelector('.tourmap-dot-lbl').textContent = n.name;
+    // Drag to fine-tune. pointerdown on a dot must NOT fall through to the canvas's own
+    // "place the armed room here" click, hence the stopPropagation + the drag guard below.
+    d.addEventListener('pointerdown', (e) => {
+      e.stopPropagation(); e.preventDefault();
+      tourMapEdit.drag = { nodeId: p.nodeId, moved: false };
+      d.setPointerCapture?.(e.pointerId);
+    });
+    els.tourMapEditDots.appendChild(d);
+  });
+
+  els.tourMapNodeList.innerHTML = '';
+  t.nodes.forEach((n) => {
+    const placed = !!tourMapPointFor(t, n.id);
+    const row = document.createElement('div');
+    row.className = 'tourmap-noderow' + (tourMapEdit.armed === n.id ? ' is-armed' : '') + (placed ? ' is-placed' : '');
+    const dot = document.createElement('span'); dot.className = 'tourmap-noderow-dot';
+    const nm = document.createElement('span'); nm.className = 'tourmap-noderow-name'; nm.textContent = n.name;
+    const st = document.createElement('span'); st.className = 'tourmap-noderow-state';
+    const pt = tourMapPointFor(t, n.id);
+    st.textContent = tourMapEdit.armed === n.id
+      ? (placed ? `${Math.round(normDeg(pt.rot))}°` : 'click the map…')
+      : (placed ? 'placed' : 'not placed');
+    row.append(dot, nm, st);
+    if (placed) {
+      const x = document.createElement('button'); x.type = 'button'; x.className = 'ax-lm-del'; x.textContent = '×'; x.title = 'Remove this room’s dot';
+      x.addEventListener('click', (e) => { e.stopPropagation(); clearTourMapPoint(n.id); });
+      row.appendChild(x);
+    }
+    row.addEventListener('click', () => {
+      tourMapEdit.armed = (tourMapEdit.armed === n.id) ? null : n.id;
+      renderTourMapEditor();
+    });
+    els.tourMapNodeList.appendChild(row);
+  });
+  if (els.tourMapModalHint) {
+    const left = t.nodes.filter((n) => !tourMapPointFor(t, n.id)).length;
+    const armedPlaced = tourMapEdit.armed && tourMapPointFor(t, tourMapEdit.armed);
+    els.tourMapModalHint.textContent = tourMapEdit.armed
+      ? (armedPlaced ? 'Drag the small handle to aim this room’s view cone, or click the map to move the dot.'
+        : 'Now click the spot on the map where that room is.')
+      : (left ? `Pick a room on the right, then click the map. ${left} room${left === 1 ? '' : 's'} still unplaced.`
+        : 'All rooms placed. Pick a room to aim its view cone, or drag a dot to fine-tune.');
+  }
+}
+// Pointer → normalised 0..1 inside the image box (which is exactly the canvas element, so
+// no letterbox offset has to be accounted for — see the CSS: the <img> fills it).
+function tourMapNorm(e) {
+  const r = els.tourMapCanvas.getBoundingClientRect();
+  return { x: clamp01((e.clientX - r.left) / Math.max(1, r.width)), y: clamp01((e.clientY - r.top) / Math.max(1, r.height)) };
+}
+
+// ── Client minimap ──
+// Rebuilt whenever the open tour changes; the ACTIVE dot is re-marked on every room
+// arrival (tourGoTo) without rebuilding, same cheap-update pattern refreshTourRoomMenu
+// uses for the drawer's room list.
+function renderClientTourMap() {
+  if (!els.tourMap) return;
+  const tour = curTourView();
+  const show = !!(state.tourView && tourHasMap(tour) && (tour.map.points || []).length);
+  els.tourMap.hidden = !show;
+  // The map takes over the compass's own top-right slot for the duration (on request —
+  // the reference tour shows a map there and no compass at all). A body class rather than
+  // touching .compass directly, so the compass keeps owning its own styling and simply
+  // yields the corner; removed again the moment the map goes away.
+  document.body.classList.toggle('tour-map-on', show);
+  if (!show) { if (els.tourMapDots) els.tourMapDots.innerHTML = ''; tourMapCone = null; return; }
+  if (els.tourMapImg) {
+    const src = tourMapSrc(tour);
+    if (els.tourMapImg.getAttribute('src') !== src) els.tourMapImg.src = src;
+  }
+  if (!els.tourMapDots) return;
+  els.tourMapDots.innerHTML = '';
+  // The view cone ("radar") for whichever room the visitor is standing in. One element,
+  // repositioned onto the active dot and re-aimed every frame — appended FIRST so it
+  // renders beneath the dots rather than over them.
+  tourMapCone = document.createElement('div');
+  tourMapCone.className = 'tour-map-cone';
+  tourMapCone.hidden = true;
+  els.tourMapDots.appendChild(tourMapCone);
+  tour.map.points.forEach((p) => {
+    const n = tour.nodes.find((x) => x.id === p.nodeId); if (!n) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'tour-map-dot' + (state.tourView.nodeId === p.nodeId ? ' is-here' : '');
+    b.style.left = `${p.x * 100}%`; b.style.top = `${p.y * 100}%`;
+    b.dataset.nodeId = p.nodeId;
+    b.title = n.name; b.setAttribute('aria-label', n.name);
+    b.addEventListener('click', (e) => { e.stopPropagation(); tourGoTo(p.nodeId); });
+    els.tourMapDots.appendChild(b);
+  });
+  updateTourMapActive();
+}
+function updateTourMapActive() {
+  if (!els.tourMapDots || !state.tourView) return;
+  els.tourMapDots.querySelectorAll('.tour-map-dot').forEach((b) => {
+    b.classList.toggle('is-here', b.dataset.nodeId === state.tourView.nodeId);
+  });
+  // Park the cone on the room the visitor is actually in; updateTourMapCone aims it.
+  const tour = curTourView();
+  const p = tour && (tour.map?.points || []).find((q) => q.nodeId === state.tourView.nodeId);
+  if (tourMapCone) {
+    tourMapCone.hidden = !p;
+    if (p) {
+      const movedRoom = tourMapCone.dataset.nodeId !== state.tourView.nodeId;
+      tourMapCone.dataset.nodeId = state.tourView.nodeId;
+      tourMapCone.style.left = `${p.x * 100}%`; tourMapCone.style.top = `${p.y * 100}%`;
+      // Re-run the fade so the cone visibly CLOSES and REOPENS on the new room rather than
+      // just being somewhere else. The element is reused (not recreated), so the animation
+      // needs the standard restart: clear it, force a reflow, hand it back.
+      if (movedRoom) { tourMapCone.style.animation = 'none'; void tourMapCone.offsetWidth; tourMapCone.style.animation = ''; }
+    }
+  }
+  updateTourMapCone();
+}
+// Live camera → cone rotation, called every frame from renderLoop (right where the compass
+// updates, for the same reason: it has to track a free-panning camera).
+//
+// `p.rot` is the on-map direction at the room's SAVED START VIEW, so the live angle is that
+// plus however far the visitor has panned since. The minus sign is the camera-yaw
+// convention: `state.view.lon` increases counter-clockwise relative to compass/screen
+// bearing (see updateCompass' own `-view.lon` and the two-lon-conventions note above
+// computeHome). Reading the room's own defaultView rather than state.northDeg is deliberate
+// — see the `rot` comment in parseTours.
+function updateTourMapCone() {
+  if (!tourMapCone || tourMapCone.hidden || !state.tourView) return;
+  const tour = curTourView(); if (!tour) return;
+  const p = (tour.map?.points || []).find((q) => q.nodeId === state.tourView.nodeId);
+  const node = tour.nodes.find((n) => n.id === state.tourView.nodeId);
+  if (!p || !node) return;
+  const lonDeg = state.view.lon * 180 / Math.PI;
+  tourMapCone.style.setProperty('--rot', `${normDeg(p.rot - (lonDeg - (node.defaultView.lon || 0)))}deg`);
 }
 // Admin Tour-tab list: each tour is a row; the selected one expands to its node list +
 // Add-node. (Hotspot linking + per-node default view are set inside the tour viewer, the
@@ -4715,6 +5749,34 @@ function refreshTourList() {
       add.addEventListener('click', (e) => { e.stopPropagation(); els.axTourNodeFile?.click(); });
       ed.appendChild(add);
 
+      // ── Tour map (one isometric / floor plan per tour) ──
+      // Sits right under Add-node because it's the same kind of action (upload an asset
+      // that belongs to this tour), and because placing dots only makes sense once the
+      // rooms it points at exist.
+      const mapBox = document.createElement('div'); mapBox.className = 'ax-tour-map';
+      if (tourHasMap(t)) {
+        const placed = (t.map.points || []).filter((p) => t.nodes.some((n) => n.id === p.nodeId)).length;
+        const row = document.createElement('div'); row.className = 'ax-tour-maprow';
+        const thumb = document.createElement('img'); thumb.className = 'ax-tour-mapthumb'; thumb.src = tourMapSrc(t); thumb.alt = '';
+        const meta = document.createElement('span'); meta.className = 'ax-tour-mapmeta';
+        meta.textContent = `${placed}/${t.nodes.length} room${t.nodes.length === 1 ? '' : 's'} placed`;
+        const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'ax-lm-del'; rm.textContent = '×'; rm.title = 'Remove this tour’s map';
+        rm.addEventListener('click', (e) => { e.stopPropagation(); clearTourMap(t.id); });
+        row.append(thumb, meta, rm); mapBox.appendChild(row);
+        const openMap = document.createElement('button'); openMap.type = 'button'; openMap.className = 'btn btn-ghost ax-tour-mapopen';
+        openMap.textContent = '🗺 Open map to place dots';
+        openMap.title = 'Place one dot per room on the map — visitors use it to jump between rooms';
+        openMap.addEventListener('click', (e) => { e.stopPropagation(); openTourMapEditor(t.id); });
+        mapBox.appendChild(openMap);
+      } else {
+        const upl = document.createElement('button'); upl.type = 'button'; upl.className = 'btn btn-ghost ax-tour-mapadd';
+        upl.textContent = '🗺 Upload isometric / floor plan';
+        upl.title = 'One map image per tour — then place a dot for each room on it';
+        upl.addEventListener('click', (e) => { e.stopPropagation(); els.axTourMapFile?.click(); });
+        mapBox.appendChild(upl);
+      }
+      ed.appendChild(mapBox);
+
       // ── Hotspot authoring, only while this tour is open in the viewer ──
       if (state.tourView && state.tourView.tourId === t.id && state.tourView.nodeId) {
         const here = t.nodes.find((n) => n.id === state.tourView.nodeId);
@@ -4739,6 +5801,49 @@ function refreshTourList() {
           const del = document.createElement('button'); del.type = 'button'; del.className = 'ax-lm-del'; del.textContent = '×'; del.title = 'Delete hotspot';
           del.addEventListener('click', (e) => { e.stopPropagation(); deleteTourHotspot(i); });
           r.append(lbl, arrow, to, del); box.appendChild(r);
+
+          // Second row: which marker this exit draws as, and — for the aimable ones — which
+          // way it points. Split onto its own line because the row above is already four
+          // controls wide in a narrow sidebar.
+          const r2 = document.createElement('div'); r2.className = 'ax-tour-hsrow2';
+          const icoSel = document.createElement('select'); icoSel.className = 'ax-tour-hsico'; icoSel.title = 'Hotspot marker';
+          TOUR_HS_ICON_ORDER.forEach((key) => { const o = document.createElement('option'); o.value = key; o.textContent = TOUR_HS_ICONS[key].label; icoSel.appendChild(o); });
+          icoSel.value = k.icon || TOUR_HS_ICON_DEFAULT;
+          icoSel.addEventListener('click', (e) => e.stopPropagation());
+          icoSel.addEventListener('change', () => { k.icon = icoSel.value; onToursChanged(); rebuildTourHotspotDOM(); refreshTourList(); });
+          r2.appendChild(icoSel);
+
+          if (tourHsIcon(k).rotatable) {
+            const aim = document.createElement('div'); aim.className = 'ax-tour-hsaim';
+            // Quick cardinal presets cover the overwhelmingly common cases (through a
+            // doorway ahead / off to one side); the slider is there for the doorway that
+            // sits at an awkward angle.
+            [['↑', 0], ['→', 90], ['↓', 180], ['←', 270]].forEach(([glyph, deg]) => {
+              const b = document.createElement('button');
+              b.type = 'button'; b.className = 'ax-tour-hsdir' + (Math.round(normDeg(k.rot)) === deg ? ' is-on' : '');
+              b.textContent = glyph; b.title = `Point ${glyph}`;
+              b.addEventListener('click', (e) => { e.stopPropagation(); k.rot = deg; onToursChanged(); rebuildTourHotspotDOM(); refreshTourList(); });
+              aim.appendChild(b);
+            });
+            const deg = document.createElement('span'); deg.className = 'ax-tour-hsdeg'; deg.textContent = `${Math.round(normDeg(k.rot))}°`;
+            const slider = document.createElement('input');
+            slider.type = 'range'; slider.min = '0'; slider.max = '359'; slider.step = '1';
+            slider.className = 'ax-tour-hsrot'; slider.value = String(Math.round(normDeg(k.rot)));
+            slider.title = 'Fine-tune the angle';
+            slider.addEventListener('click', (e) => e.stopPropagation());
+            slider.addEventListener('input', () => {
+              k.rot = normDeg(+slider.value);
+              deg.textContent = `${Math.round(k.rot)}°`;
+              // Live-update the marker in the pano without a full rebuild, so dragging the
+              // slider feels continuous rather than stepping.
+              const live = tourHsDom[tourHsDom.findIndex((h) => h.idx === i)];
+              live?.el.querySelector('.tour-hs-ico')?.style.setProperty('--rot', `${k.rot}deg`);
+            });
+            slider.addEventListener('change', () => { onToursChanged(); refreshTourList(); });
+            aim.append(slider, deg);
+            r2.appendChild(aim);
+          }
+          box.appendChild(r2);
         });
 
         const others = t.nodes.filter((n) => n.id !== state.tourView.nodeId);
@@ -4773,7 +5878,7 @@ function refreshTourList() {
         const dirLbl = document.createElement('span'); dirLbl.className = 'ax-tour-dirlbl'; dirLbl.textContent = 'Compass facing:';
         const dirSel = document.createElement('select'); dirSel.className = 'ax-tour-dirsel';
         dirSel.title = 'Which real-world direction the camera is facing right now — calibrates the compass for this room';
-        [['', 'Not set'], ['N', 'North'], ['E', 'East'], ['S', 'South'], ['W', 'West']]
+        [['', 'Not set'], ...COMPASS_DIRS.map(([val, label]) => [val, label])]
           .forEach(([val, label]) => { const o = document.createElement('option'); o.value = val; o.textContent = label; dirSel.appendChild(o); });
         dirSel.value = here?.defaultView?.facingDir || '';
         dirSel.addEventListener('click', (e) => e.stopPropagation());
@@ -4819,7 +5924,12 @@ function refreshTourList() {
 // problems. ~2 MB/node downloads fine, but an 8192×4096 RGBA texture with mips is ~179 MB,
 // so holding a 15-node tour resident (OQ-3) would be ~2.7 GB. Hence a hard LRU cap plus
 // one-hop prefetch: walking the tour is instant, and only the resident set is bounded.
-const TOUR_CACHE_MAX = 3;                                  // nodes kept in VRAM (~537 MB at 8K)
+// Bumped from 3 (2026-09-16, on request) to give the new cross-tour window below room to
+// coexist with same-tour room-neighbor prefetch without immediately evicting each other.
+// Deliberately a SMALL bump, not "prefetch everything" — at ~179 MB/node (8K) this is
+// already ~895 MB of VRAM headroom, genuinely worth knowing on a lower-end mobile GPU;
+// see prefetchNeighbourTours below for why the window itself stays small (3 tours) too.
+const TOUR_CACHE_MAX = 5;                                  // nodes kept in VRAM (~895 MB at 8K)
 const tourTex = new Map();                                 // nodeKey -> THREE.Texture (insertion order = LRU)
 const tourInflight = new Map();
 let tourHsDom = [];                                        // [{ el, dir, idx }] projected each frame
@@ -4864,6 +5974,29 @@ function prefetchTourNeighbours(tour, nodeId) {
     if (n) loadTourNodeTex(tour, n).catch(() => {});
   });
 }
+// Cross-TOUR prefetch (2026-09-16, on request): the room-hop prefetch above only ever
+// covered ROOMS within the tour already open — stepping from one tour to a wholly
+// different one (Mandir -> Gazebo, each its own single-room tour) always started a fresh
+// download with nothing warmed up. This mirrors that same "one hop ahead" idea one level
+// up, over `state.tours`' own order (the exact order the tour-list picker shows them in,
+// so "next"/"previous" here matches what the visitor actually sees): +2 tours ahead, -1
+// behind — an explicit, requested asymmetric window, not a general one-hop cache, since
+// forward is the direction a visitor walking a tour list actually goes. Only the START
+// node of each neighbour tour is warmed (not its own rooms — that's what
+// prefetchTourNeighbours does once you're actually inside it), and it shares the SAME
+// tourTex LRU as room prefetch (see TOUR_CACHE_MAX above for the VRAM trade-off this
+// makes). Fire-and-forget, called once per tour ENTRY/switch (openClientPanoTour) — not
+// on every room move within a tour, since the window only depends on which TOUR you're
+// in, not which room.
+function prefetchNeighbourTours(tourId) {
+  const i = state.tours.findIndex((t) => t.id === tourId);
+  if (i < 0) return;
+  [state.tours[i + 1], state.tours[i + 2], state.tours[i - 1]].filter(Boolean).forEach((t) => {
+    if (!t.nodes.length) return;
+    const startNode = t.nodes.find((n) => n.id === t.startNode) || t.nodes[0];
+    loadTourNodeTex(t, startNode).catch(() => {});
+  });
+}
 
 // ─── Enter / exit the takeover ──────────────────────────────────────────────
 // `anchorRooms` (default true): whether the drawer should drill straight to THIS tour's
@@ -4890,20 +6023,31 @@ function openClientPanoTour(tourId, title, { anchorRooms = true } = {}) {
   }
   if (!tour.nodes.length) { showNotice(`“${tour.name}” has no panoramas yet.`); return; }
   if (!three) return;
-  // Switching from an ALREADY-OPEN tour straight to this one is the one path where the
-  // plot map's own aerial pano would otherwise flash for a moment: closePanoTour (below)
-  // restores it synchronously, but the new tour's first room only loads asynchronously —
-  // the render loop keeps painting the aerial pano for however long that fetch takes.
-  // Reported 2026-09-09 ("small gap in which some aerial view is shown"). The curtain
-  // (also used at boot) hides that gap; it's only shown here, not on a fresh plot-map→
-  // tour entry, since that path has no prior tour texture to flash back to in the first
-  // place.
-  const switchingTours = !!state.tourView;
-  if (switchingTours) showBootCurtain();
-  if (state.tourView) closePanoTour({ silent: true });
+  // Switching from an ALREADY-OPEN tour straight to this one (Mandir -> Gazebo, say) used
+  // to fully exit-then-reenter: closePanoTour restored the aerial pano/texture
+  // SYNCHRONOUSLY, then this function tore the plot map back down and waited on the new
+  // tour's first texture — a real visible gap, previously papered over with the boot
+  // curtain (2026-09-09 fix for "small gap in which some aerial view is shown"). Reported
+  // 2026-09-16 as looking like a jarring loading screen rather than a smooth switch —
+  // fixed by never touching the aerial pano/texture here at all: keep tour A's last frame
+  // on screen, reuse its ORIGINAL saved{} snapshot (the true pre-tour aerial view —
+  // re-deriving it from `three.pano.material.map` here would wrongly capture tour A's OWN
+  // texture, corrupting "Exit Tour" into landing back in tour A instead of the aerial
+  // map), and let tourGoTo's existing crossfade (below, `instant: !switchingTours`)
+  // dissolve tour A's frame directly into tour B's first room — the exact mechanism
+  // same-tour room navigation already uses, which is why THAT path never showed a loading
+  // screen in the first place.
+  const priorTourView = state.tourView;
+  const switchingTours = !!priorTourView;
+  if (switchingTours) {
+    if (els.tourLayer) els.tourLayer.innerHTML = '';
+    tourHsDom = [];
+    state.tourHsSel = null;
+  }
 
   state.tourView = { tourId, nodeId: null, title: title || tour.name, busy: false,
-    saved: { view: { ...state.view }, panoMap: three.pano.material.map, northDeg: state.northDeg } };
+    saved: switchingTours ? priorTourView.saved
+      : { view: { ...state.view }, panoMap: three.pano.material.map, northDeg: state.northDeg } };
 
   // Takeover: everything that belongs to the plot map goes away for the duration.
   state.plots.forEach((p) => { p.group.visible = false; });
@@ -4940,8 +6084,12 @@ function openClientPanoTour(tourId, title, { anchorRooms = true } = {}) {
   renderClientSidebar();
 
   state.view.fov = 75;
-  const goPromise = tourGoTo(tour.startNode || tour.nodes[0].id, { instant: true });
-  if (switchingTours) goPromise.finally(hideBootCurtain);
+  // A fresh entry from the plot map has no prior tour texture to crossfade FROM, so it
+  // still hard-cuts straight to the first room (matching the aerial pano's own cut, not
+  // fade, entry). Switching tours crossfades instead — see the note above.
+  tourGoTo(tour.startNode || tour.nodes[0].id, { instant: !switchingTours });
+  prefetchNeighbourTours(tourId);
+  renderClientTourMap();   // rebuilt per tour — each tour has its own map + dots
 }
 function closePanoTour({ silent = false } = {}) {
   const tv = state.tourView; if (!tv) return;
@@ -4954,6 +6102,7 @@ function closePanoTour({ silent = false } = {}) {
   applyLandmarkVisibility(); applyAmenityVisibility();     // restore per each one's own rules
   document.body.classList.remove('tour-open');
   if (els.tourLayer) { els.tourLayer.hidden = true; els.tourLayer.innerHTML = ''; }
+  renderClientTourMap();   // state.tourView is already null → hides the map and gives the compass its corner back
   tourHsDom = [];
   if (tv.saved?.panoMap) { three.pano.material.map = tv.saved.panoMap; three.pano.material.needsUpdate = true; }
   if (tv.saved?.view) Object.assign(state.view, tv.saved.view);
@@ -5005,7 +6154,7 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
     // fresh), not just on an instant entry. Uncalibrated rooms fall back to 0, matching the
     // project's documented "uncalibrated ⇒ 0" default rather than leaking in whatever
     // northDeg happened to be set for the aerial view or a previous room.
-    const dirDeg = { N: 0, E: 90, S: 180, W: 270 }[node.defaultView.facingDir];
+    const dirDeg = COMPASS_DIR_DEG[node.defaultView.facingDir];
     state.northDeg = (dirDeg != null) ? (-(node.defaultView.lon || 0) - dirDeg) : 0;
     // Every arrival snaps to the room's own saved start view (2026-09-11, explicit
     // request) — hotspot clicks, the room-strip thumbnails, and the admin's node list all
@@ -5045,7 +6194,7 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
     tourTouch(tourKey(tour, node)); tourEvict();
     prefetchTourNeighbours(tour, node.id);
     state.tourHsSel = null;
-    rebuildTourHotspotDOM(); refreshTourRoomMenu(); requestRender();
+    rebuildTourHotspotDOM(); refreshTourRoomMenu(); updateTourMapActive(); requestRender();
     if (state.admin && state.adminTab === 'tour') refreshTourList();   // hotspot box follows the open node
   } catch (e) {
     showNotice(e.message || 'Could not load that panorama.');
@@ -5067,9 +6216,16 @@ function rebuildTourHotspotDOM() {
   tour.links.forEach((k, idx) => {
     if (k.from !== tv.nodeId) return;
     const target = tour.nodes.find((n) => n.id === k.to); if (!target) return;
+    const ico = tourHsIcon(k);
     const el = document.createElement('button');
-    el.type = 'button'; el.className = 'tour-hs' + (state.admin && state.tourHsSel === idx ? ' is-sel' : '');
-    el.innerHTML = `<span class="tour-hs-ring">↗</span><span class="tour-hs-lbl"></span>`;
+    el.type = 'button';
+    el.className = `tour-hs tour-hs--${k.icon || TOUR_HS_ICON_DEFAULT}` + (ico.floor ? ' is-floor' : '') + (state.admin && state.tourHsSel === idx ? ' is-sel' : '');
+    // The rotation rides on an inner wrapper, never on .tour-hs itself — renderTourHotspots
+    // writes left/top on that element every frame and a transform here would be a fight
+    // waiting to happen. The inner-inner span is what animates, so its motion happens in
+    // the already-tilted/rotated space (i.e. an arrow bounces ALONG the way it points).
+    el.innerHTML = `<span class="tour-hs-ico"><span class="tour-hs-ico-in">${ico.svg}</span></span><span class="tour-hs-lbl"></span>`;
+    if (ico.rotatable) el.querySelector('.tour-hs-ico').style.setProperty('--rot', `${normDeg(k.rot)}deg`);
     el.querySelector('.tour-hs-lbl').textContent = k.label || target.name;
     el.title = state.admin ? `Link → ${target.name} (drag to reposition)` : `Go to ${target.name}`;
     if (state.admin && state.adminTab === 'tour') {
@@ -5081,7 +6237,7 @@ function rebuildTourHotspotDOM() {
       tourGoTo(k.to);
     });
     els.tourLayer.appendChild(el);
-    tourHsDom.push({ el, dir: dirFromLonLat(k.hotspot.lon, k.hotspot.lat) });
+    tourHsDom.push({ el, dir: dirFromLonLat(k.hotspot.lon, k.hotspot.lat), idx });
   });
   renderTourHotspots();
 }
@@ -5126,7 +6282,7 @@ function addTourHotspot(targetId) {
   // Drop it where the admin is looking. `dirFromView` is the camera→stored-lon bridge:
   // the camera's forward direction, converted with the STORED convention.
   const fwd = new THREE.Vector3(); three.camera.getWorldDirection(fwd);
-  tour.links.push({ from: tv.nodeId, to: targetId, label: '', hotspot: lonLatFromDir(fwd) });
+  tour.links.push({ from: tv.nodeId, to: targetId, label: '', hotspot: lonLatFromDir(fwd), icon: TOUR_HS_ICON_DEFAULT, rot: 0 });
   state.tourHsSel = tour.links.length - 1;
   rebuildTourHotspotDOM(); refreshTourList(); onToursChanged();
   setAxStatus(`Hotspot → <strong>${esc(target.name)}</strong> added. Drag it onto the doorway it leads through.`);
@@ -5142,7 +6298,7 @@ function setTourNodeDefaultView(facingDir) {
   node.defaultView = { lon: state.view.lon * 180 / Math.PI, lat: state.view.lat * 180 / Math.PI, fov: state.view.fov,
     facingDir: facingDir || null };
   onToursChanged(); refreshTourList();
-  const dirNote = facingDir ? ` (compass set to ${{ N: 'North', E: 'East', S: 'South', W: 'West' }[facingDir]})` : '';
+  const dirNote = facingDir ? ` (compass set to ${COMPASS_DIR_LABEL[facingDir]})` : '';
   setAxStatus(`Start view saved for <strong>${esc(node.name)}</strong> — visitors arrive facing this way${dirNote}.`);
 }
 
@@ -5369,7 +6525,7 @@ function activateMenuNode(node, { fromRoot = false, autoOpen = false } = {}) {
     return;
   }
   const info = findNodeInfo(target.node.id);
-  if (target.action === 'images') openClientFolderImageModal(target.node, info);
+  if (target.action === 'images') { collapseClientDrawer(); openClientFolderImageModal(target.node, info); }
   else openNodeContent(target.node, info, { autoOpen });
 }
 
@@ -5391,13 +6547,28 @@ function renderClientSidebar() {
     // dispatches on contentType 'aerial'/'landmarks'). The only thing special about them
     // here is `enabled` — an authored node has no such flag and is always shown, but a
     // builtin's ON/OFF switch can hide it from the client without deleting it.
+    //
+    // Whenever the root menu is what's on screen (this branch), the pano behind it IS the
+    // plain aerial view — every other content type either opens a modal on top of it
+    // (video/pdf/gallery/link) or drills into its own picker level (LANDMARKS' `#catLevel2`,
+    // a submenu's `menuNavStack` level), neither of which leaves the root list visible. The
+    // one exception is an open tour (`state.tourView`), which really does replace the pano
+    // with a tour room while still showing the root list (single-tour/room case — see the
+    // `withExitTourRow`-less `+= EXIT TOUR` append below). So AERIAL VIEW is the one row
+    // that's ever marked active here, and only when no tour has taken the view over —
+    // reported 2026-09-17: backing out of Landmarks landed the visitor back on the aerial
+    // pano with nothing in the menu showing that's where they were.
+    const activeAerialId = !state.tourView
+      ? tree.find((n) => n.contentType === 'aerial' && n.enabled !== false)?.id
+      : null;
     const html = tree
       .filter((node) => node.enabled !== false)
       .map((node) => {
         const title = (node.title || 'ITEM').trim().toUpperCase();
         const drills = menuRowOpensSubmenu(node);
         const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
-        return `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
+        const activeCls = node.id === activeAerialId ? ' is-active' : '';
+        return `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}${activeCls}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
       }).join('')
       // A single-tour, single-room project has nowhere else to put an exit — see
       // openClientPanoTour's `state.menuNavStack = []` case — so it's appended straight
@@ -5410,6 +6581,7 @@ function renderClientSidebar() {
     // the Exit Tour row above is the only thing on screen and must stay reachable.
     if (els.catDrawer && !state.admin) els.catDrawer.hidden = !state.tourView && !tree.some((node) => node.enabled !== false);
     wireClientSidebarButtons();
+    addKeepMenuToggle(els.catNavL1, els.catNavL1.querySelectorAll('.cat-btn').length);
   } else {
     // Level 2 / Level 3: Drilled-in Parent Navigation
     if (els.catLevel1) els.catLevel1.hidden = true;
@@ -5452,6 +6624,7 @@ function renderClientSidebar() {
         if (synthetic) activateMenuNode(synthetic);
       });
     });
+    addKeepMenuToggle(container, children.length);
   }
 }
 
@@ -5519,9 +6692,6 @@ function fireAutoOpen(target) {
 // visitor sees is already correct.
 let bootProgressDone = false;
 function hideBootCurtain() {
-  // The progress bar only describes the FIRST boot's loading — scoped off here so a later
-  // showBootCurtain() reuse (tour-to-tour switching) shows just the plain label again,
-  // not a stale "100%" bar sitting inside the reused curtain.
   if (!bootProgressDone) {
     bootProgressDone = true;
     setBootProgress(100);
@@ -5529,14 +6699,10 @@ function hideBootCurtain() {
   }
   els.bootCurtain?.classList.add('is-hidden');
 }
-// The same curtain, re-shown — used for more than boot now: switching from one virtual
-// tour straight to another (see openClientPanoTour) briefly restores the plot map's own
-// aerial pano while tearing the first tour down, before the second tour's first room has
-// loaded, which read as "the aerial view flashes for a moment." This hides that gap the
-// same way the curtain hides the equivalent one at boot.
-function showBootCurtain() {
-  els.bootCurtain?.classList.remove('is-hidden');
-}
+// showBootCurtain() (its former re-show counterpart) was removed 2026-09-16 — it existed
+// only to paper over tour-to-tour switching's old exit-then-reenter flash with a loading
+// screen; that path now crossfades directly between tours instead (see
+// openClientPanoTour), so nothing re-shows this curtain after boot any more.
 
 function wireClientSidebarButtons() {
   if (!els.catNavL1) return;
@@ -5564,12 +6730,20 @@ function openNodeContent(node, nodeInfo = null, { autoOpen = false } = {}) {
   if (!node) return;
   if (!nodeInfo) nodeInfo = findNodeInfo(node.id);
   if (node.kind === 'contact') {
+    collapseClientDrawer();
     openClientContactModal(node.contact || {});
     return;
   }
   if (node.kind === 'child') {
     const cType = node.contentType || 'link';
     const content = node.content || {};
+    // Collapse for anything that actually shows the visitor real content — a modal, a
+    // tour room/tour switch, or the full aerial view. The two exceptions are 'landmarks'
+    // and 'virtualtour': both open a PICKER LIST the visitor still needs to choose from
+    // (openLandmarksCategoryPicker explicitly re-opens the drawer itself just below;
+    // 'virtualtour' relies on the drawer staying open to show its tour list), so
+    // collapsing here would hide the very list they need next.
+    if (cType !== 'landmarks' && cType !== 'virtualtour') collapseClientDrawer();
 
     if (cType === 'video') {
       openClientVideoModal(node.title || 'Video Player', content, { autoOpen });
@@ -5847,12 +7021,50 @@ function openClientGalleryModal(content, startIndex = 0) {
 
   currentGalleryIdx = (startIndex >= 0 && startIndex < state.currentGalleryImages.length) ? startIndex : 0;
   updateGallerySlide(currentGalleryIdx);
+  startGalleryAutoplay();
 
   els.clientGalleryModal.style.display = 'flex';
   els.clientGalleryModal.hidden = false;
   els.clientGalleryModal.setAttribute('aria-hidden', 'false');
   void els.clientGalleryModal.offsetWidth;
   els.clientGalleryModal.classList.add('open');
+}
+
+// Slideshow autoplay (2026-09-16, on request). `galleryAutoplayOn` is the visitor's own
+// play/pause choice, independent of whether a timer is actually running right now — a
+// manual Prev/Next/swipe/arrow-key restarts the countdown (so a click isn't immediately
+// followed by an autoplay tick a moment later) without touching that choice, so tapping
+// pause is the only thing that actually stops it.
+const GALLERY_AUTOPLAY_MS = 4000;
+let galleryAutoplayTimer = null;
+let galleryAutoplayOn = true;
+function startGalleryAutoplay() {
+  clearInterval(galleryAutoplayTimer);
+  galleryAutoplayTimer = null;
+  const btn = $('galleryAutoplayBtn');
+  if ((state.currentGalleryImages || []).length <= 1) { if (btn) btn.style.display = 'none'; return; }
+  if (btn) btn.style.display = 'flex';
+  updateGalleryAutoplayBtn();
+  if (!galleryAutoplayOn) return;
+  galleryAutoplayTimer = setInterval(() => updateGallerySlide(currentGalleryIdx + 1), GALLERY_AUTOPLAY_MS);
+}
+function stopGalleryAutoplay() {
+  clearInterval(galleryAutoplayTimer);
+  galleryAutoplayTimer = null;
+}
+function restartGalleryAutoplayIfRunning() {
+  if (galleryAutoplayTimer) startGalleryAutoplay();
+}
+function toggleGalleryAutoplay() {
+  galleryAutoplayOn = !galleryAutoplayOn;
+  startGalleryAutoplay();
+}
+function updateGalleryAutoplayBtn() {
+  const btn = $('galleryAutoplayBtn');
+  if (!btn) return;
+  btn.classList.toggle('is-paused', !galleryAutoplayOn);
+  btn.setAttribute('aria-pressed', String(galleryAutoplayOn));
+  btn.setAttribute('aria-label', galleryAutoplayOn ? 'Pause slideshow' : 'Play slideshow');
 }
 
 let currentGalleryIdx = 0;
@@ -5900,10 +7112,22 @@ function updateGallerySlide(idx) {
 
   if (prevBtn) prevBtn.style.display = images.length > 1 ? 'flex' : 'none';
   if (nextBtn) nextBtn.style.display = images.length > 1 ? 'flex' : 'none';
+
+  // Prefetch the neighbours either Prev/Next would land on, so that tap feels instant
+  // instead of waiting on a fresh download — plain <img> requests, so the browser's own
+  // HTTP cache (not app.js) reuses them, and there's no VRAM cost to bound the way there
+  // is for tour panoramas (2026-09-16).
+  if (images.length > 1) {
+    [1, -1].forEach((d) => {
+      const n = images[(currentGalleryIdx + d + images.length) % images.length];
+      if (n?.url) new Image().src = n.url;
+    });
+  }
 }
 
 function closeClientGalleryModal() {
   if (!els.clientGalleryModal) return;
+  stopGalleryAutoplay();
   els.clientGalleryModal.classList.remove('open');
   els.clientGalleryModal.setAttribute('aria-hidden', 'true');
   setTimeout(() => {
@@ -7644,10 +8868,16 @@ function initCustomMenuAdminAndClient() {
   $('galleryPrevBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     updateGallerySlide(currentGalleryIdx - 1);
+    restartGalleryAutoplayIfRunning();
   });
   $('galleryNextBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
     updateGallerySlide(currentGalleryIdx + 1);
+    restartGalleryAutoplayIfRunning();
+  });
+  $('galleryAutoplayBtn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleGalleryAutoplay();
   });
   $('galleryCloseBtn')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -7675,6 +8905,7 @@ function initCustomMenuAdminAndClient() {
         if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.5) {
           if (dx < 0) updateGallerySlide(currentGalleryIdx + 1);
           else updateGallerySlide(currentGalleryIdx - 1);
+          restartGalleryAutoplayIfRunning();
         }
       }
     }, { passive: true });
@@ -7685,9 +8916,11 @@ function initCustomMenuAdminAndClient() {
       if (e.key === 'ArrowLeft' || e.key === 'Left') {
         e.preventDefault();
         updateGallerySlide(currentGalleryIdx - 1);
+        restartGalleryAutoplayIfRunning();
       } else if (e.key === 'ArrowRight' || e.key === 'Right') {
         e.preventDefault();
         updateGallerySlide(currentGalleryIdx + 1);
+        restartGalleryAutoplayIfRunning();
       } else if (e.key === 'Escape' || e.key === 'Esc') {
         e.preventDefault();
         closeClientGalleryModal();
@@ -7899,6 +9132,7 @@ function collectOfflineAssets() {
   if (state.panoImage?.file) add(assetUrl(state.panoImage.file), 'image');
   if (state.groundImage?.file) add(assetUrl(state.groundImage.file), 'image');
   if (state.brand?.logo) add(assetUrl(state.brand.logo), 'image');
+  if (state.bootImage?.file) add(assetUrl(state.bootImage.file), 'image');
   if (state.audio?.file) add(siteAudioSrc(), 'audio');   // background music, same treatment as any other local asset
   for (const lm of state.landmarks || []) if (lm.render) add(renderSrc(lm), 'image');
   for (const am of state.amenities || []) if (am.render) add(renderSrc(am), 'image');
@@ -7912,6 +9146,9 @@ function collectOfflineAssets() {
   // nine tours online first. parseTours normalises each node's pano to a plain path string
   // (see its own comment), which is what assetUrl expects.
   for (const t of state.tours || []) for (const n of t.nodes || []) if (n.pano) add(assetUrl(n.pano), 'image');
+  // Tour minimap images — same reasoning as the room panoramas above: only requested once
+  // a tour with a map is actually opened, so runtime caching alone would never reach them.
+  for (const t of state.tours || []) if (t.map?.file) add(assetUrl(t.map.file, t.map._ver), 'image');
 
   // Custom menu tree — mirrors server.py's scan_menu_for_online_content's walk of the same
   // shape, but collecting local files to prefetch instead of flagging external ones. Plot
@@ -8304,14 +9541,22 @@ function isStandaloneDisplay() {
     }
     if (chosen) { state.transform = chosen.transform; state.savedView = chosen.view; if (chosen.opacity != null) state.overlayOpacity = chosen.opacity; }
     if (chosen?.data) state.sheet = { url: chosen.data.url || '', gid: chosen.data.gid || '', enabled: !!chosen.data.enabled }; // plot-data source (Google Sheet | committed CSV)
+    if (chosen?.area) state.area = chosen.area;                        // area unit + admin-defined size bands
+    if (chosen?.plotOverrides) state.plotOverrides = chosen.plotOverrides;   // admin edits that outrank the live sheet
     // site branding (title bar): alignment's brand (path) + session logo blob if any
     if (chosen?.brand) Object.assign(state.brand, { name: chosen.brand.name, tagline: chosen.brand.tagline, logo: chosen.brand.logo, _ver: chosen.brand._ver });
     if (restored?.brandLogo?.blob) { state.brand.logoBlob = restored.brandLogo.blob; state.brand.logoName = restored.brandLogo.name; if (!state.brand.logo) state.brand.logo = `sample/${restored.brandLogo.name}`; }
     if (chosen?.audio) Object.assign(state.audio, { file: chosen.audio.file, name: baseName(chosen.audio.file), _ver: chosen.audio._ver });
+    if (chosen?.bootImage) Object.assign(state.bootImage, { file: chosen.bootImage.file, name: baseName(chosen.bootImage.file), _ver: chosen.bootImage._ver });
     if (chosen?.northDeg != null) state.northDeg = chosen.northDeg;
     if (restored?.siteAudio?.blob) { state.audio.blob = restored.siteAudio.blob; state.audio.name = restored.siteAudio.name; if (!state.audio.file) state.audio.file = `sample/${restored.siteAudio.name}`; }
+    if (restored?.bootImage?.blob) { state.bootImage.blob = restored.bootImage.blob; state.bootImage.name = restored.bootImage.name; if (!state.bootImage.file) state.bootImage.file = `sample/${restored.bootImage.name}`; }
     applyBrand();
     applySiteAudio();
+    // As early as the alignment is known (well before the much larger pano/ground-image
+    // fetches below) so the custom loading-screen image covers most of the actual
+    // loading window — see applyBootImage's own comment.
+    applyBootImage();
     if (chosen?.menuConfig) {
       state.menuConfig = Object.assign({}, state.menuConfig, chosen.menuConfig);
     }
@@ -8389,6 +9634,7 @@ function isStandaloneDisplay() {
     await loadData();
     if (restored && Array.isArray(restored.rows)) state.rows = indexRows(restored.rows); // session's edited statuses win (canonicalised to the layout ids)
     applyData();
+    renderAreaFilterUI();     // needs state.rows + the alignment's `area` block, both settled by here
     // landmarks: session (freshest) > committed landmarks.json > none
     let lms = [];
     if (restored?.landmarks?.length) lms = parseLandmarks({ landmarks: restored.landmarks });
