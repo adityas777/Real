@@ -312,6 +312,18 @@ body {
    where the header legend they stand in for is hidden. */
 .zoom-status-group { display: none; flex-direction: column; gap: 6px; align-items: flex-end; }
 .zoom-status-group.is-hidden { display: none !important; }
+.zoom-controls.is-hidden { display: none !important; }   /* client, outside the aerial plot map — see updateLegendVisibility */
+/* CLIENT layout at every size (2026-09-21, on request): no header bar. The brand/legend/filter
+   strip is collapsed and its Available/Reserved/Sold pills + area filter live in the right-hand
+   control column instead, stacked above the icon buttons — the layout landscape phones already
+   used (see the landscape block further down, which still docks the pills to the top edge
+   there because a short screen can't fit the whole stack). The topbar is collapsed in place
+   (height 0), NOT display:none: it is body's first grid item, and removing it would shift the
+   pano into the wrong grid track (see the landscape block's note). */
+body:not(.is-admin) .topbar { height: 0; min-height: 0; padding: 0; margin: 0; border: none; overflow: hidden; visibility: hidden; }
+body:not(.is-admin) .zoom-status-group { display: flex; }
+body:not(.is-admin) .area-filter-sel.is-floating:not([hidden]):not(.is-hidden) { display: block; max-width: 200px; font-size: 12px; padding: 6px 12px; }
+body:not(.is-admin) .zoom-status-group .area-filter-sel.is-floating { order: -1; }   /* desktop column: filter first */
 .zoom-status-btn {
   display: inline-flex;
   align-items: center; gap: 7px;
@@ -556,6 +568,10 @@ body {
   position: absolute;
   right: 16px; bottom: 16px;
   display: flex; flex-direction: column; gap: 8px;
+  /* flex-end (2026-09-21): the container shrink-wraps its widest child (the area filter
+     pill on phones), and without this the narrower square buttons sat on its LEFT edge,
+     ragged against the right-pinned column. Everything now shares the right edge. */
+  align-items: flex-end;
   z-index: 15;
 }
 .zoom-controls .btn-icon {
@@ -1130,7 +1146,10 @@ body.is-admin .compass { display: none; }
      (`wrap-reverse`, not `wrap`: this stack is right-anchored, so extra columns have to go
      LEFT or they leave the screen.) */
   body:not(.is-admin) .zoom-controls {
-    align-items: flex-end; right: 12px; bottom: 12px; gap: 4px;
+    /* flex-START, not flex-end (2026-09-21): `wrap-reverse` below flips the cross axis, so
+       flex-start is the RIGHT edge here. The earlier flex-end put every button on the LEFT
+       edge of the pill-wide column — the still-misaligned column reported on phones. */
+    align-items: flex-start; right: 12px; bottom: 12px; gap: 4px;
     max-height: calc(100% - 24px);
     flex-wrap: wrap-reverse;
     align-content: flex-end;
@@ -1147,6 +1166,9 @@ body.is-admin .compass { display: none; }
     /* Never let the pills run off the left edge on very narrow screens */
     max-width: calc(100vw - 110px);
   }
+  /* Area filter joins the pill row, LEFT of Sold (2026-09-21): the row is row-reverse, so the
+     highest `order` lands leftmost. Sized to sit level with the 28px pills. */
+  body:not(.is-admin) .zoom-status-group .area-filter-sel.is-floating { order: 1; max-width: 140px; min-height: 28px; font-size: 11px; padding: 4px 10px; }
   body:not(.is-admin) .zoom-status-btn { padding: 5px 10px 5px 8px; min-height: 28px; font-size: 11px; gap: 5px; }
   body:not(.is-admin) .zoom-status-btn .dot { width: 8px; height: 8px; box-shadow: 0 0 0 2px rgba(255,255,255,.06); }
 
@@ -1906,6 +1928,35 @@ body.is-admin .cat-drawer { display: none !important; }
   display: flex !important;
   flex-direction: column !important;
 }
+/* Menu videos open FULL SCREEN (2026-09-21, on request): the dialog fills the viewport edge
+   to edge on a black stage, the player is contained (never cropped) inside it, and the title
+   bar collapses into a single floating × in the top-right to go back. Scoped to
+   #clientVideoModal so the PDF/brochure/gallery/tour modals keep their own framing. The
+   × is still the same `[data-close]` button, so closing (and stopping playback via
+   closeCustomModal) is unchanged. `!important` is needed against the JS-set inline
+   sizes on the <video>/<iframe> in index.html. */
+#clientVideoModal .modal-backdrop { background: #000; backdrop-filter: none; }
+#clientVideoModal .video-modal-dialog {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh;
+  max-width: none; margin: 0; border: 0; border-radius: 0; box-shadow: none;
+  background: #000; animation: none;
+}
+#clientVideoModal .modal-bar {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+  padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+  border: 0; background: linear-gradient(rgba(0,0,0,.6), rgba(0,0,0,0));
+  pointer-events: none;                    /* only the × takes taps; the rest is video */
+}
+#clientVideoModal .modal-title { color: #fff; font-size: 14px; text-shadow: 0 1px 4px rgba(0,0,0,.7); }
+#clientVideoModal .modal-close-btn {
+  pointer-events: auto; width: 40px; height: 40px; font-size: 26px; line-height: 1;
+  border-radius: 50%; background: rgba(15,18,26,.72); color: #fff;
+  border: 1.5px solid rgba(255,255,255,.55); box-shadow: 0 2px 9px rgba(0,0,0,.5);
+}
+#clientVideoModal .video-modal-body { position: absolute; inset: 0; display: block; }
+#clientVideoModal #clientVideoPlayer { width: 100% !important; height: 100% !important; max-height: none !important; object-fit: contain; background: #000; }
+#clientVideoModal #clientVideoIframe { width: 100% !important; height: 100% !important; max-height: none !important; }
+
 @media (max-width: 480px) {
   /* Every feature-modal-dialog (video/PDF/tour/gallery/contact-flag popups, the menu
      wizard) already fits the viewport via max-width:92vw above; the type-picker grid
@@ -3482,9 +3533,13 @@ body.tour-map-on .compass { display: none; }
 /* Icon halves — only one shows at a time, swapped by the container's state class rather
    than by rewriting the button's contents (textContent would wipe the inline SVG, the
    mistake the audio button's own comment warns about). */
-.tm-ico-show { display: none; }
-.tour-map.is-map-hidden .tm-ico-hide { display: none; }
-.tour-map.is-map-hidden .tm-ico-show { display: block; }
+/* One icon in BOTH states (2026-09-21, on request): the plain map glyph, whether the map is
+   open or closed — the button is a simple open/close toggle. The eye-slash half stays in the
+   markup but is never shown. Written with `.tour-map-hide` in the selector because the earlier
+   rule `.tour-map-hide svg { display:block }` (higher specificity than a bare `.tm-ico-*`)
+   was overriding the old hide/show swap, so BOTH icons were showing stacked. */
+.tour-map-hide .tm-ico-hide { display: none; }
+.tour-map-hide .tm-ico-show { display: block; }
 /* Dismissed: everything except the restore button collapses. The button is re-anchored to
    the top-right corner because .tour-map shrink-wraps its (now hidden) image — leaving it
    on `bottom` would place it against a zero-height box and push it off-screen. */
@@ -3501,18 +3556,136 @@ body.tour-map-on .compass { display: none; }
    are capped: the map can't exceed ~24% of the height or ~26% of the width, whatever
    aspect ratio the uploaded image happens to be. */
 @media (orientation: landscape) and (max-height: 500px) {
-  .tour-map { max-width: min(140px, 26vw); }
-  .tour-map-inner img { max-height: 24vh; }
-  .tour-map-dot { width: 10px; height: 10px; border-width: 1.5px; }
-  .tour-map-switch { width: 22px; height: 22px; right: 2px; bottom: 2px; }
-  .tour-map-switch svg { width: 13px; height: 13px; }
-  .tour-map-hide { width: 22px; height: 22px; right: 2px; bottom: 2px; }
-  .tour-map.has-switch .tour-map-hide { right: 28px; }
-  .tour-map-hide svg { width: 13px; height: 13px; }
+  /* Enlarged 2026-09-21 (on request, mobile users found it too small to read/tap): was
+     min(140px, 26vw) / 24vh. Still capped by both axes so it can't swallow the scene. */
+  .tour-map { max-width: min(300px, 44vw); }
+  .tour-map-inner img { max-height: 46vh; }
+  .tour-map-dot { width: 12px; height: 12px; border-width: 1.5px; }
+  /* Controls sit BELOW the map, not on its corner (2026-09-21): overlapping the image they
+     covered dots and each other. Only the map box's bottom edge moves them, so the dots'
+     %-positions are untouched. Pips slot to the left of the pair on the same row. */
+  .tour-map-switch { width: 28px; height: 28px; right: 2px; bottom: -26px; }
+  .tour-map-switch svg { width: 15px; height: 15px; }
+  .tour-map-hide { width: 28px; height: 28px; right: 2px; bottom: -26px; }
+  .tour-map.has-switch:not(.is-map-hidden) .tour-map-hide { right: 36px; }
+  .tour-map-hide svg { width: 15px; height: 15px; }
   .tour-map.is-map-hidden .tour-map-hide { top: 6px; right: 8px; bottom: auto; }
-  .tour-map-pips { bottom: -9px; gap: 3px; }
+  .tour-map-pips { right: 72px; bottom: -14px; gap: 3px; }
   .tour-map-pip { width: 4px; height: 4px; }
 }
+
+/* Portrait phones (2026-09-21) — the desktop cap of 34vw left the map ~130px wide on a
+   390px screen. Wider share of the width here since portrait has spare height; declared
+   after the base rules for the same specificity reason as the landscape block above.
+   Controls live under the map here too (see the landscape block for why). */
+@media (orientation: portrait) and (max-width: 600px) {
+  .tour-map { max-width: min(340px, 74vw); }
+  .tour-map-inner img { max-height: 40vh; }
+  .tour-map-dot { width: 16px; height: 16px; }
+  .tour-map-switch { width: 34px; height: 34px; right: 4px; bottom: -30px; }
+  .tour-map-switch svg { width: 18px; height: 18px; }
+  .tour-map-hide { width: 34px; height: 34px; right: 4px; bottom: -30px; }
+  .tour-map.has-switch:not(.is-map-hidden) .tour-map-hide { right: 44px; }
+  .tour-map-hide svg { width: 18px; height: 18px; }
+  .tour-map-pips { right: 88px; bottom: -16px; gap: 4px; }
+}
+
+/* ── MENU IMAGE builtin (2026-09-21) ─────────────────────────────────────────
+   A picture drawn INSIDE the client menu (asked for to put a QR code under CONTACT US),
+   not a tappable row. Sits in the normal row flow, so wherever the admin drags the item is
+   where it appears. pointer-events:none so it can never look clickable, and the width is
+   capped so a large upload can't stretch the drawer. */
+.cat-menu-img {
+  padding: 12px 14px 4px;
+  display: flex; justify-content: center;
+  pointer-events: none;
+}
+.cat-menu-img img {
+  display: block; max-width: 100%; width: auto; height: auto;
+  max-height: 190px;
+  border-radius: 8px;
+  /* A QR has to stay crisp: white behind it and a little padding, since many renders are
+     transparent or trimmed right to the modules. */
+  background: #fff; padding: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .35);
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  /* A short landscape phone has almost no room to spare in the drawer. */
+  .cat-menu-img { padding: 7px 10px 2px; }
+  .cat-menu-img img { max-height: 92px; padding: 4px; }
+}
+/* Admin: the upload slot inside the expanded MENU IMAGE row. */
+.builtin-mi { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+.builtin-mi-thumb {
+  display: flex; justify-content: center; padding: 8px;
+  background: #fff; border-radius: 6px; border: 1px solid var(--line);
+}
+.builtin-mi-thumb img { display: block; max-width: 100%; max-height: 120px; width: auto; height: auto; }
+.builtin-mi-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.builtin-mi-actions .btn { flex: 1 1 auto; justify-content: center; font-size: 11px; }
+
+/* ── Furnished / unfurnished toggle (client, 2026-09-21) ─────────────────────
+   Top-CENTRE: the two upper corners are already taken (compass + minimap right, drawer
+   toggle left), and centring is also what the reference tour does. The bar is a child of
+   .pano, so it sits above the hotspot layer but below the modals. */
+.tour-variants {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 16; display: flex; gap: 6px;
+  padding: 4px; border-radius: 999px;
+  background: rgba(15, 18, 26, .72);
+  border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.tour-variants[hidden] { display: none; }
+.tour-variant-btn {
+  padding: 7px 16px; border: 0; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 700; letter-spacing: .3px;
+  text-transform: uppercase; white-space: nowrap;
+  background: transparent; color: rgba(255, 255, 255, .72);
+  transition: background-color .16s var(--ease), color .16s var(--ease);
+}
+.tour-variant-btn:hover:not(:disabled) { color: #fff; background: rgba(255, 255, 255, .1); }
+.tour-variant-btn[aria-pressed="true"] { background: var(--gold, #d4af37); color: #14161c; }
+/* The room has no such render. Dimmed IN PLACE rather than removed — the bar must not
+   change size as the visitor walks, and their chosen version stays selected underneath.
+   Styled off a CLASS, not :disabled: the button stays clickable so tapping it can explain
+   why nothing happened (a real `disabled` swallows the click entirely). */
+.tour-variant-btn.is-unavailable { opacity: .34; }
+.tour-variant-btn.is-unavailable[aria-pressed="true"] { background: rgba(212, 175, 55, .3); color: rgba(255, 255, 255, .6); }
+.tour-variant-btn.is-unavailable:hover { background: transparent; color: rgba(255, 255, 255, .72); }
+@media (max-width: 600px), (orientation: landscape) and (max-height: 500px) {
+  /* Narrow/short screens: the compass and minimap crowd in from the right, so shrink rather
+     than let this bar collide with them. */
+  .tour-variants { top: 8px; gap: 4px; padding: 3px; }
+  .tour-variant-btn { padding: 5px 11px; font-size: 10.5px; letter-spacing: .2px; }
+}
+
+/* ── Admin: per-node render slots + version labels ───────────────────────── */
+/* Second line of a node row — which of the two renders this room actually has. */
+.ax-tour-vrow { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin: -2px 0 7px 26px; }
+.ax-tour-vtag {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--text-mute); background: var(--bg);
+}
+.ax-tour-vtag.is-on { border-color: rgba(212, 175, 55, .5); color: var(--gold, #d4af37); }
+.ax-tour-vadd {
+  font: inherit; font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px;
+  padding: 2px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px dashed var(--line); background: transparent; color: var(--text-mute);
+}
+.ax-tour-vadd:hover { border-color: var(--gold, #d4af37); color: var(--gold, #d4af37); border-style: solid; }
+.ax-tour-vdel { width: 18px; height: 18px; font-size: 11px; }
+/* Tour-level: what the client's two buttons are called. */
+.ax-tour-vlabels { display: flex; align-items: center; gap: 6px; margin: 9px 0 3px; flex-wrap: wrap; }
+.ax-tour-vlabels-h { font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-mute); flex: none; }
+.ax-tour-vlabel {
+  flex: 1 1 80px; min-width: 0; font: inherit; font-size: 11px;
+  padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+}
+.ax-tour-vlabel:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
 
 /* ── Tour map editor (admin modal) ── */
 .tourmap-modal-body { display: flex; gap: 14px; padding: 16px; background: var(--panel); align-items: flex-start; }
@@ -3572,6 +3745,7 @@ body.tour-map-on .compass { display: none; }
 .tourmap-noderow-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--line); }
 .tourmap-noderow.is-placed .tourmap-noderow-dot { background: #2f7df6; }
 .tourmap-noderow-name { flex: 1; min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tourmap-rotbtn { flex: none; font-size: 16px; font-weight: 700; }
 .tourmap-noderow-state { font-size: 9.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-mute); flex: none; }
 .tourmap-noderow.is-armed .tourmap-noderow-state { color: var(--gold, #d4af37); }
 
@@ -3701,6 +3875,7 @@ body.tour-open .lm-overflow-hint { display: none !important; }
    wide in a sidebar this narrow. */
 .ax-tour-hsrow2 { display: flex; flex-direction: column; gap: 5px; margin: -4px 0 10px; }
 .ax-tour-hsico { width: 100%; min-width: 0; }
+.ax-tour-hsvar { width: 100%; min-width: 0; }
 .ax-tour-hsaim { display: flex; align-items: center; gap: 4px; }
 .ax-tour-hsdir {
   width: 22px; height: 22px; flex: none; padding: 0; cursor: pointer;

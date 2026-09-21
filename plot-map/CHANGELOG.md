@@ -5,6 +5,229 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-21 (New builtin: MENU IMAGE — a picture drawn inside the menu, e.g. a QR code)
+
+Requested: show an image in the client menu under CONTACT US (a QR code), managed from admin
+like AERIAL VIEW / LANDMARKS / VIRTUAL TOUR, with an on/off switch — the difference being that
+the image is DISPLAYED rather than tapped.
+
+Added as a fourth builtin, `menuimage`, so it inherits the whole builtin mechanism: drag to
+reorder, rename, ON/OFF switch, no delete, self-heal if removed. Two things are its own:
+- It self-heals in at the END of the tree (`BUILTIN_DEFS.menuimage.atEnd`), not the top, since
+  it was asked for as the last item.
+- It is the only builtin with content. Stored as an ordinary `kind:'child'` node with
+  `content.fileName` / `fileBlob`, which means save, export, the offline precache walk and the
+  standalone bundle already handle its image with no new code.
+
+**Client.** `renderClientSidebar` draws `.cat-menu-img` in place of a `.cat-btn`, at both root
+and submenu level, wherever the item sits. `pointer-events: none` so it can never read as
+tappable; white backing + padding so a trimmed or transparent QR stays scannable; height-capped
+(190px, 92px on a short landscape phone) so a big upload can't stretch the drawer. With no
+image uploaded it renders nothing rather than an empty frame. Excluded from
+`computeAutoOpenTarget` — it is not a destination and must never become the default screen by
+sitting on top.
+
+**Admin.** The expanded builtin row carries an upload slot with a preview, Replace and Remove.
+Saved as PNG (not JPEG): a QR is hard-edged black-and-white, exactly what JPEG smears, and a
+smeared QR can stop scanning. `collectCustomMenuFiles` now maps png/jpg/webp to real image
+mime types instead of octet-stream.
+
+Verified in a browser on a throwaway project: menu renders AERIAL VIEW, LANDMARKS, VIRTUAL
+TOUR, CONTACT US, [IMAGE] with the image last; it loads (300x300 -> 190x190 rendered), is not
+a button, computes `pointer-events: none` so a tap at its centre passes through to the nav
+behind it, and it does not hijack the default screen.
+
+SW v28. Files: `app.js`, `index.html`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-21 (Fix: the version toggle was dead to real taps)
+
+Reported twice — "it is not switching", then "why is the unfurnished button not getting
+clicked". Root cause: `.tour-variants` lives inside `#pano`, which calls `setPointerCapture`
+on pointerdown, so a real tap's `click` is retargeted to #pano and the button's own listener
+never runs. This is the documented trap every other in-pano control already works around —
+amenity pins, tour hotspots, and the minimap's dots/switch/hide are all hit-tested in `pick()`
+for exactly this reason. The toggle was not, so it was dead to mouse and touch alike.
+
+Fixed by adding a `.tour-variant-btn` branch to `pick()`, before the minimap buttons. The
+`click` listener stays for keyboard Enter/Space, matching how `.tour-map-switch` is wired.
+
+**Why the previous verification missed it:** the browser test drove the buttons with
+`el.click()`, which dispatches a synthetic click straight at the element and bypasses the
+pointer pipeline — the one thing that was broken. The test now sends real pointerdown/pointerup
+at the button's coordinates (`realTap`) and would have failed on the old build. Re-verified end
+to end by sampling rendered pano pixels: tap Unfurnished -> rgb(30,90,160) becomes
+rgb(200,70,20); tap Furnished -> back; walking rooms while unfurnished arrives in the
+unfurnished render; and in a single-render room the tap explains itself and keeps the choice.
+
+SW v27. Files: `app.js`, `sw.js`.
+
+---
+## 2026-09-21 (Variant toggle: same crossfade as rooms; dead tap now explains itself)
+
+Reported: "clicking unfurnished is not switching", plus a request that the swap fade the same
+way room-to-room moves do.
+
+- **Crossfade unified.** The variant swap ran its own 300ms tween against the room move's
+  460ms. Both now call one `tourCrossfade(tex)` helper (`TOUR_FADE_MS`), so they are identical
+  and cannot drift apart again.
+- **The dead tap.** A room with only one render dimmed the other side with the `disabled`
+  PROPERTY, and a disabled button swallows its click — so tapping it did nothing at all, with
+  no explanation. That is the reported symptom whenever the visitor is standing in a room that
+  has no second render. Now dimmed via `aria-disabled` + `.is-unavailable`, stays clickable,
+  and says which room is missing which version. The chosen version is still NOT changed, so it
+  resumes in the next room that has both.
+- `renderTourVariantBar()` also runs in `tourGoTo`'s `finally`, so a throw mid-move can't
+  leave a stale available/unavailable state on the bar.
+
+Verified in a browser by sampling the rendered pano texture's pixels (not just DOM state) on a
+throwaway 3-room project: furnished rgb(30,90,160) -> unfurnished rgb(200,70,20) -> back again;
+walking rooms while unfurnished arrives in the unfurnished render; and in the single-render
+room the tap now produces "4.Living Room has no unfurnished version - showing the furnished
+one instead." with the texture unchanged and the choice kept.
+
+SW v26. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-21 (Virtual tour: furnished / unfurnished room versions)
+
+Requested: let a visitor switch between a furnished and an unfurnished render of the same
+room, keep that choice as they walk from room to room, and make the second render optional
+per room. Built as a VARIANT ON THE NODE rather than a parallel set of rooms, so hotspots,
+isometric dots, view cones and start views are authored once and cannot drift apart.
+
+**Data** (all optional; every tour saved before this reads back unchanged, one variant, no
+toggle). Slots are named `a`/`b`, not furnished/unfurnished, because the LABELS are editable:
+- `node.panoAlt` (+ `panoAltBlob`, `_urlAlt`) — the second render. `node.pano` is slot A.
+- `tour.variantLabels` — `['Furnished','Unfurnished']` by default, omitted from tour.json
+  while unchanged.
+- `link.variant` — `null` (both) | `'a'` | `'b'`, for a hotspot that only means something in
+  one render (the reference tour's "close the curtains").
+
+**Client.** Toggle bar top-centre (`#tourVariants`), shown only when some room in the open
+tour has both. `state.tourView.variant` persists room to room and resets to `a` on entering
+any tour. A room with one render falls back at RENDER time (`nodeVariantFor`) without writing
+back to the choice, so it resumes in the next room that has both — and its missing button is
+disabled in place, not removed, so the bar never jumps. Swapping crossfades at the same camera
+angle (300ms, vs 460ms room-to-room) so the furniture appears to materialise. `tourKey` now
+includes the variant; prefetch warms only the current one.
+
+**Admin.** Each node row gained a ＋ to add/remove the second render; the tour gained two
+label inputs; each hotspot gained a "show in" picker (only once the tour has two versions).
+
+Also updated so the feature survives a round trip: session snapshot, `tourNodeBlobFiles`
+(save + export), the offline precache list, and `server.py`'s `tour_pano_basenames`
+(bundle export).
+
+Verified in a browser against a throwaway 3-room project (two rooms with both renders, one
+with only the furnished): labels render, toggle flips, the furnished-only hotspot disappears
+in unfurnished, and walking into the single-render room leaves the choice selected but
+disabled. Caught in that pass: the toggle was first wired in `wireAdmin()`, which returns
+early for a client — the buttons were dead for every visitor. Moved to `wireViewControls()`.
+
+SW v25. Files: `app.js`, `index.html`, `styles.css`, `sw.js`, `server.py`.
+
+---
+## 2026-09-21 (Minimap toggle shows just the map icon)
+
+Requested: the minimap open/close button should look like the plain map icon and toggle the
+isometric open/closed. It already toggled (`toggleTourMapHidden`), but a specificity clash
+(`.tour-map-hide svg` vs bare `.tm-ico-*`) showed the eye-slash AND map icons stacked. Now only
+the map icon shows, in both states. CSS only; SW v24. Files: `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-21 (Admin: − / + to aim each room's view cone)
+
+Requested: in the tour-map editor, let the admin set the direction the minimap's "shadow"
+(view cone) points, with + and − beside each room. Each placed room row now has − / + buttons
+that turn its `rot` by 15° (Shift = 5°) via `setTourMapPointRot`; the row shows the current
+angle instead of "placed". Same value the drag handle edits, so it saves with the tour and is
+what the client cone starts from. SW v23. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-21 (Area filter moves to the top pill row on phones)
+
+Requested: on mobile the "Filter: All sizes" dropdown sits to the LEFT of Sold in the top row.
+`#areaFilterSelMobile` moved into `#zoomStatusGroup` (index.html) so it docks with the pills;
+CSS `order` puts it leftmost in the landscape row and first in the desktop column. SW v22.
+Files: `index.html`, `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-21 (Client header removed; filters and status pills join the right-hand column)
+
+Requested: no header on the client. The topbar (brand + legend + area filter) is collapsed at
+every size (was landscape-phone only) and the area filter + Available/Reserved/Sold pills show
+in the `.zoom-controls` column above the icon buttons. Landscape phones keep their existing
+docking (pills top-right by the compass). Admin keeps its header. CSS only; SW v21.
+Files: `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-21 (Hide plot-map controls outside the aerial view)
+
+Requested: in a tour the # / landmark / amenity / zoom / recenter column (plot-map tools) was
+still showing and overlapping the minimap's buttons. `updateLegendVisibility` now also hides
+`.zoom-controls` (client only) whenever `isAerialSectionActive()` is false, i.e. in a tour,
+landmark picker or sub-menu. Admin unchanged. SW v20. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-21 (No hover tooltip on plots outside the area filter)
+
+Requested: with a size band picked, hovering a plot that is NOT in the band no longer shows
+its plot number / info card (or hover highlight). `hover()` treats dimmed plots
+(`isAreaDimmed`) as no hit on the client; admin is unchanged. SW v19.
+Files: `app.js`, `sw.js`.
+
+---
+
+## 2026-09-21 (Menu videos open full screen)
+
+Requested: a video picked from the menu should play full screen with a × to go back.
+`#clientVideoModal` (CSS only) now fills the viewport on black, player `object-fit: contain`,
+title bar collapsed to a floating gradient with a round × top-right (same `[data-close]`
+button, so close/stop-playback is unchanged). Other modals untouched. SW v18.
+Files: `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-21 (Area filter dropdown wears the band colours)
+
+Requested: the area-filter dropdown options should use the colour the admin set for each band
+(the colour its plots wear on the layout). `renderAreaFilterUI` now sets each `<option>`'s
+background to `f.color` with a luminance-picked text colour, and `tintAreaSelect` tints the
+closed select to the picked band (reset on "All sizes"). Native option backgrounds work on
+desktop and Android Chrome/Edge; iOS Safari ignores them. SW v17. Files: `app.js`, `sw.js`.
+
+---
+
+## 2026-09-21 (Larger isometric minimap on mobile, controls moved off the map)
+
+Requested: the tour's isometric minimap was too small for phone users, and a screenshot
+showed the hide + switch buttons sitting ON the map's corner, covering dots and each other.
+- Controls (hide / switch / position pips) now sit BELOW the map on phones instead of over
+  its bottom-right corner (`bottom` negative). Dots' %-positions are unaffected.
+- Landscape phone (`max-height: 500px`): width cap `min(140px, 26vw)` -> `min(300px, 44vw)`,
+  height cap `24vh` -> `46vh`, dots 10px -> 12px, buttons 28px.
+- Portrait phone (new `max-width: 600px` block): width cap `min(340px, 74vw)` (was the
+  desktop `34vw`), height cap `40vh`, dots 16px, buttons 34px.
+- `sw.js` VERSION v12 -> v14 so installed phones drop the cached stylesheet.
+
+- Follow-up: tour controls nudged up (now ~30px below the map instead of ~42px; pips
+  re-aligned). `.zoom-controls` gets `align-items: flex-end` so the # / landmark / amenity /
+  zoom buttons share the area-filter pill's right edge instead of hugging its left (was only
+  fixed for landscape). SW v15.
+- Real cause of the landscape misalignment (SW v16): the landscape `.zoom-controls` rule uses
+  `flex-wrap: wrap-reverse`, which flips the cross axis, so its `align-items: flex-end` meant
+  LEFT. Changed to `flex-start` (= right under wrap-reverse).
+
+Files: `styles.css`, `sw.js`.
+
+---
+
 ## 2026-09-18 (Fix: switching isometrics showed nothing)
 
 Reported immediately after the feature below shipped. Two independent causes, either of

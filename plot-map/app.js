@@ -74,6 +74,8 @@ const els = {
   axTitle: $('axTitle'), axSubtitle: $('axSubtitle'), axTabBtnAlign: $('axTabBtnAlign'), axTabBtnLandmarks: $('axTabBtnLandmarks'), axTabBtnAmenities: $('axTabBtnAmenities'), axTabBtnTour: $('axTabBtnTour'),
   axTabAlign: $('axTabAlign'), axTabLandmarks: $('axTabLandmarks'), axTabAmenities: $('axTabAmenities'), axTabTour: $('axTabTour'),
   axTourAdd: $('axTourAdd'), axTourList: $('axTourList'), axTourEmpty: $('axTourEmpty'), axTourNodeFile: $('axTourNodeFile'), axTourLoad: $('axTourLoad'), axTourFile: $('axTourFile'), axTourSaveBtn: $('axTourSaveBtn'),
+  axTourNodeAltFile: $('axTourNodeAltFile'), tourVariants: $('tourVariants'),
+  axMenuImageFile: $('axMenuImageFile'),
   axTourMapFile: $('axTourMapFile'), tourMapModal: $('tourMapModal'), tourMapModalTitle: $('tourMapModalTitle'), tourMapModalHint: $('tourMapModalHint'),
   tourMapCanvas: $('tourMapCanvas'), tourMapEditImg: $('tourMapEditImg'), tourMapEditDots: $('tourMapEditDots'), tourMapNodeList: $('tourMapNodeList'),
   tourMap: $('tourMap'), tourMapInner: $('tourMapInner'), tourMapImg: $('tourMapImg'), tourMapDots: $('tourMapDots'),
@@ -205,6 +207,8 @@ const state = {
   landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   amenities: [], amSel: null, amCardOpen: null,  // in-layout amenities (icon pins + render); selected id; open card id
   tours: [], tourSel: null, tourNodeSel: null,   // authored virtual tours (tour.json); admin: selected tour id + node id
+  menuImageTarget: null,                         // MENU IMAGE node awaiting an upload — see setMenuImageFromFile
+  tourAltTarget: null,                           // node awaiting a second (variant 'b') render — see addTourNodeAltFromFile
   tourView: null, tourHsSel: null,               // live tour takeover ({tourId,nodeId,…}) + admin-selected hotspot index
   tourActive: null, tourNode: null,              // client: running tour object + current node id (null ⇒ not in a tour)
   cardAnchor: null, cardHoverMode: false,        // shared info-card anchor {lon,lat}; hover cards (landmarks) auto-hide
@@ -1470,6 +1474,14 @@ function wireViewControls() {
   // a POINTER event on #pano; a keyboard Enter/Space on this (focused, real <button>)
   // fires `click` directly and never touches #pano's capture at all.
   els.tourMapSwitch?.addEventListener('click', (e) => { e.stopPropagation(); switchTourMap(); });
+  // Furnished / unfurnished. Wired HERE and not in wireAdmin, which returns early for a
+  // client — this is client UI, so wiring it there left the buttons dead for every visitor.
+  // POINTER taps do NOT arrive here (see the .tour-variant-btn branch in pick): #pano's
+  // capture eats them. This listener exists for the keyboard — Enter/Space on a focused
+  // button fires `click` directly and never touches #pano — exactly like .tour-map-switch.
+  els.tourVariants?.querySelectorAll('[data-variant]').forEach((b) => {
+    b.addEventListener('click', (e) => { e.stopPropagation(); touch(); setTourVariant(b.dataset.variant); });
+  });
   els.tourMapHide?.addEventListener('click', (e) => { e.stopPropagation(); toggleTourMapHidden(); });
   els.fsToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
   els.audioToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleAudio(); });
@@ -2217,7 +2229,11 @@ function rayToGround(e) {                               // pointer ray → point
   return t > 0 ? ray.direction.clone().multiplyScalar(t).add(ray.origin) : null;
 }
 function hover(e) {
-  const id = rayHit(e);
+  // Plots outside the active area band are faded back (isAreaDimmed) — hovering one must not
+  // pop its number/info card or light it up, or the dimmed plots read as still selectable.
+  // Client only: the admin keeps hover so they can still inspect any plot while editing.
+  let id = rayHit(e);
+  if (id && !state.admin && isAreaDimmed(id)) id = null;
   if (id !== state.hoverId) { clearHover(); state.hoverId = id; if (id) setEmphasis(id, true); requestRender(); }
   if (id) showTooltip(id, e); else hideTooltip();
 }
@@ -2235,6 +2251,12 @@ function pick(e) {
     // Same trap, for the minimap's own buttons (2026-09-18) — checked before the dots since
     // they sit visually above them, in the map's corner. Hide is checked first of all: while
     // the map is dismissed it's the ONLY thing on screen here, and it must stay reachable.
+    // The furnished/unfurnished toggle is the same trap (2026-09-21): it lives inside #pano,
+    // so a real tap's `click` is eaten by the capture above and its own listener never ran —
+    // the button looked completely dead to every visitor. Checked first; it owns its corner of
+    // the screen and overlaps nothing else.
+    const vbtn = hitEl?.closest?.('.tour-variant-btn');
+    if (vbtn) { setTourVariant(vbtn.dataset.variant); return; }
     const hideBtn = hitEl?.closest?.('.tour-map-hide');
     if (hideBtn) { toggleTourMapHidden(); return; }
     const sw = hitEl?.closest?.('.tour-map-switch');
@@ -2403,6 +2425,10 @@ function updateLegendVisibility() {
   const show = isAerialSectionActive();
   els.legend?.classList.toggle('is-hidden', !show);
   els.zoomStatusGroup?.classList.toggle('is-hidden', !show);
+  // The rest of the plot-map control column (# / landmarks / amenities / zoom / recenter) is
+  // just as meaningless inside a tour or a sub-section — and in a tour it sat on top of the
+  // minimap's own hide/switch buttons. Client only: the admin keeps these tools throughout.
+  document.querySelector('.zoom-controls')?.classList.toggle('is-hidden', !show && !state.admin);
   // The area dropdown follows the legend exactly: it only means anything on the plot map,
   // so it goes away inside a tour / the landmark picker like every other plot-map control.
   const hasFilters = (state.area.filters || []).length > 0;
@@ -2411,6 +2437,18 @@ function updateLegendVisibility() {
     s.hidden = !hasFilters;
     s.classList.toggle('is-hidden', !show);
   });
+}
+// Text colour that stays readable on an admin-picked band colour (perceived-luminance test).
+function areaBandTextColor(hex) {
+  const n = hexToInt(hex), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#111' : '#fff';
+}
+// The closed dropdown wears the picked band's colour too, so what's selected reads the same
+// as the plots it highlights on the layout. "All sizes" (no band) goes back to the stylesheet.
+function tintAreaSelect(sel) {
+  const f = (state.area.filters || []).find((x) => x.id === sel.value);
+  sel.style.backgroundColor = f ? f.color : '';
+  sel.style.color = f ? areaBandTextColor(f.color) : '';
 }
 // Both dropdowns are built from one list so they can't drift — same reasoning as
 // syncZoomStatusButtons for the status pills.
@@ -2427,9 +2465,14 @@ function renderAreaFilterUI() {
       const range = f.min != null && f.max != null ? `${f.min}–${f.max}`
         : f.min != null ? `${f.min}+` : f.max != null ? `up to ${f.max}` : 'any';
       o.textContent = `${f.name} (${range} ${state.area.unit})`;
+      // Same colour the admin gave the band, i.e. the one its plots wear on the layout.
+      // Native <option> backgrounds are honoured by desktop + Android Chrome/Edge; iOS Safari
+      // draws its own picker and ignores them (the closed control is tinted regardless).
+      o.style.backgroundColor = f.color; o.style.color = areaBandTextColor(f.color);
       sel.appendChild(o);
     });
     sel.value = state.areaFilterId || '';
+    tintAreaSelect(sel);
   });
   updateLegendVisibility();
 }
@@ -2535,7 +2578,7 @@ function refreshAreaAdminUI() {
 }
 function setAreaFilter(id) {
   state.areaFilterId = id || null;
-  [els.areaFilterSel, els.areaFilterSelMobile].forEach((s) => { if (s) s.value = state.areaFilterId || ''; });
+  [els.areaFilterSel, els.areaFilterSelMobile].forEach((s) => { if (s) { s.value = state.areaFilterId || ''; tintAreaSelect(s); } });
   colorPlots(); requestRender(true);
 }
 
@@ -2927,10 +2970,24 @@ function builtinNodeExists(list, key) {
 // 'tour': the content type 'tour' is already taken (an EXTERNAL 3DVista/Kuula iframe), so
 // this built-in's own content type is 'virtualtour' — auto-discovers whichever tours
 // exist in state.tours, as opposed to an authored 'panotour' item pointing at one by id.
+// `menuimage` (2026-09-21, on request) is the odd one out: every other builtin is a ROW the
+// visitor taps, this one DRAWS its uploaded image straight into the menu and is not clickable
+// at all (asked for to sit a QR code under CONTACT US). It reuses the builtin machinery for
+// everything else — drag to reorder, ON/OFF switch, rename, self-heal — and because it is an
+// ordinary `kind: 'child'` node with `content.fileName`/`fileBlob`, saving, export, the
+// offline precache and the bundle all pick its image up with no special casing.
 const BUILTIN_DEFS = {
   aerial: { contentType: 'aerial', title: 'AERIAL VIEW' },
   landmarks: { contentType: 'landmarks', title: 'LANDMARKS' },
-  tour: { contentType: 'virtualtour', title: 'VIRTUAL TOUR' }
+  tour: { contentType: 'virtualtour', title: 'VIRTUAL TOUR' },
+  menuimage: { contentType: 'menuimage', title: 'MENU IMAGE', atEnd: true }
+};
+// Does this node draw itself into the menu instead of being a tappable row?
+const isMenuImageNode = (n) => !!n && n.contentType === 'menuimage';
+const menuImageSrc = (n) => {
+  const c = (n && n.content) || {};
+  if (c.fileBlob) { if (!c._url) c._url = URL.createObjectURL(c.fileBlob); return c._url; }
+  return c.fileName ? assetUrl(c.fileName) : '';   // unversioned, same as the contact-card photo
 };
 function ensureBuiltinNodes() {
   const tree = state.menuConfig.tree;
@@ -2939,7 +2996,9 @@ function ensureBuiltinNodes() {
     if (builtinNodeExists(tree, key)) return;
     const def = BUILTIN_DEFS[key];
     const legacyEntry = legacy[key] || {};
-    tree.splice(i, 0, {
+    // The image belongs at the END by default — it was asked for as the last thing under
+    // CONTACT US. The admin can still drag it anywhere, like any other builtin.
+    tree.splice(def.atEnd ? tree.length : i, 0, {
       id: `builtin-${key}`,
       kind: 'child',
       contentType: def.contentType,
@@ -3278,9 +3337,10 @@ function buildSession() {                                // a complete snapshot 
     bootImage: state.bootImage.blob ? { name: state.bootImage.name || 'loading.web.jpg', blob: state.bootImage.blob } : null,
     landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, category: l.category || null, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
     amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes, render: a.render, renderBlob: a.renderBlob || null, hotspot: { ...a.hotspot } })),
-    tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
-      nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null, defaultView: { ...n.defaultView } })),
-      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot }, icon: k.icon, rot: k.rot })),
+    tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode, variantLabels: tourVariantLabels(t),
+      nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null,
+        panoAlt: n.panoAlt || null, panoAltBlob: n.panoAltBlob || null, defaultView: { ...n.defaultView } })),
+      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot }, icon: k.icon, rot: k.rot, variant: k.variant || null })),
       maps: (t.maps || []).map((m) => ({ id: m.id, file: m.file, blob: m.blob || null, points: (m.points || []).map((p) => ({ ...p })) })) })),
   };
 }
@@ -3523,7 +3583,15 @@ function collectCustomMenuFiles() {
       } else if (node.kind === 'child') {
         const c = node.content || {};
         if (c.fileBlob && c.fileName) {
-          const mime = c.fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : (c.fileName.toLowerCase().endsWith('.mp4') ? 'video/mp4' : 'application/octet-stream');
+          // Image types spelled out too (2026-09-21): the MENU IMAGE builtin ships a .png and
+          // octet-stream is the wrong hint for something the client loads into an <img>.
+          const lower = c.fileName.toLowerCase();
+          const mime = lower.endsWith('.pdf') ? 'application/pdf'
+            : lower.endsWith('.mp4') ? 'video/mp4'
+            : lower.endsWith('.png') ? 'image/png'
+            : /\.jpe?g$/.test(lower) ? 'image/jpeg'
+            : lower.endsWith('.webp') ? 'image/webp'
+            : 'application/octet-stream';
           addBlob(c.fileBlob, c.fileName, mime);
         }
         if (node.contentType === 'gallery' && Array.isArray(c.images)) {
@@ -3789,6 +3857,8 @@ function wireAdmin() {
   els.axTourFile?.addEventListener('change', async () => { const f = els.axTourFile.files?.[0]; if (f) { try { setTours(parseTours(JSON.parse(await f.text()))); onToursChanged(); setAxStatus(`Loaded ${state.tours.length} tour(s) from ${f.name}.`); } catch (err) { setAxStatus(`Could not read that tour file (${err.message}).`); } } els.axTourFile.value = ''; });
   els.axTourNodeFile?.addEventListener('change', async () => { const f = els.axTourNodeFile.files?.[0]; if (f) await addTourNodeFromFile(f); els.axTourNodeFile.value = ''; });
   els.axTourMapFile?.addEventListener('change', async () => { const f = els.axTourMapFile.files?.[0]; if (f) await setTourMapFromFile(f); els.axTourMapFile.value = ''; });
+  els.axMenuImageFile?.addEventListener('change', async () => { const f = els.axMenuImageFile.files?.[0]; if (f) await setMenuImageFromFile(f); els.axMenuImageFile.value = ''; });
+  els.axTourNodeAltFile?.addEventListener('change', async () => { const f = els.axTourNodeAltFile.files?.[0]; if (f) await addTourNodeAltFromFile(f); els.axTourNodeAltFile.value = ''; });
   // Tour-map editor: a click anywhere on the image places the ARMED room's dot there.
   // `tourMapEdit.drag` is checked first because a drag that ends over the canvas also
   // fires a click — without the guard, releasing a dragged dot would place the armed
@@ -5355,6 +5425,19 @@ const TOUR_HS_ICONS = {
     svg: '<svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" class="hs-ring" /><circle cx="20" cy="20" r="5" class="hs-dot" /></svg>' },
 };
 const TOUR_HS_ICON_ORDER = ['chevron', 'door', 'stairs', 'ring'];
+// ── Room VARIANTS (2026-09-21) ──────────────────────────────────────────────
+// A room can carry TWO panoramas of the same viewpoint — furnished and unfurnished — and
+// the visitor flips between them with a toggle that persists as they walk the tour. The
+// slots are named 'a'/'b' rather than 'furnished'/'unfurnished' because their LABELS are
+// per-tour and admin-editable (a future site may want Day/Night or Option A/B); 'a' is
+// always the node's original `pano`, so every tour saved before this reads back unchanged
+// with one variant and no toggle.
+const TOUR_VARIANTS = ['a', 'b'];
+const TOUR_VARIANT_LABELS_DEFAULT = ['Furnished', 'Unfurnished'];
+const otherVariant = (v) => (v === 'b' ? 'a' : 'b');
+// A link shows in both variants unless it names one — e.g. a "close the curtains" hotspot
+// that only means anything in the furnished render.
+const normVariantTag = (v) => (TOUR_VARIANTS.includes(v) ? v : null);
 const TOUR_HS_ICON_DEFAULT = 'chevron';
 const tourHsIcon = (k) => TOUR_HS_ICONS[k?.icon] || TOUR_HS_ICONS[TOUR_HS_ICON_DEFAULT];
 
@@ -5367,9 +5450,13 @@ function parseTours(d) {
   return arr.map((t, i) => {
     const nodes = (Array.isArray(t.nodes) ? t.nodes : []).map((n, j) => {
       const pano = (n.pano && n.pano.file) ? n.pano.file : (typeof n.pano === 'string' ? n.pano : null);
+      // Variant 'b' — optional. Same shape as `pano` (committed path + in-memory blob for an
+      // unsaved upload), and its own object-URL slot so revoking one never orphans the other.
+      const panoAlt = (n.panoAlt && n.panoAlt.file) ? n.panoAlt.file : (typeof n.panoAlt === 'string' ? n.panoAlt : null);
       const dv = n.defaultView || {};
       return { id: (n.id || 'n' + (j + 1)).toString(), name: (n.name || '').toString() || ('Node ' + (j + 1)),
         pano, panoBlob: n.panoBlob || null, _ver: ver, _url: null,
+        panoAlt, panoAltBlob: n.panoAltBlob || null, _urlAlt: null,
         defaultView: { lon: +(dv.lonDeg != null ? dv.lonDeg : dv.lon) || 0, lat: +(dv.latDeg != null ? dv.latDeg : dv.lat) || 0, fov: +dv.fov || 75,
           facingDir: COMPASS_DIR_KEYS.includes(dv.facingDir) ? dv.facingDir : null } };
     }).filter((n) => n.id);
@@ -5379,7 +5466,8 @@ function parseTours(d) {
     // arrow — it's the shape the reference tour uses for a doorway, and an un-aimed arrow
     // pointing straight up already reads as "through here".
     const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot),
-      icon: TOUR_HS_ICON_ORDER.includes(k.icon) ? k.icon : TOUR_HS_ICON_DEFAULT, rot: normDeg(+k?.rot || 0) }))
+      icon: TOUR_HS_ICON_ORDER.includes(k.icon) ? k.icon : TOUR_HS_ICON_DEFAULT, rot: normDeg(+k?.rot || 0),
+      variant: normVariantTag(k?.variant) }))
       .filter((k) => nodeIds.has(k.from) && nodeIds.has(k.to) && k.hotspot);   // drop links to deleted nodes
     // Optional isometric / floor-plan image(s) for this tour — MULTIPLE per tour
     // (2026-09-18, on request: the client gets a switch button to flip between them, e.g.
@@ -5405,8 +5493,12 @@ function parseTours(d) {
         .filter((p) => nodeIds.has(p.nodeId) && isFinite(p.x) && isFinite(p.y));   // drop dots for deleted rooms
       return { id: (mSrc && mSrc.id ? mSrc.id.toString() : null) || `m${mi + 1}`, file: mFile, blob: (mSrc && mSrc.blob) || null, _ver: ver, _url: null, points };
     }).filter((m) => m.file || m.blob);
+    // Editable per tour; a blank entry falls back to the default rather than rendering an
+    // unlabelled button.
+    const rawLabels = Array.isArray(t.variantLabels) ? t.variantLabels : [];
+    const variantLabels = TOUR_VARIANT_LABELS_DEFAULT.map((d, vi) => ((rawLabels[vi] || '').toString().trim() || d));
     return { id: (t.id || 't' + (i + 1)).toString(), name: (t.name || '').toString() || ('Tour ' + (i + 1)),
-      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links, maps };
+      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links, maps, variantLabels };
   }).filter((t) => t.id);
 }
 const clamp01 = (v) => Math.max(0, Math.min(1, +v || 0));
@@ -5414,11 +5506,15 @@ const normDeg = (d) => ((+d || 0) % 360 + 360) % 360;
 function buildToursData() {
   return { version: 1, note: 'Build91 virtual tours', savedAt: new Date().toISOString(),
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
+      // Omitted while still the defaults, so existing tours don't all grow a new key.
+      ...(tourVariantLabels(t).some((v, vi) => v !== TOUR_VARIANT_LABELS_DEFAULT[vi]) ? { variantLabels: tourVariantLabels(t) } : {}),
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, ...(n.pano ? { pano: { file: n.pano } } : {}),
+        ...(n.panoAlt ? { panoAlt: { file: n.panoAlt } } : {}),
         defaultView: { lonDeg: +(+n.defaultView.lon).toFixed(2), latDeg: +(+n.defaultView.lat).toFixed(2), fov: Math.round(+n.defaultView.fov || 75),
           ...(n.defaultView.facingDir ? { facingDir: n.defaultView.facingDir } : {}) } })),
       links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) },
-        icon: k.icon || TOUR_HS_ICON_DEFAULT, rot: Math.round(normDeg(k.rot)) })),
+        icon: k.icon || TOUR_HS_ICON_DEFAULT, rot: Math.round(normDeg(k.rot)),
+        ...(k.variant ? { variant: k.variant } : {}) })),
       ...((t.maps || []).some((m) => m.file) ? { maps: t.maps.filter((m) => m.file).map((m) => ({ id: m.id, file: m.file,
         points: (m.points || []).map((p) => ({ nodeId: p.nodeId, x: +(+p.x).toFixed(4), y: +(+p.y).toFixed(4), rot: Math.round(normDeg(p.rot)) })) })) } : {}) })) };
 }
@@ -5426,7 +5522,10 @@ function buildToursData() {
 function tourNodeBlobFiles() {
   const out = [];
   state.tours.forEach((t) => {
-    t.nodes.forEach((n) => { if (n.panoBlob && n.pano) out.push([baseName(n.pano), n.panoBlob, 'image/jpeg']); });
+    t.nodes.forEach((n) => {
+      if (n.panoBlob && n.pano) out.push([baseName(n.pano), n.panoBlob, 'image/jpeg']);
+      if (n.panoAltBlob && n.panoAlt) out.push([baseName(n.panoAlt), n.panoAltBlob, 'image/jpeg']);
+    });
     (t.maps || []).forEach((m) => { if (m.blob && m.file) out.push([baseName(m.file), m.blob, 'image/png']); });   // PNG keeps the render's transparency
   });
   return out;
@@ -5480,9 +5579,46 @@ async function addTourNodeFromFile(file) {
   state.tourNodeSel = id; refreshTourList(); onToursChanged();
   setAxStatus(`Node “${node.name}” added to ${esc(t.name)}. (Hotspot linking + preview land in the tour viewer — next build step.)`);
 }
+// The second render for one room. Which room is decided before the file dialog opens
+// (state.tourAltTarget), because a file input gives no way to carry it through the picker.
+async function addTourNodeAltFromFile(file) {
+  const t = curTour(); if (!t || !file) return;
+  const n = t.nodes.find((x) => x.id === state.tourAltTarget); if (!n) return;
+  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
+  let out; try { out = await resizeImageToBlob(file, cap, 'image/jpeg', 0.85); } catch { setAxStatus('Could not read that image as a panorama.'); return; }
+  if (n._urlAlt) { try { URL.revokeObjectURL(n._urlAlt); } catch {} n._urlAlt = null; }
+  // Same naming convention as the primary (see addTourNodeFromFile) with a -b suffix, so the
+  // two renders of one room sort together on disk. assetUrl() only ever reads the basename.
+  n.panoAlt = `sample/tour-${t.id}-${n.id}-b.web.jpg`;
+  n.panoAltBlob = out.blob;
+  // Drop any cached texture for this slot — the room may already have been viewed with a
+  // previous upload still in the LRU under the same key.
+  const k = tourKey(t, n, 'b'); const old = tourTex.get(k);
+  if (old) { old.dispose(); tourTex.delete(k); }
+  refreshTourList(); onToursChanged(); renderTourVariantBar();
+  const labels = tourVariantLabels(t);
+  setAxStatus(`${esc(labels[1])} render added to “${esc(n.name)}”.`);
+}
+function clearTourNodeAlt(tourId, nodeId) {
+  const t = state.tours.find((x) => x.id === tourId); if (!t) return;
+  const n = t.nodes.find((x) => x.id === nodeId); if (!n) return;
+  if (n._urlAlt) { try { URL.revokeObjectURL(n._urlAlt); } catch {} n._urlAlt = null; }
+  n.panoAlt = null; n.panoAltBlob = null;
+  const k = tourKey(t, n, 'b'); const tex = tourTex.get(k);
+  if (tex) { tex.dispose(); tourTex.delete(k); }
+  // If the visitor/admin is standing in this room in variant b, fall back to a so the
+  // viewer isn't left showing a texture that no longer has a source.
+  if (state.tourView && state.tourView.tourId === t.id && state.tourView.nodeId === n.id && curTourVariant() === 'b') {
+    state.tourView.variant = 'a';
+    const node = n; loadTourNodeTex(t, node, 'a').then((tex2) => { swapPano(tex2); requestRender(); }).catch(() => {});
+  }
+  refreshTourList(); onToursChanged(); renderTourVariantBar();
+}
 function deleteTourNode(tourId, nodeId) {
   const t = state.tours.find((x) => x.id === tourId); if (!t) return;
-  const n = t.nodes.find((x) => x.id === nodeId); if (n && n._url) { try { URL.revokeObjectURL(n._url); } catch {} }
+  const n = t.nodes.find((x) => x.id === nodeId);
+  if (n && n._url) { try { URL.revokeObjectURL(n._url); } catch {} }
+  if (n && n._urlAlt) { try { URL.revokeObjectURL(n._urlAlt); } catch {} }
   t.nodes = t.nodes.filter((x) => x.id !== nodeId);
   t.links = t.links.filter((k) => k.from !== nodeId && k.to !== nodeId);   // drop links touching it
   // ...and its dot on every isometric, or a minimap would keep drawing a dot that jumps
@@ -5575,6 +5711,7 @@ function setTourMapPoint(nodeId, x, y) {
   else m.points.push({ nodeId, x: clamp01(x), y: clamp01(y), rot: 0 });
   onToursChanged(); renderTourMapEditor(); renderClientTourMap();
 }
+const TOURMAP_ROT_STEP = 15;   // degrees per − / + click in the room list
 function setTourMapPointRot(nodeId, deg) {
   const m = curTourMapMap(); const p = m && tourMapPointFor(m, nodeId); if (!p) return;
   p.rot = normDeg(deg);
@@ -5640,9 +5777,23 @@ function renderTourMapEditor() {
     const pt = tourMapPointFor(m, n.id);
     st.textContent = tourMapEdit.armed === n.id
       ? (placed ? `${Math.round(normDeg(pt.rot))}°` : 'click the map…')
-      : (placed ? 'placed' : 'not placed');
+      : (placed ? `${Math.round(normDeg(pt.rot))}°` : 'not placed');
     row.append(dot, nm, st);
     if (placed) {
+      // − / + turn this room's view cone (the "shadow" the client sees on the minimap) by a
+      // fixed step — the same `rot` the drag handle edits, i.e. the direction it points at the
+      // room's saved start view. Shift = fine 5° step. Buttons sit ON the row, so no need to
+      // arm the room first.
+      [['−', -1, 'Turn the view cone anticlockwise (Shift = 5°)'], ['+', 1, 'Turn the view cone clockwise (Shift = 5°)']].forEach(([txt, dir, tip]) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'ax-lm-del tourmap-rotbtn';
+        b.textContent = txt; b.title = tip; b.setAttribute('aria-label', tip);
+        b.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setTourMapPointRot(n.id, pt.rot + dir * (e.shiftKey ? 5 : TOURMAP_ROT_STEP));
+          renderTourMapEditor();
+        });
+        row.appendChild(b);
+      });
       const x = document.createElement('button'); x.type = 'button'; x.className = 'ax-lm-del'; x.textContent = '×'; x.title = 'Remove this room’s dot';
       x.addEventListener('click', (e) => { e.stopPropagation(); clearTourMapPoint(n.id); });
       row.appendChild(x);
@@ -5786,6 +5937,66 @@ function renderClientTourMap() {
 // on for the whole tour): it would reoccupy this exact corner and collide with the restore
 // button, and a tour compass is usually uncalibrated anyway (most rooms leave `facingDir`
 // unset — see the `rot` note in parseTours), so bringing it back buys nothing here.
+// ── Furnished / unfurnished toggle (2026-09-21) ─────────────────────────────
+// Shown whenever ANY room in the open tour carries both renders. In a room that has only
+// one, the missing side is DISABLED rather than hidden — the bar keeps its size and
+// position as the visitor walks, instead of appearing and vanishing room to room, and
+// their chosen mode is left untouched so it resumes in the next room that has both.
+function renderTourVariantBar() {
+  const bar = els.tourVariants; if (!bar) return;
+  const tour = curTourView();
+  const show = !!state.tourView && tourHasVariants(tour);
+  bar.hidden = !show;
+  if (!show) return;
+  const labels = tourVariantLabels(tour);
+  const node = curTourNode();
+  const live = curTourVariant();
+  TOUR_VARIANTS.forEach((v, vi) => {
+    const btn = bar.querySelector(`[data-variant="${v}"]`); if (!btn) return;
+    btn.textContent = labels[vi];
+    // "Pressed" follows the visitor's CHOICE, not what the room fell back to — otherwise
+    // walking into a furnished-only room would look like the toggle flipped itself.
+    btn.setAttribute('aria-pressed', String(v === live));
+    const have = node ? nodeHasVariant(node, v) : true;
+    // aria-disabled + a class, NOT the `disabled` property: a truly disabled button swallows
+    // the click, so tapping the greyed side did nothing at all and read as "the toggle is
+    // broken" (reported 2026-09-21). It stays clickable and explains itself instead.
+    btn.disabled = false;
+    btn.setAttribute('aria-disabled', String(!have));
+    btn.classList.toggle('is-unavailable', !have);
+    btn.title = have ? labels[vi] : `This room has no ${labels[vi].toLowerCase()} version`;
+  });
+}
+async function setTourVariant(v) {
+  const tv = state.tourView, tour = curTourView();
+  if (!tv || !tour || tv.busy || !TOUR_VARIANTS.includes(v) || v === tv.variant) return;
+  const node = curTourNode(); if (!node) return;
+  if (!nodeHasVariant(node, v)) {
+    // Say so rather than no-op. The choice is deliberately NOT changed — the visitor stays in
+    // the version they picked, so it resumes in the next room that has both.
+    const labs = tourVariantLabels(tour);
+    showNotice(`“${esc(node.name)}” has no ${esc(labs[TOUR_VARIANTS.indexOf(v)].toLowerCase())} version — showing the ${esc(labs[TOUR_VARIANTS.indexOf(otherVariant(v))].toLowerCase())} one instead.`);
+    return;
+  }
+  tv.busy = true; refreshTourRoomMenu();
+  try {
+    const tex = await loadTourNodeTex(tour, node, v);
+    if (!state.tourView) return;                          // exited while loading
+    tv.variant = v;
+    // Deliberately NO camera move: it is the same viewpoint, so holding the angle is what
+    // makes the furniture appear to materialise in place. Same crossfade as walking between
+    // rooms (2026-09-21, on request) — one shared helper, so they cannot drift apart.
+    await tourCrossfade(tex);
+    tourTouch(tourKey(tour, node, v)); tourEvict();
+    prefetchTourNeighbours(tour, node.id);                // neighbours in the NEW variant
+    rebuildTourHotspotDOM();                              // variant-tagged hotspots appear/disappear
+    renderTourVariantBar(); requestRender();
+  } catch (e) {
+    showNotice(e.message || 'Could not load that version of this room.');
+  } finally {
+    if (state.tourView) { state.tourView.busy = false; refreshTourRoomMenu(); }
+  }
+}
 function toggleTourMapHidden() {
   state.tourMapHidden = !state.tourMapHidden;
   try { localStorage.setItem('b91-tour-map-hidden', state.tourMapHidden ? '1' : '0'); } catch {}
@@ -5911,7 +6122,54 @@ function refreshTourList() {
         const dn = document.createElement('button'); dn.type = 'button'; dn.className = 'ax-lm-del'; dn.textContent = '×'; dn.title = 'Delete node';
         dn.addEventListener('click', (e) => { e.stopPropagation(); deleteTourNode(t.id, n.id); });
         row.append(star, go, nn, dn); ed.appendChild(row);
+
+        // Second line: the room's two renders. Slot A is the pano uploaded with the node and
+        // is always present; slot B is optional — the ＋ opens the picker for THIS node
+        // (state.tourAltTarget, since a file input can't carry it), and once filled shows a ×
+        // to drop it again.
+        const vr = document.createElement('div'); vr.className = 'ax-tour-vrow';
+        const vLabels = tourVariantLabels(t);
+        const tagA = document.createElement('span'); tagA.className = 'ax-tour-vtag is-on';
+        tagA.textContent = vLabels[0]; tagA.title = `${vLabels[0]} render (the pano this node was created from)`;
+        vr.appendChild(tagA);
+        if (nodeHasVariant(n, 'b')) {
+          const tagB = document.createElement('span'); tagB.className = 'ax-tour-vtag is-on';
+          tagB.textContent = vLabels[1]; tagB.title = `${vLabels[1]} render`;
+          const rmB = document.createElement('button'); rmB.type = 'button'; rmB.className = 'ax-lm-del ax-tour-vdel';
+          rmB.textContent = '×'; rmB.title = `Remove the ${vLabels[1]} render`;
+          rmB.addEventListener('click', (e) => { e.stopPropagation(); clearTourNodeAlt(t.id, n.id); });
+          vr.append(tagB, rmB);
+        } else {
+          const addB = document.createElement('button'); addB.type = 'button'; addB.className = 'ax-tour-vadd';
+          addB.textContent = `＋ ${vLabels[1]}`;
+          addB.title = `Upload the ${vLabels[1]} render of this room — must be shot from the SAME camera position as the ${vLabels[0]} one, or the hotspots will not line up`;
+          addB.addEventListener('click', (e) => { e.stopPropagation(); state.tourAltTarget = n.id; els.axTourNodeAltFile?.click(); });
+          vr.appendChild(addB);
+        }
+        ed.appendChild(vr);
       });
+      // What the client's two toggle buttons are called. Per tour, so one project can run
+      // Furnished/Unfurnished and another Day/Night. Blank falls back to the default rather
+      // than rendering an unlabelled button (see parseTours).
+      const vBox = document.createElement('div'); vBox.className = 'ax-tour-vlabels';
+      const vh = document.createElement('span'); vh.className = 'ax-tour-vlabels-h'; vh.textContent = 'Version labels';
+      vh.title = 'What the two buttons are called in the viewer. Only shown once a room has both renders.';
+      vBox.appendChild(vh);
+      tourVariantLabels(t).forEach((lab, vi) => {
+        const inp = document.createElement('input'); inp.className = 'ax-tour-vlabel'; inp.value = lab;
+        inp.placeholder = TOUR_VARIANT_LABELS_DEFAULT[vi];
+        inp.title = `Label for version ${vi + 1}`;
+        inp.addEventListener('click', (e) => e.stopPropagation());
+        inp.addEventListener('input', () => {
+          const next = tourVariantLabels(t).slice();
+          next[vi] = inp.value.trim() || TOUR_VARIANT_LABELS_DEFAULT[vi];
+          t.variantLabels = next;
+          onToursChanged(); renderTourVariantBar();
+        });
+        vBox.appendChild(inp);
+      });
+      ed.appendChild(vBox);
+
       const add = document.createElement('button'); add.type = 'button'; add.className = 'btn btn-ghost ax-tour-addnode'; add.textContent = '＋ Add node (upload pano)';
       add.addEventListener('click', (e) => { e.stopPropagation(); els.axTourNodeFile?.click(); });
       ed.appendChild(add);
@@ -5980,6 +6238,22 @@ function refreshTourList() {
           icoSel.addEventListener('click', (e) => e.stopPropagation());
           icoSel.addEventListener('change', () => { k.icon = icoSel.value; onToursChanged(); rebuildTourHotspotDOM(); refreshTourList(); });
           r2.appendChild(icoSel);
+
+          // Which version(s) this exit appears in — for a hotspot that only makes sense in
+          // one render (e.g. "close the curtains", which has no meaning unfurnished).
+          // Offered only once the tour actually has two versions somewhere, so a single-render
+          // tour's sidebar stays as it was.
+          if (tourHasVariants(t)) {
+            const vSel = document.createElement('select'); vSel.className = 'ax-tour-hsvar'; vSel.title = 'Show this hotspot in';
+            const labs = tourVariantLabels(t);
+            [['', 'Both versions'], ['a', `${labs[0]} only`], ['b', `${labs[1]} only`]].forEach(([val, txt]) => {
+              const o = document.createElement('option'); o.value = val; o.textContent = txt; vSel.appendChild(o);
+            });
+            vSel.value = k.variant || '';
+            vSel.addEventListener('click', (e) => e.stopPropagation());
+            vSel.addEventListener('change', () => { k.variant = normVariantTag(vSel.value); onToursChanged(); rebuildTourHotspotDOM(); });
+            r2.appendChild(vSel);
+          }
 
           if (tourHsIcon(k).rotatable) {
             const aim = document.createElement('div'); aim.className = 'ax-tour-hsaim';
@@ -6104,30 +6378,51 @@ let tourHsDom = [];                                        // [{ el, dir, idx }]
 let tourFadeMesh = null;
 let tourHsDrag = null;
 
-const tourKey = (t, n) => `${t.id}/${n.id}`;
+// The variant is part of the cache key: the two renders of one room are different textures
+// and must never alias each other in tourTex.
+const tourKey = (t, n, v) => `${t.id}/${n.id}/${v || 'a'}`;
+const tourVariantLabels = (t) => (Array.isArray(t && t.variantLabels) && t.variantLabels.length === 2)
+  ? t.variantLabels : TOUR_VARIANT_LABELS_DEFAULT.slice();
+// Does this room actually carry that variant's image?
+const nodeHasVariant = (n, v) => !!(v === 'b' ? (n.panoAlt || n.panoAltBlob) : (n.pano || n.panoBlob));
+// Which variant this room will ACTUALLY render for a requested one. A room with only the
+// furnished render shows it while the visitor is in unfurnished mode — the fallback happens
+// here, at render time, and never writes back to tourView.variant, so their choice survives
+// walking through a single-variant room and resumes in the next room that has both.
+const nodeVariantFor = (n, v) => (nodeHasVariant(n, v) ? v : otherVariant(v));
+// True when ANY room in the tour has both, i.e. the toggle is worth showing at all.
+const tourHasVariants = (t) => !!t && t.nodes.some((n) => nodeHasVariant(n, 'a') && nodeHasVariant(n, 'b'));
+const curTourVariant = () => (state.tourView && state.tourView.variant) || 'a';
 const curTourView = () => state.tourView ? state.tours.find((t) => t.id === state.tourView.tourId) : null;
 const curTourNode = () => { const t = curTourView(); return t ? t.nodes.find((n) => n.id === state.tourView.nodeId) : null; };
 
 // Node image source: a fresh in-memory blob (admin, pre-export) wins over the committed
 // file, exactly like renderSrc does for landmark/amenity renders.
-function tourNodeSrc(node) {
+function tourNodeSrc(node, v) {
+  if (nodeVariantFor(node, v || 'a') === 'b') {
+    if (node.panoAltBlob) { if (!node._urlAlt) node._urlAlt = URL.createObjectURL(node.panoAltBlob); return node._urlAlt; }
+    return node.panoAlt ? assetUrl(node.panoAlt, node._ver) : null;
+  }
   if (node.panoBlob) { if (!node._url) node._url = URL.createObjectURL(node.panoBlob); return node._url; }
   return node.pano ? assetUrl(node.pano, node._ver) : null;
 }
 function tourTouch(k) { const v = tourTex.get(k); if (v) { tourTex.delete(k); tourTex.set(k, v); } }
 function tourEvict() {
-  const keep = state.tourView ? `${state.tourView.tourId}/${state.tourView.nodeId}` : null;
+  const keep = state.tourView ? `${state.tourView.tourId}/${state.tourView.nodeId}/${curTourVariant()}` : null;
   while (tourTex.size > TOUR_CACHE_MAX) {
     const [k, tex] = tourTex.entries().next().value;
     if (k === keep) { tourTouch(k); break; }                // never evict what is on screen
     tex.dispose(); tourTex.delete(k);
   }
 }
-function loadTourNodeTex(tour, node) {
-  const k = tourKey(tour, node);
+function loadTourNodeTex(tour, node, v) {
+  // Key on the variant the room will REALLY show, so a single-variant room resolves to the
+  // same cache entry whichever mode the visitor is in, instead of downloading it twice.
+  const vv = nodeVariantFor(node, v || 'a');
+  const k = tourKey(tour, node, vv);
   if (tourTex.has(k)) { tourTouch(k); return Promise.resolve(tourTex.get(k)); }
   if (tourInflight.has(k)) return tourInflight.get(k);
-  const src = tourNodeSrc(node);
+  const src = tourNodeSrc(node, vv);
   if (!src) return Promise.reject(new Error(`Node “${node.name}” has no panorama image.`));
   const p = loadPanoTexture(src).then((tex) => {
     tourInflight.delete(k); tourTex.set(k, tex); tourEvict(); return tex;
@@ -6137,9 +6432,12 @@ function loadTourNodeTex(tour, node) {
 }
 // Prefetch every node one hop away, so the next click is instant. Fire-and-forget.
 function prefetchTourNeighbours(tour, nodeId) {
+  // Only the variant currently being viewed — warming both would double every tour's
+  // download for a toggle the visitor may never touch.
+  const v = curTourVariant();
   tour.links.filter((k) => k.from === nodeId).forEach((k) => {
     const n = tour.nodes.find((x) => x.id === k.to);
-    if (n) loadTourNodeTex(tour, n).catch(() => {});
+    if (n) loadTourNodeTex(tour, n, v).catch(() => {});
   });
 }
 // Cross-TOUR prefetch (2026-09-16, on request): the room-hop prefetch above only ever
@@ -6162,7 +6460,7 @@ function prefetchNeighbourTours(tourId) {
   [state.tours[i + 1], state.tours[i + 2], state.tours[i - 1]].filter(Boolean).forEach((t) => {
     if (!t.nodes.length) return;
     const startNode = t.nodes.find((n) => n.id === t.startNode) || t.nodes[0];
-    loadTourNodeTex(t, startNode).catch(() => {});
+    loadTourNodeTex(t, startNode, 'a').catch(() => {});   // a neighbouring tour is always entered fresh, i.e. at variant 'a'
   });
 }
 
@@ -6213,7 +6511,10 @@ function openClientPanoTour(tourId, title, { anchorRooms = true } = {}) {
     state.tourHsSel = null;
   }
 
-  state.tourView = { tourId, nodeId: null, title: title || tour.name, busy: false,
+  // Every tour is entered at variant 'a'; the visitor's choice persists as they walk THIS
+  // tour (tourGoTo keeps it) but does not leak into the next tour they open, whose rooms
+  // may label their slots differently.
+  state.tourView = { tourId, nodeId: null, title: title || tour.name, busy: false, variant: 'a',
     saved: switchingTours ? priorTourView.saved
       : { view: { ...state.view }, panoMap: three.pano.material.map, northDeg: state.northDeg } };
 
@@ -6225,6 +6526,8 @@ function openClientPanoTour(tourId, title, { anchorRooms = true } = {}) {
   if (els.panel?.classList.contains('open')) closePanel();
   if (els.amCard?.classList.contains('open')) closeAmCard();
   document.body.classList.add('tour-open');
+  renderTourVariantBar();
+  updateLegendVisibility();   // plot-map controls don't apply inside a tour
   if (els.tourLayer) els.tourLayer.hidden = false;
   // While ANY tour is open — freshly entered from the plot map, or switched to from a
   // different tour — the drawer stays anchored to a tour-related section, not reset to
@@ -6269,6 +6572,8 @@ function closePanoTour({ silent = false } = {}) {
   if (three.ground) three.ground.mesh.visible = true;
   applyLandmarkVisibility(); applyAmenityVisibility();     // restore per each one's own rules
   document.body.classList.remove('tour-open');
+  renderTourVariantBar();     // state.tourView is already null → hides the toggle
+  updateLegendVisibility();   // back on the plot map (if the menu is at its root)
   if (els.tourLayer) { els.tourLayer.hidden = true; els.tourLayer.innerHTML = ''; }
   renderClientTourMap();   // state.tourView is already null → hides the map and gives the compass its corner back
   tourHsDom = [];
@@ -6302,6 +6607,21 @@ function tourTween(ms, fn) {
     })();
   });
 }
+// The tour crossfade: a second sphere just inside the first, sharing its geometry, fades in
+// over the outgoing texture. Geometry is SHARED — dispose only the material. Used BOTH for
+// room-to-room moves and for the furnished/unfurnished swap (2026-09-21, on request: the two
+// must look identical), so the duration and easing live in exactly one place.
+const TOUR_FADE_MS = 460;
+async function tourCrossfade(tex) {
+  if (!three.pano.material.map) { swapPano(tex); return; }
+  tourFadeMesh = new THREE.Mesh(three.pano.geometry, new THREE.MeshBasicMaterial({
+    map: tex, side: THREE.DoubleSide, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
+  tourFadeMesh.scale.setScalar(0.985); tourFadeMesh.renderOrder = 2;
+  three.scene.add(tourFadeMesh);
+  await tourTween(TOUR_FADE_MS, (e) => { if (tourFadeMesh) tourFadeMesh.material.opacity = e; });
+  if (three.pano.material.map !== tex) { three.pano.material.map = tex; three.pano.material.needsUpdate = true; }
+  three.scene.remove(tourFadeMesh); tourFadeMesh.material.dispose(); tourFadeMesh = null;
+}
 async function tourGoTo(nodeId, { instant = false } = {}) {
   const tv = state.tourView, tour = curTourView();
   if (!tv || !tour || tv.busy) return;
@@ -6311,7 +6631,7 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
 
   tv.busy = true; refreshTourRoomMenu();
   try {
-    const tex = await loadTourNodeTex(tour, node);
+    const tex = await loadTourNodeTex(tour, node, curTourVariant());
     if (!state.tourView) return;                            // exited while loading
 
     tv.nodeId = node.id;
@@ -6345,29 +6665,20 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
     state.view.fov = node.defaultView.fov || 75;
     clampView();
 
-    if (instant || !three.pano.material.map) {
-      swapPano(tex);
-    } else {
-      // Crossfade: a second sphere just inside the first, sharing its geometry, fades in
-      // over the outgoing texture. Geometry is SHARED — dispose only the material.
-      tourFadeMesh = new THREE.Mesh(three.pano.geometry, new THREE.MeshBasicMaterial({
-        map: tex, side: THREE.DoubleSide, transparent: true, opacity: 0, depthTest: false, depthWrite: false }));
-      tourFadeMesh.scale.setScalar(0.985); tourFadeMesh.renderOrder = 2;
-      three.scene.add(tourFadeMesh);
-      await tourTween(460, (e) => { if (tourFadeMesh) tourFadeMesh.material.opacity = e; });
-      if (three.pano.material.map !== tex) { three.pano.material.map = tex; three.pano.material.needsUpdate = true; }
-      three.scene.remove(tourFadeMesh); tourFadeMesh.material.dispose(); tourFadeMesh = null;
-    }
+    if (instant) swapPano(tex);
+    else await tourCrossfade(tex);
 
-    tourTouch(tourKey(tour, node)); tourEvict();
+    tourTouch(tourKey(tour, node, nodeVariantFor(node, curTourVariant()))); tourEvict();
     prefetchTourNeighbours(tour, node.id);
     state.tourHsSel = null;
-    rebuildTourHotspotDOM(); refreshTourRoomMenu(); updateTourMapActive(); requestRender();
+    rebuildTourHotspotDOM(); refreshTourRoomMenu(); updateTourMapActive(); renderTourVariantBar(); requestRender();
     if (state.admin && state.adminTab === 'tour') refreshTourList();   // hotspot box follows the open node
   } catch (e) {
     showNotice(e.message || 'Could not load that panorama.');
   } finally {
-    if (state.tourView) { state.tourView.busy = false; refreshTourRoomMenu(); }
+    // The bar is refreshed HERE as well as on the success path: if anything above threw,
+    // a stale available/unavailable state would otherwise carry into the new room.
+    if (state.tourView) { state.tourView.busy = false; refreshTourRoomMenu(); renderTourVariantBar(); }
   }
 }
 
@@ -6381,8 +6692,14 @@ function rebuildTourHotspotDOM() {
   const tv = state.tourView, tour = curTourView();
   els.tourLayer.innerHTML = ''; tourHsDom = [];
   if (!tv || !tour) return;
+  // A variant-tagged link only draws in its own variant — e.g. a "close the curtains"
+  // hotspot that means nothing in the unfurnished render. Admin sees every hotspot
+  // regardless, or a link tagged to the variant they aren't previewing would be
+  // unselectable and look deleted.
+  const liveVariant = curTourVariant();
   tour.links.forEach((k, idx) => {
     if (k.from !== tv.nodeId) return;
+    if (!state.admin && k.variant && k.variant !== liveVariant) return;
     const target = tour.nodes.find((n) => n.id === k.to); if (!target) return;
     const ico = tourHsIcon(k);
     const el = document.createElement('button');
@@ -6737,6 +7054,13 @@ function renderClientSidebar() {
       // is the one stable way to identify it regardless of what it's been renamed to.
       .filter((node) => node.enabled !== false && !(state.tourView && node.builtin === 'tour'))
       .map((node) => {
+        // The MENU IMAGE builtin renders as a picture in the list, not a row — nothing to tap.
+        // With no image uploaded yet it renders NOTHING rather than an empty frame, so a
+        // switched-on-but-unfilled item is invisible to the visitor instead of a broken box.
+        if (isMenuImageNode(node)) {
+          const src = menuImageSrc(node);
+          return src ? `<div class="cat-menu-img"><img src="${esc(src)}" alt="${esc((node.title || '').trim())}" /></div>` : '';
+        }
         const title = (node.title || 'ITEM').trim().toUpperCase();
         const drills = menuRowOpensSubmenu(node);
         const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
@@ -6787,6 +7111,12 @@ function renderClientSidebar() {
     }
 
     container.innerHTML = children.map((node) => {
+      // Same as the root list — an image dragged into a folder draws itself there too.
+      if (isMenuImageNode(node)) {
+        if (node.enabled === false) return '';
+        const src = menuImageSrc(node);
+        return src ? `<div class="cat-menu-img"><img src="${esc(src)}" alt="${esc((node.title || '').trim())}" /></div>` : '';
+      }
       const title = (node.title || 'ITEM').trim().toUpperCase();
       const drills = menuRowOpensSubmenu(node);
       const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
@@ -6833,7 +7163,9 @@ function computeAutoOpenTarget() {
   if (state.admin) return null;
   // A disabled builtin doesn't count as "on top" — the next enabled item does. Authored
   // nodes have no `enabled` field at all and are always considered.
-  const top = getMenuTree().find((n) => n.enabled !== false);
+  // A MENU IMAGE is not a destination — it draws itself into the menu and cannot be tapped,
+  // so it must never be picked as the default screen just for sitting at the top.
+  const top = getMenuTree().find((n) => n.enabled !== false && !isMenuImageNode(n));
   if (!top) return null;
   const resolved = resolveFolderTarget(top);
   // AERIAL VIEW has no content of its own to "open" — clicking it resets the camera to a
@@ -6972,6 +7304,8 @@ function openNodeContent(node, nodeInfo = null, { autoOpen = false } = {}) {
         openClientPanoTour(t.id, t.name);
         if (t.startNode !== content.nodeId) setTimeout(() => tourGoTo(content.nodeId), 0);
       }
+    } else if (cType === 'menuimage') {
+      // Drawn into the menu, never opened — see renderClientSidebar. Nothing to do.
     } else if (cType === 'exittour') {
       closePanoTour();
     } else if (cType === 'virtualtour') {
@@ -7555,11 +7889,12 @@ state.expandedBuiltins = state.expandedBuiltins || new Set();
 // unfolds the live category → landmark list read straight from the Landmarks tab data
 // (see getLandmarkCategories), so an admin never has to author menu items to keep it in
 // sync with what's actually been placed.
-const BUILTIN_ICON = { aerial: '🧭', landmarks: '📍', tour: '🌐' };
+const BUILTIN_ICON = { aerial: '🧭', landmarks: '📍', tour: '🌐', menuimage: '🖼' };
 const BUILTIN_INFO = {
   aerial: 'Flies the camera back to the full site aerial view. Needs no link or content of its own — a visitor just taps it to reset their view.',
   landmarks: 'Opens the landmark category picker. The categories and landmarks listed below are read live from the Landmarks tab — add, remove or recategorize a landmark there and this list updates on its own.',
-  tour: 'Opens the project’s virtual tour(s). The list below is read live from the Tour tab — with exactly one tour it opens straight away; with several, a picker lets the visitor choose which to walk through.'
+  tour: 'Opens the project’s virtual tour(s). The list below is read live from the Tour tab — with exactly one tour it opens straight away; with several, a picker lets the visitor choose which to walk through.',
+  menuimage: 'Shows a picture inside the menu itself — typically a QR code. Unlike every other row it is not tappable: the image is simply drawn where this item sits, so drag it to the bottom to sit under CONTACT US. Switch it off to hide it without losing the upload.'
 };
 function renderBuiltinNodeRow(node, depth) {
   const key = node.builtin;
@@ -7585,6 +7920,50 @@ function renderBuiltinNodeRow(node, depth) {
       <p class="builtin-info-text">${esc(BUILTIN_INFO[key] || '')}</p>
       ${key === 'landmarks' ? renderBuiltinLandmarkCategories() : ''}
       ${key === 'tour' ? renderBuiltinTourList() : ''}
+      ${key === 'menuimage' ? renderBuiltinMenuImage(node) : ''}
+    </div>
+  `;
+}
+
+// Upload slot for the MENU IMAGE builtin — the only builtin that carries content of its own.
+// Stored as an ordinary child node's `content.fileName`/`fileBlob`, so every existing save,
+// export and precache path already handles it (see collectCustomMenuFiles).
+// PNG, not JPEG: a QR code is exactly the kind of hard-edged black-and-white art that JPEG
+// smears, and a smeared QR can stop scanning. Capped at 1024px — far more than a menu-width
+// image needs, and it keeps the file small enough to ride along in the offline cache.
+async function setMenuImageFromFile(file) {
+  const info = findNodeInfo(state.menuImageTarget);
+  const node = info && info.node; if (!node || !file) return;
+  let out;
+  try { out = await resizeImageToBlob(file, 1024, 'image/png'); }
+  catch { setAxStatus('Could not read that file as an image.'); return; }
+  const c = node.content || (node.content = {});
+  if (c._url) { try { URL.revokeObjectURL(c._url); } catch {} c._url = null; }
+  c.fileName = `sample/menu-image-${node.id}.web.png`;
+  c.fileBlob = out.blob;
+  c.url = '';
+  onAlignmentChanged(); renderAdminMenuTree(); renderClientSidebar();
+  setAxStatus('Menu image updated.');
+}
+function clearMenuImage(nodeId) {
+  const info = findNodeInfo(nodeId);
+  const node = info && info.node; if (!node) return;
+  const c = node.content || (node.content = {});
+  if (c._url) { try { URL.revokeObjectURL(c._url); } catch {} c._url = null; }
+  c.fileName = ''; c.fileBlob = null; c.url = '';
+  onAlignmentChanged(); renderAdminMenuTree(); renderClientSidebar();
+}
+function renderBuiltinMenuImage(node) {
+  const src = menuImageSrc(node);
+  const has = !!src;
+  return `
+    <div class="builtin-mi" data-node-id="${esc(node.id)}">
+      ${has ? `<div class="builtin-mi-thumb"><img src="${esc(src)}" alt="" /></div>`
+            : `<p class="builtin-cat-empty">No image yet — upload one and it appears in the client menu.</p>`}
+      <div class="builtin-mi-actions">
+        <button type="button" class="btn btn-ghost builtin-mi-pick" data-node-id="${esc(node.id)}">${has ? '🖼 Replace image…' : '🖼 Upload image…'}</button>
+        ${has ? `<button type="button" class="btn btn-ghost builtin-mi-clear" data-node-id="${esc(node.id)}">Remove</button>` : ''}
+      </div>
     </div>
   `;
 }
@@ -7921,6 +8300,17 @@ function renderAdminMenuTree() {
       else state.expandedBuiltins.add(key);
       renderAdminMenuTree();
     });
+  });
+
+  treeEl.querySelectorAll('.builtin-mi-pick').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.menuImageTarget = btn.dataset.nodeId;
+      els.axMenuImageFile?.click();
+    });
+  });
+  treeEl.querySelectorAll('.builtin-mi-clear').forEach((btn) => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); clearMenuImage(btn.dataset.nodeId); });
   });
 
   // Category name inside the expanded LANDMARKS row — double-click to rename. Renaming
@@ -9329,7 +9719,13 @@ function collectOfflineAssets() {
   // opportunistic runtime caching never reached them either unless someone had walked all
   // nine tours online first. parseTours normalises each node's pano to a plain path string
   // (see its own comment), which is what assetUrl expects.
-  for (const t of state.tours || []) for (const n of t.nodes || []) if (n.pano) add(assetUrl(n.pano), 'image');
+  // Both renders of a room, where a second one exists (2026-09-21): the furnished/unfurnished
+  // toggle is useless offline if only one side was precached, and the visitor gets no warning
+  // that the other is missing until they tap it.
+  for (const t of state.tours || []) for (const n of t.nodes || []) {
+    if (n.pano) add(assetUrl(n.pano), 'image');
+    if (n.panoAlt) add(assetUrl(n.panoAlt), 'image');
+  }
   // Tour minimap images — same reasoning as the room panoramas above: only requested once
   // a tour with a map is actually opened, so runtime caching alone would never reach them.
   for (const t of state.tours || []) for (const m of t.maps || []) if (m.file) add(assetUrl(m.file, m._ver), 'image');

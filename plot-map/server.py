@@ -164,9 +164,12 @@ def tour_pano_basenames(src_dir):
         return names                                # malformed tour.json must not kill the export
     for tour in (doc.get("tours") or []):
         for node in (tour.get("nodes") or []):
-            f = (node.get("pano") or {}).get("file")
-            if f:
-                names.add(os.path.basename(f))
+            # Both renders where a room has two (furnished/unfurnished, 2026-09-21) — the
+            # client's version toggle needs either one to be a usable texture in bundle mode.
+            for key in ("pano", "panoAlt"):
+                f = (node.get(key) or {}).get("file")
+                if f:
+                    names.add(os.path.basename(f))
     return names
 
 def build_embedded_images_json(src_dir, alignment_dict):

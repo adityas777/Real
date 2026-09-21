@@ -192,6 +192,16 @@
       <!-- virtual-tour navigation hotspots, projected from the 3D scene each frame while a
            tour has taken over the viewer (VIRTUAL-TOUR.md Phase 1 / D-11) -->
       <div class="tour-hs-layer" id="tourHotspots" hidden></div>
+      <!-- Furnished / unfurnished toggle (2026-09-21). A room may carry two panoramas of the
+           SAME viewpoint; this flips between them without moving the camera, and the choice
+           persists as the visitor walks the tour. Only rendered when some room in the open
+           tour has both (renderTourVariantBar); in a room that has only one, the missing
+           side is disabled rather than removed so the bar never jumps. Labels are per-tour
+           and admin-editable, so they are filled in by JS, not written here. -->
+      <div class="tour-variants" id="tourVariants" role="group" aria-label="Room version" hidden>
+        <button class="tour-variant-btn" id="tourVariantA" type="button" data-variant="a" aria-pressed="true"></button>
+        <button class="tour-variant-btn" id="tourVariantB" type="button" data-variant="b" aria-pressed="false"></button>
+      </div>
       <!-- virtual-tour minimap: the tour's isometric/floor-plan image with one dot per room,
            drawn BARE (no panel/border — see styles.css) in the compass's own top-right slot,
            which renderClientTourMap hides for the duration. Only shown while a tour that HAS
@@ -356,7 +366,6 @@
            button takes over just the "Available" filter toggle, in the same spot -->
       <!-- landscape twin of #areaFilterSel — the topbar it normally lives in is collapsed
            at this size, so without this the area filter would be desktop-only -->
-      <select class="area-filter-sel is-floating" id="areaFilterSelMobile" aria-label="Filter plots by area" hidden></select>
       <div class="zoom-status-group" id="zoomStatusGroup">
         <button class="btn zoom-status-btn" id="zoomAvailableBtn" type="button" data-status="available" aria-pressed="true" aria-label="Toggle available plots">
           <span class="dot"></span>Available <span class="count">0</span>
@@ -367,6 +376,9 @@
         <button class="btn zoom-status-btn" id="zoomSoldBtn" type="button" data-status="sold" aria-pressed="true" aria-label="Toggle sold plots">
           <span class="dot"></span>Sold <span class="count">0</span>
         </button>
+        <!-- Lives INSIDE the status group (2026-09-21) so it docks with the pills: leftmost in the
+             landscape phone row (CSS order), first in the desktop column. -->
+        <select class="area-filter-sel is-floating" id="areaFilterSelMobile" aria-label="Filter plots by area" hidden></select>
       </div>
       <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false" aria-label="Show plot numbers"
         title="Show plot numbers">#</button>
@@ -533,7 +545,12 @@
       <button class="btn btn-import" id="axTourAdd" type="button">＋ Add tour</button>
       <p class="ax-lm-empty" id="axTourEmpty">No tours yet.</p>
       <div class="ax-tour-list" id="axTourList" aria-label="Tours"></div>
+      <!-- MENU IMAGE builtin (2026-09-21): the picture drawn inside the client menu, e.g. a QR
+           code. Target node is state.menuImageTarget — a file input cannot carry it. -->
+      <input type="file" id="axMenuImageFile" accept="image/png,image/jpeg,image/webp,image/*" hidden />
       <input type="file" id="axTourNodeFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+      <!-- Second render for the node named by state.tourAltTarget — see addTourNodeAltFromFile -->
+      <input type="file" id="axTourNodeAltFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
       <!-- one isometric / floor-plan image per tour (see setTourMapFromFile) -->
       <input type="file" id="axTourMapFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
       <div class="adminbar-actions">

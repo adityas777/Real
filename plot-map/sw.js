@@ -51,7 +51,7 @@
 // bumped per this file's policy of one per shell-affecting change. v12: fixes to that
 // same feature (switching to a dot-less isometric hid the whole minimap; the flip revealed
 // an image that hadn't downloaded yet).
-const VERSION = 'v12';
+const VERSION = 'v28';
 // Only the SHELL is version-namespaced. The shell is CODE (app.js/styles/vendor) — a new
 // deploy genuinely invalidates it, and it's ~2MB, cheap to re-fetch.
 //
