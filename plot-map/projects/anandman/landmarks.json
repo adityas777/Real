@@ -1,0 +1,415 @@
+{
+  "version": 1,
+  "note": "Build91 landmark hotspots",
+  "savedAt": "2026-09-18T10:42:22.444Z",
+  "landmarks": [
+    {
+      "id": "lm1",
+      "label": "AIMS Raipur",
+      "distance": "3.7",
+      "driveTime": "8",
+      "icon": "hospital",
+      "featured": true,
+      "category": "HEALTHCARE",
+      "hotspot": {
+        "lonDeg": 23.4,
+        "latDeg": -3.96
+      },
+      "banner": {
+        "lonDeg": 23.26,
+        "latDeg": 5.49
+      }
+    },
+    {
+      "id": "lm2",
+      "label": "Suyash Hospital",
+      "distance": "5.2",
+      "driveTime": "12",
+      "icon": "hospital",
+      "featured": true,
+      "category": "HEALTHCARE",
+      "hotspot": {
+        "lonDeg": -38.94,
+        "latDeg": -3.13
+      },
+      "banner": {
+        "lonDeg": -41.73,
+        "latDeg": 35.43
+      }
+    },
+    {
+      "id": "lm6",
+      "label": "RITEE College",
+      "distance": "5.1",
+      "driveTime": "13",
+      "icon": "college",
+      "featured": true,
+      "category": "EDUCATION",
+      "hotspot": {
+        "lonDeg": 0.49,
+        "latDeg": -2.45
+      },
+      "banner": {
+        "lonDeg": 1.37,
+        "latDeg": 10.09
+      }
+    },
+    {
+      "id": "lm7",
+      "label": "Kanger Valley School",
+      "distance": "5.4",
+      "driveTime": "14",
+      "icon": "school",
+      "featured": false,
+      "category": "EDUCATION",
+      "hotspot": {
+        "lonDeg": 3.14,
+        "latDeg": -1.87
+      },
+      "banner": {
+        "lonDeg": 3.1,
+        "latDeg": 30.09
+      }
+    },
+    {
+      "id": "lm8",
+      "label": "Brahamavid School",
+      "distance": "10",
+      "driveTime": "50",
+      "icon": "school",
+      "featured": false,
+      "category": "EDUCATION",
+      "hotspot": {
+        "lonDeg": 20.86,
+        "latDeg": -1.6
+      },
+      "banner": {
+        "lonDeg": 20.35,
+        "latDeg": 18.08
+      }
+    },
+    {
+      "id": "lm3",
+      "label": "RAJKUMAR COLLEGE",
+      "distance": "6.6",
+      "driveTime": "15",
+      "icon": "college",
+      "featured": false,
+      "category": "EDUCATION",
+      "hotspot": {
+        "lonDeg": -50.73,
+        "latDeg": -3.71
+      },
+      "banner": {
+        "lonDeg": -51.77,
+        "latDeg": 26.82
+      }
+    },
+    {
+      "id": "lm4",
+      "label": "NIT Raipur",
+      "distance": "5.1",
+      "driveTime": "11",
+      "icon": "college",
+      "featured": true,
+      "category": "EDUCATION",
+      "hotspot": {
+        "lonDeg": -29.71,
+        "latDeg": -2.35
+      },
+      "banner": {
+        "lonDeg": -27.08,
+        "latDeg": 10.73
+      }
+    },
+    {
+      "id": "lm5",
+      "label": "Holy Hearts School",
+      "distance": "3.2",
+      "driveTime": "7",
+      "icon": "school",
+      "featured": false,
+      "category": "EDUCATION",
+      "hotspot": {
+        "lonDeg": -14.8,
+        "latDeg": -6.23
+      },
+      "banner": {
+        "lonDeg": -14.99,
+        "latDeg": 39.84
+      }
+    },
+    {
+      "id": "lm13",
+      "label": "Tatiband Chowk",
+      "distance": "3.2",
+      "driveTime": "7",
+      "icon": "market",
+      "featured": true,
+      "category": "COMMERCIAL",
+      "hotspot": {
+        "lonDeg": 36.95,
+        "latDeg": -2.89
+      },
+      "banner": {
+        "lonDeg": 37.06,
+        "latDeg": 9.04
+      }
+    },
+    {
+      "id": "lm10",
+      "label": "Bhanpuri Chowk",
+      "distance": "5.5",
+      "driveTime": "11",
+      "icon": "market",
+      "featured": true,
+      "category": "COMMERCIAL",
+      "hotspot": {
+        "lonDeg": -100.22,
+        "latDeg": -2.67
+      },
+      "banner": {
+        "lonDeg": -100.32,
+        "latDeg": 7.01
+      }
+    },
+    {
+      "id": "lm11",
+      "label": "Samta Colony",
+      "distance": "6.5",
+      "driveTime": "13",
+      "icon": "market",
+      "featured": true,
+      "category": "COMMERCIAL",
+      "hotspot": {
+        "lonDeg": -57.28,
+        "latDeg": -1.52
+      },
+      "banner": {
+        "lonDeg": -65.01,
+        "latDeg": 9.7
+      }
+    },
+    {
+      "id": "lm12",
+      "label": "Kabir Nagar",
+      "distance": "3.1",
+      "driveTime": "16",
+      "icon": "market",
+      "featured": false,
+      "category": "COMMERCIAL",
+      "hotspot": {
+        "lonDeg": -15.92,
+        "latDeg": -3.29
+      },
+      "banner": {
+        "lonDeg": -15.87,
+        "latDeg": 8.77
+      }
+    },
+    {
+      "id": "lm24",
+      "label": "Raipur - Bilaspur Highway",
+      "distance": "3.7",
+      "driveTime": "7",
+      "icon": "highway",
+      "featured": true,
+      "category": "CONNECTIVITY",
+      "hotspot": {
+        "lonDeg": 72.43,
+        "latDeg": -2.92
+      },
+      "banner": {
+        "lonDeg": 72.88,
+        "latDeg": 19.4
+      }
+    },
+    {
+      "id": "lm14",
+      "label": "Airport",
+      "distance": "22",
+      "driveTime": "38",
+      "icon": "airport",
+      "featured": false,
+      "category": "CONNECTIVITY",
+      "hotspot": {
+        "lonDeg": -55.23,
+        "latDeg": -1.14
+      },
+      "banner": {
+        "lonDeg": -55.52,
+        "latDeg": 32.98
+      }
+    },
+    {
+      "id": "lm15",
+      "label": "Raipur Railway",
+      "distance": "5",
+      "driveTime": "17",
+      "icon": "train",
+      "featured": true,
+      "category": "CONNECTIVITY",
+      "hotspot": {
+        "lonDeg": -47.06,
+        "latDeg": -2.14
+      },
+      "banner": {
+        "lonDeg": -46.45,
+        "latDeg": 21.35
+      }
+    },
+    {
+      "id": "lm16",
+      "label": "New Bus Stand",
+      "distance": "10",
+      "driveTime": "23",
+      "icon": "bus",
+      "featured": false,
+      "category": "CONNECTIVITY",
+      "hotspot": {
+        "lonDeg": -20.82,
+        "latDeg": -1.51
+      },
+      "banner": {
+        "lonDeg": -18.63,
+        "latDeg": 26.24
+      }
+    },
+    {
+      "id": "lm22",
+      "label": "D Mart",
+      "distance": "7.5",
+      "driveTime": "15",
+      "icon": "mall",
+      "featured": false,
+      "category": "LIFESTYLE",
+      "hotspot": {
+        "lonDeg": 9.12,
+        "latDeg": -1.13
+      },
+      "banner": {
+        "lonDeg": 9.05,
+        "latDeg": 12.11
+      }
+    },
+    {
+      "id": "lm17",
+      "label": "Best Price",
+      "distance": "4.5",
+      "driveTime": "9",
+      "icon": "mall",
+      "featured": false,
+      "category": "LIFESTYLE",
+      "hotspot": {
+        "lonDeg": -87.88,
+        "latDeg": -7.53
+      },
+      "banner": {
+        "lonDeg": -87.88,
+        "latDeg": 9.47
+      }
+    },
+    {
+      "id": "lm18",
+      "label": "Shubham K Mart",
+      "distance": "4.4",
+      "driveTime": "12",
+      "icon": "mall",
+      "featured": false,
+      "category": "LIFESTYLE",
+      "hotspot": {
+        "lonDeg": -51.27,
+        "latDeg": -2.49
+      },
+      "banner": {
+        "lonDeg": -53.69,
+        "latDeg": 29.56
+      }
+    },
+    {
+      "id": "lm19",
+      "label": "Swimming Pool",
+      "distance": "5.6",
+      "driveTime": "12",
+      "icon": "lake",
+      "featured": false,
+      "category": "LIFESTYLE",
+      "hotspot": {
+        "lonDeg": -37.3,
+        "latDeg": -1.78
+      },
+      "banner": {
+        "lonDeg": -36.55,
+        "latDeg": 11.45
+      }
+    },
+    {
+      "id": "lm20",
+      "label": "International Hockey Stadium",
+      "distance": "5.3",
+      "driveTime": "12",
+      "icon": "stadium",
+      "featured": false,
+      "category": "LIFESTYLE",
+      "hotspot": {
+        "lonDeg": -33.42,
+        "latDeg": -2.66
+      },
+      "banner": {
+        "lonDeg": -32.04,
+        "latDeg": 39.02
+      }
+    },
+    {
+      "id": "lm21",
+      "label": "Criclet Stadium",
+      "distance": "4.7",
+      "driveTime": "12",
+      "icon": "stadium",
+      "featured": false,
+      "category": "LIFESTYLE",
+      "hotspot": {
+        "lonDeg": -25.11,
+        "latDeg": -3.67
+      },
+      "banner": {
+        "lonDeg": -24.24,
+        "latDeg": 23.09
+      }
+    },
+    {
+      "id": "lm23",
+      "label": "Iskon Temple",
+      "distance": "5",
+      "driveTime": "12",
+      "icon": "temple",
+      "featured": false,
+      "category": "TEMPLE",
+      "hotspot": {
+        "lonDeg": 26.6,
+        "latDeg": -2.34
+      },
+      "banner": {
+        "lonDeg": 26.81,
+        "latDeg": 15.55
+      }
+    },
+    {
+      "id": "lm9",
+      "label": "Gururdwara",
+      "distance": "1.9",
+      "driveTime": "5",
+      "icon": "temple",
+      "featured": false,
+      "category": "TEMPLE",
+      "hotspot": {
+        "lonDeg": 56.9,
+        "latDeg": -4.73
+      },
+      "banner": {
+        "lonDeg": 57.18,
+        "latDeg": 15.94
+      }
+    }
+  ]
+}

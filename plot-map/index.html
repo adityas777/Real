@@ -196,12 +196,30 @@
            drawn BARE (no panel/border — see styles.css) in the compass's own top-right slot,
            which renderClientTourMap hides for the duration. Only shown while a tour that HAS
            a map is open. Tapping a dot jumps to that room — routed through pick(), not the
-           dot's own click, because #pano eats it (see the pointer-capture gotcha). -->
+           dot's own click, because #pano eats it (see the pointer-capture gotcha).
+           A tour can carry SEVERAL isometrics (2026-09-18) — #tourMapSwitch flips between
+           them with a 3D rotation (see switchTourMap/styles.css .tour-map-inner.is-flipping),
+           hidden by renderClientTourMap whenever there's only one. #tourMapPips is the small
+           position indicator ("which of N is this"), same visibility rule. Both are OUTSIDE
+           #tourMapInner on purpose — they must not spin along with the flip. -->
       <div class="tour-map" id="tourMap" hidden>
         <div class="tour-map-inner" id="tourMapInner">
           <img id="tourMapImg" alt="Tour map" />
           <div class="tour-map-dots" id="tourMapDots"></div>
         </div>
+        <button class="tour-map-switch" id="tourMapSwitch" type="button" aria-label="Switch map view" title="Switch map view" hidden>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.66-5.66M20 12a8 8 0 0 1-13.66 5.66" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M17.5 3.5v3.5H14M6.5 20.5V17H10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="tour-map-pips" id="tourMapPips" hidden></div>
+        <!-- Dismiss / restore the whole minimap. One button that swaps icon rather than a
+             one-way close, so there's always a way back (see toggleTourMapHidden); CSS
+             repositions it into the corner once `.is-map-hidden` collapses everything else.
+             Two inline SVGs swapped by that class — the same icon-halves pattern the audio
+             button uses, NOT textContent (which would wipe the SVG). -->
+        <button class="tour-map-hide" id="tourMapHide" type="button" aria-label="Hide the map" title="Hide the map" aria-pressed="false" hidden>
+          <svg class="tm-ico-hide" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.8 2.8M9.4 5.2A9.5 9.5 0 0 1 12 5c5 0 9 4.5 9 7a12 12 0 0 1-2.4 3.3M6.2 6.4C3.9 7.9 3 10.2 3 12c0 2.5 4 7 9 7 1.4 0 2.7-.35 3.8-.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg class="tm-ico-show" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4.5 3 7v12.5l6-2.5 6 2.5 6-2.5V4.5L15 7 9 4.5zM9 4.5V17M15 7v12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
     </div>
 

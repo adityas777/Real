@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7680 5223" class="plot-overlay" preserveAspectRatio="xMidYMid meet">
+  <!-- Exported by the Build91 admin trace tool. -->
+  <g class="plots">
+    <g class="plot-group">
+      <polygon id="Plot-A101" class="plot" points="2724,1063 2827,1064 2830,1070 2850,1077 2867,1065 2865,1165 2753,1164 2760,1157 2765,1162 2770,1158 2771,1151 2764,1146 2755,1126 2767,1118 2767,1110 2762,1110 2756,1101 2748,1103 2751,1096 2744,1097 2735,1089 2725,1064" />
+      <text class="plot-label" x="2775.3" y="1111.6">A101</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A102" class="plot" points="2880,1059 2881,1066 3023,1067 3026,1073 3034,1073 3037,1080 3042,1078 3041,1168 2878,1166 2880,1060" />
+      <text class="plot-label" x="2972.2" y="1089">A102</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A103" class="plot" points="2729,1178 2748,1179 2750,1190 2762,1186 2760,1178 2865,1180 2863,1263 2701,1260 2701,1217 2704,1222 2714,1222 2728,1214 2731,1217 2737,1210 2737,1197 2747,1199 2744,1185 2729,1179" />
+      <text class="plot-label" x="2747.2" y="1204.2">A103</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A104" class="plot" points="2879,1180 3039,1182 3039,1265 2877,1263 2879,1181" />
+      <text class="plot-label" x="2942.6" y="1214.2">A104</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A105" class="plot" points="2700,1271 2721,1275 2863,1277 2861,1360 2701,1357 2700,1272" />
+      <text class="plot-label" x="2757.7" y="1302">A105</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A106" class="plot" points="2876,1276 3039,1280 3038,1363 2877,1360 2876,1277" />
+      <text class="plot-label" x="2941.2" y="1311.2">A106</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A107" class="plot" points="2700,1371 2861,1374 2860,1457 2698,1455 2699,1372" />
+      <text class="plot-label" x="2763.6" y="1405.8">A107</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A108" class="plot" points="2876,1374 3037,1377 3036,1460 2874,1457 2876,1375" />
+      <text class="plot-label" x="2939.8" y="1408.6">A108</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A109" class="plot" points="2699,1468 2860,1471 2858,1554 2695,1552 2698,1469" />
+      <text class="plot-label" x="2762" y="1502.8">A109</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A110" class="plot" points="2873,1465 2887,1465 2874,1465 2874,1472 3036,1473 3034,1557 2873,1555 2873,1466" />
+      <text class="plot-label" x="2915.5" y="1489.8">A110</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A111" class="plot" points="2694,1565 2695,1569 2858,1568 2857,1652 2695,1649 2694,1566" />
+      <text class="plot-label" x="2748.8" y="1594.8">A111</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A112" class="plot" points="2872,1565 2887,1569 3034,1571 3033,1625 3018,1615 3005,1618 2997,1635 2999,1654 2870,1652 2872,1566" />
+      <text class="plot-label" x="2958.7" y="1607">A112</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A113" class="plot" points="2693,1659 2694,1664 2856,1665 2855,1749 2694,1745 2693,1660" />
+      <text class="plot-label" x="2747.5" y="1690.3">A113</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A114" class="plot" points="2871,1666 3000,1667 3001,1675 3012,1678 3015,1685 3028,1685 3032,1678 3031,1752 2869,1750 2870,1667" />
+      <text class="plot-label" x="2972.9" y="1690.3">A114</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A115" class="plot" points="2693,1760 2855,1762 2853,1847 2691,1844 2693,1761" />
+      <text class="plot-label" x="2757" y="1794.8">A115</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A116" class="plot" points="2869,1762 3030,1765 3029,1849 2868,1847 2869,1763" />
+      <text class="plot-label" x="2933" y="1797.2">A116</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A117" class="plot" points="2691,1857 2853,1860 2851,1944 2688,1941 2691,1858" />
+      <text class="plot-label" x="2754.8" y="1892">A117</text>
+    </g>
+    <g class="plot-group">
+      <polygon id="Plot-A118" class="plot" points="2867,1860 3028,1862 3028,1947 2866,1944 2866,1861" />
+      <text class="plot-label" x="2931" y="1894.8">A118</text>
+    </g>
+  </g>
+</svg>

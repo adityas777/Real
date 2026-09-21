@@ -1,0 +1,539 @@
+{
+  "version": 1,
+  "note": "Build91 virtual tours",
+  "savedAt": "2026-09-18T10:42:22.444Z",
+  "tours": [
+    {
+      "id": "t10",
+      "name": "MANDIR",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "mandir_front_view",
+          "pano": {
+            "file": "sample/tour-t10-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -173.6,
+            "latDeg": 2.81,
+            "fov": 75,
+            "facingDir": "NE"
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t11",
+      "name": "CLUB HOUSE AND POOL",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "Swimming_pool",
+          "pano": {
+            "file": "sample/tour-t11-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t12",
+      "name": "GYM",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "gym_pano_1",
+          "pano": {
+            "file": "sample/tour-t12-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t13",
+      "name": "KIDS PLAY AREA",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "Sector_A_-_KIDS_PLAY_AREA",
+          "pano": {
+            "file": "sample/tour-t13-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t14",
+      "name": "MULTIPURPOSE PLAY COURT",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "Sector-A_.Multi-Purpose_Court",
+          "pano": {
+            "file": "sample/tour-t14-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t15",
+      "name": "GAZEBO",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "garden_pano_view_-2",
+          "pano": {
+            "file": "sample/tour-t15-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t16",
+      "name": "JOGGING TRACK",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "garden",
+          "pano": {
+            "file": "sample/tour-t16-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t17",
+      "name": "CYCLING TRACK",
+      "startNode": "n1",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "CYCLING_PATH",
+          "pano": {
+            "file": "sample/tour-t17-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        }
+      ],
+      "links": []
+    },
+    {
+      "id": "t20",
+      "name": "MODERN VILLA",
+      "startNode": "n4",
+      "nodes": [
+        {
+          "id": "n1",
+          "name": "1.Master Bedroom",
+          "pano": {
+            "file": "sample/tour-t20-n1.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -545.09,
+            "latDeg": -3.48,
+            "fov": 67
+          }
+        },
+        {
+          "id": "n2",
+          "name": "2.Bedroom 1",
+          "pano": {
+            "file": "sample/tour-t20-n2.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -536.89,
+            "latDeg": -1.36,
+            "fov": 67
+          }
+        },
+        {
+          "id": "n3",
+          "name": "3.Washroom 1",
+          "pano": {
+            "file": "sample/tour-t20-n3.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -903.46,
+            "latDeg": -1.13,
+            "fov": 75
+          }
+        },
+        {
+          "id": "n4",
+          "name": "4.Living Room",
+          "pano": {
+            "file": "sample/tour-t20-n4.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -180.35,
+            "latDeg": -3.09,
+            "fov": 63
+          }
+        },
+        {
+          "id": "n5",
+          "name": "5. Washroom 2",
+          "pano": {
+            "file": "sample/tour-t20-n5.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -543.09,
+            "latDeg": -0.58,
+            "fov": 75
+          }
+        },
+        {
+          "id": "n6",
+          "name": "6.Dining Room",
+          "pano": {
+            "file": "sample/tour-t20-n6.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -1259.87,
+            "latDeg": -7.43,
+            "fov": 75
+          }
+        },
+        {
+          "id": "n7",
+          "name": "7._Bedroom 2",
+          "pano": {
+            "file": "sample/tour-t20-n7.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -903.78,
+            "latDeg": 0.14,
+            "fov": 71
+          }
+        },
+        {
+          "id": "n8",
+          "name": "8.Drawing Room",
+          "pano": {
+            "file": "sample/tour-t20-n8.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -180.29,
+            "latDeg": -1.66,
+            "fov": 63
+          }
+        },
+        {
+          "id": "n9",
+          "name": "9.Kitchen",
+          "pano": {
+            "file": "sample/tour-t20-n9.web.jpg"
+          },
+          "defaultView": {
+            "lonDeg": -539.54,
+            "latDeg": 2.23,
+            "fov": 63
+          }
+        }
+      ],
+      "links": [
+        {
+          "from": "n4",
+          "to": "n6",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 89.12,
+            "latDeg": -12.36
+          },
+          "icon": "chevron",
+          "rot": 0
+        },
+        {
+          "from": "n4",
+          "to": "n9",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 77.95,
+            "latDeg": -17.8
+          },
+          "icon": "chevron",
+          "rot": 275
+        },
+        {
+          "from": "n4",
+          "to": "n2",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -90.5,
+            "latDeg": -12.29
+          },
+          "icon": "chevron",
+          "rot": 359
+        },
+        {
+          "from": "n4",
+          "to": "n8",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -77.67,
+            "latDeg": -18.89
+          },
+          "icon": "chevron",
+          "rot": 69
+        },
+        {
+          "from": "n8",
+          "to": "n4",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -134.62,
+            "latDeg": -8.3
+          },
+          "icon": "chevron",
+          "rot": 0
+        },
+        {
+          "from": "n8",
+          "to": "n1",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -48.32,
+            "latDeg": -4.27
+          },
+          "icon": "chevron",
+          "rot": 76
+        },
+        {
+          "from": "n6",
+          "to": "n7",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 168.18,
+            "latDeg": 0.83
+          },
+          "icon": "chevron",
+          "rot": 260
+        },
+        {
+          "from": "n6",
+          "to": "n5",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -145.84,
+            "latDeg": -23.02
+          },
+          "icon": "chevron",
+          "rot": 84
+        },
+        {
+          "from": "n9",
+          "to": "n6",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 176.56,
+            "latDeg": -18.23
+          },
+          "icon": "chevron",
+          "rot": 270
+        },
+        {
+          "from": "n5",
+          "to": "n6",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -150.12,
+            "latDeg": -14.03
+          },
+          "icon": "chevron",
+          "rot": 84
+        },
+        {
+          "from": "n1",
+          "to": "n8",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -17.72,
+            "latDeg": -22.42
+          },
+          "icon": "chevron",
+          "rot": 69
+        },
+        {
+          "from": "n2",
+          "to": "n3",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 49.84,
+            "latDeg": -3.65
+          },
+          "icon": "chevron",
+          "rot": 0
+        },
+        {
+          "from": "n2",
+          "to": "n4",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -12.21,
+            "latDeg": -23.97
+          },
+          "icon": "chevron",
+          "rot": 76
+        },
+        {
+          "from": "n2",
+          "to": "n8",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -22,
+            "latDeg": -11.12
+          },
+          "icon": "chevron",
+          "rot": 290
+        },
+        {
+          "from": "n3",
+          "to": "n2",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 138.19,
+            "latDeg": -12.52
+          },
+          "icon": "chevron",
+          "rot": 306
+        },
+        {
+          "from": "n7",
+          "to": "n6",
+          "label": "",
+          "hotspot": {
+            "lonDeg": 3.85,
+            "latDeg": -1.63
+          },
+          "icon": "chevron",
+          "rot": 0
+        },
+        {
+          "from": "n6",
+          "to": "n4",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -64.91,
+            "latDeg": -32.88
+          },
+          "icon": "chevron",
+          "rot": 0
+        }
+      ],
+      "maps": [
+        {
+          "id": "m1",
+          "file": "sample/tour-t20-map.web.png",
+          "points": [
+            {
+              "nodeId": "n1",
+              "x": 0.8434,
+              "y": 0.4327,
+              "rot": 0
+            },
+            {
+              "nodeId": "n4",
+              "x": 0.5229,
+              "y": 0.5152,
+              "rot": 0
+            },
+            {
+              "nodeId": "n8",
+              "x": 0.7683,
+              "y": 0.7214,
+              "rot": 0
+            },
+            {
+              "nodeId": "n6",
+              "x": 0.3727,
+              "y": 0.5482,
+              "rot": 0
+            },
+            {
+              "nodeId": "n7",
+              "x": 0.1493,
+              "y": 0.3887,
+              "rot": 0
+            },
+            {
+              "nodeId": "n5",
+              "x": 0.4203,
+              "y": 0.3777,
+              "rot": 0
+            },
+            {
+              "nodeId": "n2",
+              "x": 0.7152,
+              "y": 0.5069,
+              "rot": 0
+            },
+            {
+              "nodeId": "n3",
+              "x": 0.6419,
+              "y": 0.386,
+              "rot": 0
+            },
+            {
+              "nodeId": "n9",
+              "x": 0.3031,
+              "y": 0.7186,
+              "rot": 0
+            }
+          ]
+        },
+        {
+          "id": "mmu6tuqs71",
+          "file": "sample/tour-t20-map-mmu6tuqs71.web.png",
+          "points": []
+        }
+      ]
+    }
+  ]
+}

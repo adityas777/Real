@@ -77,6 +77,7 @@ const els = {
   axTourMapFile: $('axTourMapFile'), tourMapModal: $('tourMapModal'), tourMapModalTitle: $('tourMapModalTitle'), tourMapModalHint: $('tourMapModalHint'),
   tourMapCanvas: $('tourMapCanvas'), tourMapEditImg: $('tourMapEditImg'), tourMapEditDots: $('tourMapEditDots'), tourMapNodeList: $('tourMapNodeList'),
   tourMap: $('tourMap'), tourMapInner: $('tourMapInner'), tourMapImg: $('tourMapImg'), tourMapDots: $('tourMapDots'),
+  tourMapSwitch: $('tourMapSwitch'), tourMapPips: $('tourMapPips'), tourMapHide: $('tourMapHide'),
   axLmAdd: $('axLmAdd'), axLmList: $('axLmList'), axLmEmpty: $('axLmEmpty'), axLmCount: $('axLmCount'), axLmShowAll: $('axLmShowAll'), axLmHideAll: $('axLmHideAll'), axLmLoad: $('axLmLoad'), axLmFile: $('axLmFile'), axLmSave: $('axLmSave'),
   axAmAdd: $('axAmAdd'), axAmList: $('axAmList'), axAmEmpty: $('axAmEmpty'), axAmLoad: $('axAmLoad'), axAmFile: $('axAmFile'), axAmSave: $('axAmSave'),
   // amenity info card + full-render lightbox
@@ -221,6 +222,10 @@ const state = {
   // Visitor pref: does picking a menu item collapse the drawer? Default false = the
   // existing auto-collapse behaviour. See buildKeepMenuToggle.
   keepMenuOpen: (() => { try { return localStorage.getItem('b91-keep-menu-open') === '1'; } catch { return false; } })(),
+  // Visitor pref: has the tour minimap been dismissed? Persisted like the other client
+  // toggles, so "I don't want this" sticks across rooms and tours rather than needing to be
+  // re-dismissed every time. See toggleTourMapHidden.
+  tourMapHidden: (() => { try { return localStorage.getItem('b91-tour-map-hidden') === '1'; } catch { return false; } })(),
 };
 let three = null, plotsDirty = false;
 const labelCache = new Map();           // id → reusable label Sprite (avoid texture churn on rebuild)
@@ -1461,6 +1466,11 @@ function wireViewControls() {
     sel?.addEventListener('change', (e) => { e.stopPropagation(); touch(); setAreaFilter(sel.value); });
     sel?.addEventListener('click', (e) => e.stopPropagation());   // don't let the pano steal the tap
   });
+  // A real click listener too, not just the pick() routing above — pick() only fires from
+  // a POINTER event on #pano; a keyboard Enter/Space on this (focused, real <button>)
+  // fires `click` directly and never touches #pano's capture at all.
+  els.tourMapSwitch?.addEventListener('click', (e) => { e.stopPropagation(); switchTourMap(); });
+  els.tourMapHide?.addEventListener('click', (e) => { e.stopPropagation(); toggleTourMapHidden(); });
   els.fsToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
   els.audioToggle?.addEventListener('click', (e) => { e.stopPropagation(); toggleAudio(); });
   els.autoPanToggle?.addEventListener('click', (e) => {
@@ -1784,24 +1794,36 @@ function setKeepMenuOpen(on) {
 // branch hides #catLevel2, so re-rendering from here would slam the landmark picker shut
 // the moment someone toggled this inside it.
 function syncKeepMenuToggles() {
-  document.querySelectorAll('.cat-keep').forEach((b) => {
-    b.classList.toggle('is-on', !!state.keepMenuOpen);
-    b.setAttribute('aria-pressed', String(!!state.keepMenuOpen));
-    b.title = state.keepMenuOpen ? 'Menu stays open when you pick an item' : 'Menu closes when you pick an item';
+  document.querySelectorAll('.cat-keep').forEach((wrap) => {
+    const input = wrap.querySelector('.ui-switch-input');
+    if (input) input.checked = !!state.keepMenuOpen;
+    wrap.title = state.keepMenuOpen ? 'Menu stays open when you pick an item' : 'Menu closes when you pick an item';
   });
 }
+// A real ON/OFF switch (2026-09-18, replacing a custom checkbox-look button) — the same
+// `.ui-switch` markup/CSS the landmark "show by default" row and the menu builder's
+// built-in-row toggle already use, on request, rather than a bespoke control.
 function buildKeepMenuToggle() {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'cat-keep' + (state.keepMenuOpen ? ' is-on' : '');
-  b.setAttribute('aria-pressed', String(!!state.keepMenuOpen));
-  b.title = state.keepMenuOpen ? 'Menu stays open when you pick an item' : 'Menu closes when you pick an item';
-  b.innerHTML = '<span class="cat-keep-box"></span><span class="cat-keep-lbl">KEEP OPEN</span>';
-  b.addEventListener('click', (e) => {
-    e.stopPropagation(); state.lastUserTouch = Date.now();
-    setKeepMenuOpen(!state.keepMenuOpen);
-  });
-  return b;
+  const wrap = document.createElement('label');
+  wrap.className = 'cat-keep ui-switch';
+  wrap.title = state.keepMenuOpen ? 'Menu stays open when you pick an item' : 'Menu closes when you pick an item';
+  const input = document.createElement('input');
+  input.type = 'checkbox'; input.className = 'ui-switch-input';
+  input.checked = !!state.keepMenuOpen;
+  // No visible label (2026-09-18, on request) — the accessible name lives on the input
+  // instead, and the wrap's `title` covers a sighted hover.
+  input.setAttribute('aria-label', 'Keep menu open when you pick an item');
+  // stopPropagation matches every other in-menu control (e.g. the landmark category
+  // buttons) — without it the click bubbles to the row/backdrop handler that closes menus.
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('change', () => { state.lastUserTouch = Date.now(); setKeepMenuOpen(input.checked); });
+  const track = document.createElement('span'); track.className = 'ui-switch-track';
+  const thumb = document.createElement('span'); thumb.className = 'ui-switch-thumb';
+  track.appendChild(thumb);
+  // Order matters: `.ui-switch-input:checked + .ui-switch-track` is an adjacent-sibling
+  // selector, so the input must be immediately followed by the track with nothing between.
+  wrap.append(input, track);
+  return wrap;
 }
 // Only worth offering where there's more than one thing to pick between.
 function addKeepMenuToggle(container, itemCount) {
@@ -2210,6 +2232,13 @@ function pick(e) {
   // pins), so they are hit-tested here instead. Admin drags are handled by the element's
   // own pointerdown, which stops propagation before capture happens.
   if (state.tourView) {
+    // Same trap, for the minimap's own buttons (2026-09-18) — checked before the dots since
+    // they sit visually above them, in the map's corner. Hide is checked first of all: while
+    // the map is dismissed it's the ONLY thing on screen here, and it must stay reachable.
+    const hideBtn = hitEl?.closest?.('.tour-map-hide');
+    if (hideBtn) { toggleTourMapHidden(); return; }
+    const sw = hitEl?.closest?.('.tour-map-switch');
+    if (sw) { switchTourMap(); return; }
     // The minimap's room dots are the same trap again — they sit inside #pano, so their
     // own click is eaten by its pointer capture. Checked BEFORE .tour-hs because the
     // minimap is an overlay drawn on top of everything else in the scene.
@@ -3252,7 +3281,7 @@ function buildSession() {                                // a complete snapshot 
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode,
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null, defaultView: { ...n.defaultView } })),
       links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot }, icon: k.icon, rot: k.rot })),
-      map: t.map ? { file: t.map.file, blob: t.map.blob || null, points: (t.map.points || []).map((p) => ({ ...p })) } : null })),
+      maps: (t.maps || []).map((m) => ({ id: m.id, file: m.file, blob: m.blob || null, points: (m.points || []).map((p) => ({ ...p })) })) })),
   };
 }
 let sessionTimer = null;
@@ -3471,7 +3500,7 @@ async function fetchReferencedImages(haveNames) {
   if (!state.bootImage.blob) add(state.bootImage.file);
   state.amenities.forEach((a) => { if (!a.renderBlob) add(a.render); });
   state.landmarks.forEach((l) => { if (!l.renderBlob) add(l.render); });
-  state.tours.forEach((t) => { if (t.map && !t.map.blob) add(t.map.file); });
+  state.tours.forEach((t) => (t.maps || []).forEach((m) => { if (!m.blob) add(m.file); }));
   const out = [];
   for (const name of new Set(refs)) {
     try { const r = await fetch(`${state.assetBase}/${name}`); if (r.ok) out.push([name, await r.blob(), 'application/octet-stream']); } catch {}
@@ -3776,7 +3805,7 @@ function wireAdmin() {
     // Aiming a cone: the angle is just the pointer's bearing from that dot's centre,
     // measured clockwise from "up" to match the CSS rotation the cone uses.
     if (tourMapEdit.rotDrag) {
-      const t = curTourMapTour(); const p = t && tourMapPointFor(t, tourMapEdit.rotDrag.nodeId);
+      const m = curTourMapMap(); const p = m && tourMapPointFor(m, tourMapEdit.rotDrag.nodeId);
       if (!p) return;
       const r = els.tourMapCanvas.getBoundingClientRect();
       const dx = (e.clientX - r.left) - p.x * r.width;
@@ -3792,7 +3821,7 @@ function wireAdmin() {
     if (!tourMapEdit.drag) return;
     tourMapEdit.drag.moved = true;
     const { x, y } = tourMapNorm(e);
-    const t = curTourMapTour(); const p = t && tourMapPointFor(t, tourMapEdit.drag.nodeId);
+    const m = curTourMapMap(); const p = m && tourMapPointFor(m, tourMapEdit.drag.nodeId);
     if (!p) return;
     p.x = x; p.y = y;
     // Move the live element directly rather than re-rendering the whole editor on every
@@ -5352,26 +5381,32 @@ function parseTours(d) {
     const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot),
       icon: TOUR_HS_ICON_ORDER.includes(k.icon) ? k.icon : TOUR_HS_ICON_DEFAULT, rot: normDeg(+k?.rot || 0) }))
       .filter((k) => nodeIds.has(k.from) && nodeIds.has(k.to) && k.hotspot);   // drop links to deleted nodes
-    // Optional isometric / floor-plan image for this tour (at most one), plus one dot per
-    // room placed on it in NORMALISED 0..1 coordinates — so the same map renders correctly
-    // at any display size (admin editor at ~900px, client minimap at ~190px) without
-    // storing, or having to rescale, pixel positions. `blob` mirrors `panoBlob` above: it
-    // exists so an unsaved upload survives a session round-trip through IndexedDB.
-    const mSrc = t.map && typeof t.map === 'object' ? t.map : null;
-    const mFile = mSrc ? (mSrc.file || null) : null;
-    // `rot` = which way the view cone points ON THE MAP (degrees clockwise from "up")
-    // when standing in that room at its saved start view. Deliberately anchored to the map
-    // image rather than to real-world north: `state.northDeg`/`facingDir` compass
-    // calibration is optional and, in practice, unset on most rooms (all 9 of anandman's
-    // MODERN VILLA, 2026-09-17) — deriving the cone from it would have aimed every one of
-    // them arbitrarily. This way the admin aims it against the picture they're looking at,
-    // and it stays correct whether or not the compass is ever calibrated.
-    const points = (mSrc && Array.isArray(mSrc.points) ? mSrc.points : [])
-      .map((p) => ({ nodeId: (p && p.nodeId != null ? p.nodeId : '').toString(), x: clamp01(+p.x), y: clamp01(+p.y), rot: normDeg(+p?.rot || 0) }))
-      .filter((p) => nodeIds.has(p.nodeId) && isFinite(p.x) && isFinite(p.y));   // drop dots for deleted rooms
-    const map = (mFile || (mSrc && mSrc.blob)) ? { file: mFile, blob: (mSrc && mSrc.blob) || null, _ver: ver, _url: null, points } : null;
+    // Optional isometric / floor-plan image(s) for this tour — MULTIPLE per tour
+    // (2026-09-18, on request: the client gets a switch button to flip between them, e.g.
+    // separate views/floors of the same site), each with its own dot per room in
+    // NORMALISED 0..1 coordinates — so a map renders correctly at any display size (admin
+    // editor at ~900px, client minimap at ~190px) without storing, or having to rescale,
+    // pixel positions. Accepts the legacy singular `map` key (every file written before
+    // this) by wrapping it as a one-item array, so nothing already saved needs migrating.
+    // `blob` mirrors `panoBlob` above: it exists so an unsaved upload survives a session
+    // round-trip through IndexedDB.
+    const rawMaps = Array.isArray(t.maps) ? t.maps : (t.map && typeof t.map === 'object' ? [t.map] : []);
+    const maps = rawMaps.map((mSrc, mi) => {
+      const mFile = (mSrc && mSrc.file) || null;
+      // `rot` = which way the view cone points ON THE MAP (degrees clockwise from "up")
+      // when standing in that room at its saved start view. Deliberately anchored to the
+      // map image rather than to real-world north: `state.northDeg`/`facingDir` compass
+      // calibration is optional and, in practice, unset on most rooms (all 9 of anandman's
+      // MODERN VILLA, 2026-09-17) — deriving the cone from it would have aimed every one of
+      // them arbitrarily. This way the admin aims it against the picture they're looking
+      // at, and it stays correct whether or not the compass is ever calibrated.
+      const points = (mSrc && Array.isArray(mSrc.points) ? mSrc.points : [])
+        .map((p) => ({ nodeId: (p && p.nodeId != null ? p.nodeId : '').toString(), x: clamp01(+p.x), y: clamp01(+p.y), rot: normDeg(+p?.rot || 0) }))
+        .filter((p) => nodeIds.has(p.nodeId) && isFinite(p.x) && isFinite(p.y));   // drop dots for deleted rooms
+      return { id: (mSrc && mSrc.id ? mSrc.id.toString() : null) || `m${mi + 1}`, file: mFile, blob: (mSrc && mSrc.blob) || null, _ver: ver, _url: null, points };
+    }).filter((m) => m.file || m.blob);
     return { id: (t.id || 't' + (i + 1)).toString(), name: (t.name || '').toString() || ('Tour ' + (i + 1)),
-      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links, map };
+      startNode: (t.startNode && nodeIds.has(t.startNode)) ? t.startNode : (nodes[0] ? nodes[0].id : null), nodes, links, maps };
   }).filter((t) => t.id);
 }
 const clamp01 = (v) => Math.max(0, Math.min(1, +v || 0));
@@ -5384,14 +5419,15 @@ function buildToursData() {
           ...(n.defaultView.facingDir ? { facingDir: n.defaultView.facingDir } : {}) } })),
       links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) },
         icon: k.icon || TOUR_HS_ICON_DEFAULT, rot: Math.round(normDeg(k.rot)) })),
-      ...(t.map && t.map.file ? { map: { file: t.map.file, points: (t.map.points || []).map((p) => ({ nodeId: p.nodeId, x: +(+p.x).toFixed(4), y: +(+p.y).toFixed(4), rot: Math.round(normDeg(p.rot)) })) } } : {}) })) };
+      ...((t.maps || []).some((m) => m.file) ? { maps: t.maps.filter((m) => m.file).map((m) => ({ id: m.id, file: m.file,
+        points: (m.points || []).map((p) => ({ nodeId: p.nodeId, x: +(+p.x).toFixed(4), y: +(+p.y).toFixed(4), rot: Math.round(normDeg(p.rot)) })) })) } : {}) })) };
 }
 // every node pano blob still in memory (fresh import / session restore), for Export + session
 function tourNodeBlobFiles() {
   const out = [];
   state.tours.forEach((t) => {
     t.nodes.forEach((n) => { if (n.panoBlob && n.pano) out.push([baseName(n.pano), n.panoBlob, 'image/jpeg']); });
-    if (t.map?.blob && t.map.file) out.push([baseName(t.map.file), t.map.blob, 'image/png']);   // PNG keeps the render's transparency
+    (t.maps || []).forEach((m) => { if (m.blob && m.file) out.push([baseName(m.file), m.blob, 'image/png']); });   // PNG keeps the render's transparency
   });
   return out;
 }
@@ -5401,7 +5437,7 @@ async function loadToursFile() {
 function setTours(list) {
   state.tours.forEach((t) => {
     t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } });
-    if (t.map?._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
+    (t.maps || []).forEach((m) => { if (m._url) { try { URL.revokeObjectURL(m._url); } catch {} } });
   });
   state.tours = list || [];
   tourSeq = state.tours.reduce((m, t) => { const k = parseInt(String(t.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(k) ? k : 0); }, 0);
@@ -5412,7 +5448,7 @@ function onToursChanged() { if (state.admin) scheduleSessionSave(); }
 const curTour = () => state.tours.find((t) => t.id === state.tourSel) || null;
 
 function addTour() {
-  const t = { id: newTourId(), name: 'Tour ' + (state.tours.length + 1), startNode: null, nodes: [], links: [] };
+  const t = { id: newTourId(), name: 'Tour ' + (state.tours.length + 1), startNode: null, nodes: [], links: [], maps: [] };
   state.tours.push(t); state.tourSel = t.id; state.tourNodeSel = null;
   refreshTourList(); onToursChanged();
   setAxStatus('Tour added — give it a name, then <strong>Add node</strong> to upload each 360° panorama.');
@@ -5421,7 +5457,7 @@ function deleteTour(id) {
   const t = state.tours.find((x) => x.id === id);
   if (t) {
     t.nodes.forEach((n) => { if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} } });
-    if (t.map?._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
+    (t.maps || []).forEach((m) => { if (m._url) { try { URL.revokeObjectURL(m._url); } catch {} } });
   }
   state.tours = state.tours.filter((x) => x.id !== id);
   if (state.tourSel === id) { state.tourSel = state.tours[0]?.id || null; state.tourNodeSel = null; }
@@ -5449,9 +5485,9 @@ function deleteTourNode(tourId, nodeId) {
   const n = t.nodes.find((x) => x.id === nodeId); if (n && n._url) { try { URL.revokeObjectURL(n._url); } catch {} }
   t.nodes = t.nodes.filter((x) => x.id !== nodeId);
   t.links = t.links.filter((k) => k.from !== nodeId && k.to !== nodeId);   // drop links touching it
-  // ...and its dot on the tour map, or the minimap would keep drawing a dot that jumps
+  // ...and its dot on every isometric, or a minimap would keep drawing a dot that jumps
   // nowhere. parseTours filters these out on load too; this is the live-edit half.
-  if (t.map) t.map.points = (t.map.points || []).filter((p) => p.nodeId !== nodeId);
+  (t.maps || []).forEach((m) => { m.points = (m.points || []).filter((p) => p.nodeId !== nodeId); });
   if (t.startNode === nodeId) t.startNode = t.nodes[0]?.id || null;
   if (state.tourNodeSel === nodeId) state.tourNodeSel = null;
   refreshTourList(); onToursChanged();
@@ -5462,20 +5498,23 @@ async function saveToursAs() {
 }
 
 // ─── Tour map (isometric / floor plan with one dot per room) ────────────────────────
-// One image per tour, plus a 0..1 coordinate per room on it. Authored in the admin modal
-// below (click a room, click the map) and shown to the visitor as a corner minimap while
-// that tour is open — the "you are here + jump anywhere" affordance a room list can't
-// give, since a list has no spatial information in it at all.
+// One OR MORE images per tour (2026-09-18: multiple, on request — e.g. separate floors or
+// angles of the same site; the client gets a switch button to flip between them), each with
+// a 0..1 coordinate per room on it. Authored in the admin modal below (click a room, click
+// the map) and shown to the visitor as a corner minimap while that tour is open — the "you
+// are here + jump anywhere" affordance a room list can't give, since a list has no spatial
+// information in it at all.
 //
 // This is a plain <img>, NOT a WebGL texture — so unlike panoImage/groundImage it needs no
 // BUNDLE_IMAGES base64 embedding for the standalone `file://` bundle (same reasoning as
 // the brand logo; see the file:// gotchas in CLAUDE.md).
-function tourMapSrc(t) {
-  if (!t || !t.map) return '';
-  if (t.map.blob) { if (!t.map._url) t.map._url = URL.createObjectURL(t.map.blob); return t.map._url; }
-  return assetUrl(t.map.file, t.map._ver);   // committed path → active project dir, cache-busted
+// Takes a single MAP object (not a tour) — a tour can have several now.
+function tourMapSrc(m) {
+  if (!m) return '';
+  if (m.blob) { if (!m._url) m._url = URL.createObjectURL(m.blob); return m._url; }
+  return assetUrl(m.file, m._ver);   // committed path → active project dir, cache-busted
 }
-const tourHasMap = (t) => !!(t && t.map && (t.map.file || t.map.blob));
+const tourHasMaps = (t) => !!(t && Array.isArray(t.maps) && t.maps.length);
 async function setTourMapFromFile(file) {
   const t = curTour(); if (!t || !file) return;
   // PNG, not JPEG — same call as the brand logo, and for the same reason: an isometric
@@ -5485,17 +5524,20 @@ async function setTourMapFromFile(file) {
   // this is meant to avoid. 1600px is plenty — the largest it's ever drawn is the admin
   // editor (~900px wide); the client minimap is ~340px.
   let out; try { out = await resizeImageToBlob(file, 1600, 'image/png'); } catch { setAxStatus('Could not read that image.'); return; }
-  if (t.map?._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
-  const keep = (t.map && Array.isArray(t.map.points)) ? t.map.points : [];   // replacing the image keeps existing dots
-  t.map = { file: `sample/tour-${t.id}-map.web.png`, blob: out.blob, _ver: '', _url: null, points: keep };
+  if (!Array.isArray(t.maps)) t.maps = [];
+  // Timestamp + running index rather than a plain counter — mirrors the area-filter id
+  // pattern — so an id stays unique even after earlier isometrics have been deleted.
+  const id = 'm' + Date.now().toString(36) + t.maps.length;
+  t.maps.push({ id, file: `sample/tour-${t.id}-map-${id}.web.png`, blob: out.blob, _ver: '', _url: null, points: [] });
   refreshTourList(); onToursChanged();
-  setAxStatus(`Map added to <strong>${esc(t.name)}</strong> — open it to place a dot for each room.`);
+  setAxStatus(`Isometric added to <strong>${esc(t.name)}</strong> — open it to place a dot for each room.`);
 }
-function clearTourMap(tourId) {
-  const t = state.tours.find((x) => x.id === tourId); if (!t || !t.map) return;
-  if (t.map._url) { try { URL.revokeObjectURL(t.map._url); } catch {} }
-  t.map = null;
-  if (tourMapEdit.tourId === tourId) closeTourMapEditor();
+function clearTourMap(tourId, mapId) {
+  const t = state.tours.find((x) => x.id === tourId); if (!t) return;
+  const m = (t.maps || []).find((x) => x.id === mapId); if (!m) return;
+  if (m._url) { try { URL.revokeObjectURL(m._url); } catch {} }
+  t.maps = t.maps.filter((x) => x.id !== mapId);
+  if (tourMapEdit.tourId === tourId && tourMapEdit.mapId === mapId) closeTourMapEditor();
   refreshTourList(); onToursChanged(); renderClientTourMap();
 }
 
@@ -5503,45 +5545,51 @@ function clearTourMap(tourId) {
 // `armed` is the room whose dot the next click on the image will set. Clicking a room in
 // the side list arms it; clicking the image places/moves that room's dot and disarms, so
 // the common case (place every room once, in order) is click-room, click-map, repeat.
-const tourMapEdit = { tourId: null, armed: null, drag: null, dragJustEnded: false, rotDrag: null };
+// `mapId` scopes the whole editor to ONE isometric at a time — opened per-row from the
+// admin's map list (see refreshTourList) rather than the editor offering its own picker,
+// since "which isometric am I placing dots on" is much clearer decided before opening it.
+const tourMapEdit = { tourId: null, mapId: null, armed: null, drag: null, dragJustEnded: false, rotDrag: null };
 let tourMapCone = null;   // the client minimap's single view-cone element (see updateTourMapCone)
-function openTourMapEditor(tourId) {
+let tourMapFlipping = false;   // guards switchTourMap against overlapping flips (see its own comment)
+function openTourMapEditor(tourId, mapId) {
   const t = state.tours.find((x) => x.id === tourId);
-  if (!t || !tourHasMap(t)) return;
-  tourMapEdit.tourId = tourId; tourMapEdit.armed = null; tourMapEdit.drag = null;
+  const m = t && (t.maps || []).find((x) => x.id === mapId);
+  if (!t || !m) return;
+  tourMapEdit.tourId = tourId; tourMapEdit.mapId = mapId; tourMapEdit.armed = null; tourMapEdit.drag = null;
   if (els.tourMapModalTitle) els.tourMapModalTitle.textContent = `🗺 ${t.name || 'Tour'} — place rooms on the map`;
-  if (els.tourMapEditImg) els.tourMapEditImg.src = tourMapSrc(t);
+  if (els.tourMapEditImg) els.tourMapEditImg.src = tourMapSrc(m);
   openCustomModal(els.tourMapModal);
   renderTourMapEditor();
 }
 function closeTourMapEditor() {
-  tourMapEdit.tourId = null; tourMapEdit.armed = null; tourMapEdit.drag = null;
+  tourMapEdit.tourId = null; tourMapEdit.mapId = null; tourMapEdit.armed = null; tourMapEdit.drag = null;
   closeCustomModal(els.tourMapModal);
 }
 const curTourMapTour = () => state.tours.find((t) => t.id === tourMapEdit.tourId) || null;
-function tourMapPointFor(t, nodeId) { return (t.map?.points || []).find((p) => p.nodeId === nodeId) || null; }
+const curTourMapMap = () => { const t = curTourMapTour(); return (t && (t.maps || []).find((m) => m.id === tourMapEdit.mapId)) || null; };
+function tourMapPointFor(m, nodeId) { return (m?.points || []).find((p) => p.nodeId === nodeId) || null; }
 function setTourMapPoint(nodeId, x, y) {
-  const t = curTourMapTour(); if (!t || !t.map) return;
-  const existing = tourMapPointFor(t, nodeId);
+  const m = curTourMapMap(); if (!m) return;
+  const existing = tourMapPointFor(m, nodeId);
   if (existing) { existing.x = clamp01(x); existing.y = clamp01(y); }      // moving keeps its aim
-  else t.map.points.push({ nodeId, x: clamp01(x), y: clamp01(y), rot: 0 });
+  else m.points.push({ nodeId, x: clamp01(x), y: clamp01(y), rot: 0 });
   onToursChanged(); renderTourMapEditor(); renderClientTourMap();
 }
 function setTourMapPointRot(nodeId, deg) {
-  const t = curTourMapTour(); const p = t && tourMapPointFor(t, nodeId); if (!p) return;
+  const m = curTourMapMap(); const p = m && tourMapPointFor(m, nodeId); if (!p) return;
   p.rot = normDeg(deg);
   onToursChanged(); renderClientTourMap();
 }
 function clearTourMapPoint(nodeId) {
-  const t = curTourMapTour(); if (!t || !t.map) return;
-  t.map.points = t.map.points.filter((p) => p.nodeId !== nodeId);
+  const m = curTourMapMap(); if (!m) return;
+  m.points = m.points.filter((p) => p.nodeId !== nodeId);
   onToursChanged(); renderTourMapEditor(); renderClientTourMap();
 }
 function renderTourMapEditor() {
-  const t = curTourMapTour();
-  if (!t || !els.tourMapEditDots || !els.tourMapNodeList) return;
+  const t = curTourMapTour(); const m = curTourMapMap();
+  if (!t || !m || !els.tourMapEditDots || !els.tourMapNodeList) return;
   els.tourMapEditDots.innerHTML = '';
-  (t.map?.points || []).forEach((p) => {
+  (m.points || []).forEach((p) => {
     const n = t.nodes.find((x) => x.id === p.nodeId); if (!n) return;
     // Every dot previews its own view cone, so the admin can see at a glance which rooms
     // are still aimed at the default (straight up) — but only the SELECTED room gets the
@@ -5583,13 +5631,13 @@ function renderTourMapEditor() {
 
   els.tourMapNodeList.innerHTML = '';
   t.nodes.forEach((n) => {
-    const placed = !!tourMapPointFor(t, n.id);
+    const placed = !!tourMapPointFor(m, n.id);
     const row = document.createElement('div');
     row.className = 'tourmap-noderow' + (tourMapEdit.armed === n.id ? ' is-armed' : '') + (placed ? ' is-placed' : '');
     const dot = document.createElement('span'); dot.className = 'tourmap-noderow-dot';
     const nm = document.createElement('span'); nm.className = 'tourmap-noderow-name'; nm.textContent = n.name;
     const st = document.createElement('span'); st.className = 'tourmap-noderow-state';
-    const pt = tourMapPointFor(t, n.id);
+    const pt = tourMapPointFor(m, n.id);
     st.textContent = tourMapEdit.armed === n.id
       ? (placed ? `${Math.round(normDeg(pt.rot))}°` : 'click the map…')
       : (placed ? 'placed' : 'not placed');
@@ -5606,8 +5654,8 @@ function renderTourMapEditor() {
     els.tourMapNodeList.appendChild(row);
   });
   if (els.tourMapModalHint) {
-    const left = t.nodes.filter((n) => !tourMapPointFor(t, n.id)).length;
-    const armedPlaced = tourMapEdit.armed && tourMapPointFor(t, tourMapEdit.armed);
+    const left = t.nodes.filter((n) => !tourMapPointFor(m, n.id)).length;
+    const armedPlaced = tourMapEdit.armed && tourMapPointFor(m, tourMapEdit.armed);
     els.tourMapModalHint.textContent = tourMapEdit.armed
       ? (armedPlaced ? 'Drag the small handle to aim this room’s view cone, or click the map to move the dot.'
         : 'Now click the spot on the map where that room is.')
@@ -5623,23 +5671,81 @@ function tourMapNorm(e) {
 }
 
 // ── Client minimap ──
-// Rebuilt whenever the open tour changes; the ACTIVE dot is re-marked on every room
-// arrival (tourGoTo) without rebuilding, same cheap-update pattern refreshTourRoomMenu
-// uses for the drawer's room list.
+// Wraps into range rather than clamping, so "switch" can always just add 1 — the common
+// case (2 maps) then behaves as a plain toggle back and forth.
+const wrapIndex = (i, len) => (!len ? 0 : ((i % len) + len) % len);
+// Which map is "current" for the open tour. Lives on `state.tourView` itself (not a
+// separate global) so it's naturally scoped to this viewing of this tour and resets to 0
+// the next time ANY tour is entered — `state.tourView` is rebuilt fresh by
+// openClientPanoTour every time, so there's nothing to reset by hand.
+function activeTourMap() {
+  const tour = curTourView(); const maps = (tour && tour.maps) || [];
+  if (!maps.length) return null;
+  if (state.tourView) state.tourView.mapIndex = wrapIndex(state.tourView.mapIndex || 0, maps.length);
+  return maps[state.tourView ? state.tourView.mapIndex : 0];
+}
+// Rebuilt whenever the open tour (or its active map) changes; the ACTIVE dot is re-marked
+// on every room arrival (tourGoTo) without rebuilding, same cheap-update pattern
+// refreshTourRoomMenu uses for the drawer's room list.
 function renderClientTourMap() {
   if (!els.tourMap) return;
   const tour = curTourView();
-  const show = !!(state.tourView && tourHasMap(tour) && (tour.map.points || []).length);
+  const maps = (tour && tour.maps) || [];
+  const map = activeTourMap();
+  // Gate on the TOUR having something worth showing, NOT on the ACTIVE map having dots
+  // (2026-09-18 fix). Requiring dots on the active one made sense while a tour had exactly
+  // one map — a lone dot-less map does nothing — but with several it meant switching to a
+  // newly-added isometric the admin hadn't placed dots on yet hid the WHOLE minimap, switch
+  // button and all, so there was no way to switch back. An unplaced map still shows; it
+  // just draws no dots until the admin places some.
+  const show = !!(state.tourView && map && maps.some((m) => (m.points || []).length));
   els.tourMap.hidden = !show;
   // The map takes over the compass's own top-right slot for the duration (on request —
   // the reference tour shows a map there and no compass at all). A body class rather than
   // touching .compass directly, so the compass keeps owning its own styling and simply
   // yields the corner; removed again the moment the map goes away.
   document.body.classList.toggle('tour-map-on', show);
-  if (!show) { if (els.tourMapDots) els.tourMapDots.innerHTML = ''; tourMapCone = null; return; }
+  if (!show) {
+    if (els.tourMapDots) els.tourMapDots.innerHTML = '';
+    if (els.tourMapSwitch) els.tourMapSwitch.hidden = true;
+    if (els.tourMapPips) els.tourMapPips.hidden = true;
+    if (els.tourMapHide) els.tourMapHide.hidden = true;
+    tourMapCone = null;
+    return;
+  }
+  // Dismissed by the visitor: `.tour-map` itself stays rendered (NOT `hidden`) so the
+  // restore button survives — CSS collapses the image/dots/switch/pips and repositions the
+  // one remaining button into the corner. Everything below still builds normally, so
+  // un-hiding is instant and already correct rather than needing a rebuild.
+  const dismissed = !!state.tourMapHidden;
+  els.tourMap.classList.toggle('is-map-hidden', dismissed);
+  if (els.tourMapHide) {
+    els.tourMapHide.hidden = false;
+    els.tourMapHide.title = dismissed ? 'Show the map' : 'Hide the map';
+    els.tourMapHide.setAttribute('aria-label', dismissed ? 'Show the map' : 'Hide the map');
+    els.tourMapHide.setAttribute('aria-pressed', String(dismissed));
+  }
   if (els.tourMapImg) {
-    const src = tourMapSrc(tour);
+    const src = tourMapSrc(map);
     if (els.tourMapImg.getAttribute('src') !== src) els.tourMapImg.src = src;
+  }
+  // The switch button + its pagination pips only make sense with 2+ isometrics — a single
+  // map has nothing to switch TO, so both stay hidden rather than showing a dead control.
+  // (While dismissed, CSS hides them regardless of this.)
+  if (els.tourMapSwitch) els.tourMapSwitch.hidden = maps.length < 2;
+  // Tells the CSS whether the hide button needs to shift left to clear the switch, or can
+  // sit in the corner alone (see .tour-map.has-switch).
+  els.tourMap.classList.toggle('has-switch', maps.length >= 2);
+  if (els.tourMapPips) {
+    els.tourMapPips.hidden = maps.length < 2;
+    els.tourMapPips.innerHTML = '';
+    if (maps.length >= 2) {
+      const idx = state.tourView.mapIndex || 0;
+      maps.forEach((_, i) => {
+        const pip = document.createElement('span'); pip.className = 'tour-map-pip' + (i === idx ? ' is-on' : '');
+        els.tourMapPips.appendChild(pip);
+      });
+    }
   }
   if (!els.tourMapDots) return;
   els.tourMapDots.innerHTML = '';
@@ -5650,7 +5756,7 @@ function renderClientTourMap() {
   tourMapCone.className = 'tour-map-cone';
   tourMapCone.hidden = true;
   els.tourMapDots.appendChild(tourMapCone);
-  tour.map.points.forEach((p) => {
+  map.points.forEach((p) => {
     const n = tour.nodes.find((x) => x.id === p.nodeId); if (!n) return;
     const b = document.createElement('button');
     b.type = 'button';
@@ -5663,14 +5769,74 @@ function renderClientTourMap() {
   });
   updateTourMapActive();
 }
+// Flips to the next isometric with a smooth 3D rotation — the whole `.tour-map-inner` (image
+// + dots together, so they turn as one unit rather than the dots floating over a spinning
+// picture) rotates to its edge, the image/dots are swapped while invisible edge-on, then it
+// rotates back to reveal the new one. Timeout-based rather than a `transitionend` listener:
+// simpler, and this codebase already times CSS transitions this way elsewhere (the drawer/
+// gallery fades) — a transition running on a single `transform` property has no multi-event
+// ambiguity to worry about. The 220ms half-duration must match `.tour-map-inner.is-flipping`
+// in styles.css; if that duration changes, this does too.
+// Visitor can dismiss the minimap entirely (2026-09-18, on request). Deliberately a
+// TOGGLE on one button rather than a one-way close: the button stays in the same corner
+// either way and just swaps its icon, so there's always an obvious way back — a dismiss
+// with no restore would strand a visitor who tapped it by accident.
+//
+// The compass is deliberately NOT restored while the map is dismissed (`tour-map-on` stays
+// on for the whole tour): it would reoccupy this exact corner and collide with the restore
+// button, and a tour compass is usually uncalibrated anyway (most rooms leave `facingDir`
+// unset — see the `rot` note in parseTours), so bringing it back buys nothing here.
+function toggleTourMapHidden() {
+  state.tourMapHidden = !state.tourMapHidden;
+  try { localStorage.setItem('b91-tour-map-hidden', state.tourMapHidden ? '1' : '0'); } catch {}
+  renderClientTourMap();
+}
+function switchTourMap() {
+  const tour = curTourView(); const maps = (tour && tour.maps) || [];
+  if (!state.tourView || maps.length < 2) return;
+  if (tourMapFlipping) return;                       // ignore taps mid-flip rather than stacking them
+  const next = wrapIndex((state.tourView.mapIndex || 0) + 1, maps.length);
+  if (!els.tourMapInner) { state.tourView.mapIndex = next; renderClientTourMap(); return; }
+
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    tourMapFlipping = false;
+    els.tourMapInner?.classList.remove('is-flipping');   // transitions 90deg -> 0, the reveal half
+    // The tour can be exited mid-flip (a pending timer always outlives the thing that
+    // scheduled it) — bail on the index write, but only AFTER clearing the class/flag
+    // above, or the minimap would be left stranded edge-on and permanently un-switchable
+    // the next time a tour opens.
+    if (!state.tourView) return;
+    state.tourView.mapIndex = next;
+    renderClientTourMap();
+  };
+  // Wait for BOTH the turn and the image before revealing. The turn alone isn't enough: an
+  // isometric is a ~1-2MB PNG that isn't in cache the first time it's shown, so swapping
+  // `src` and rotating back in the same tick revealed an image that hadn't downloaded yet —
+  // i.e. a blank map, which is exactly the "not visible" this fixes. Preloading runs in
+  // PARALLEL with the rotation, so an already-cached image costs nothing extra.
+  let turned = false, ready = false;
+  const bothDone = () => { if (turned && ready) commit(); };
+  const pre = new Image();
+  pre.onload = pre.onerror = () => { ready = true; bothDone(); };   // onerror too: a broken
+  pre.src = tourMapSrc(maps[next]);                                 // image must not wedge it
+  // ...and a hard cap so a slow network can't leave the map stranded edge-on (invisible)
+  // indefinitely. Past this we reveal regardless and let the <img> finish on its own.
+  setTimeout(() => { ready = true; bothDone(); }, 1500);
+
+  tourMapFlipping = true;
+  els.tourMapInner.classList.add('is-flipping');
+  setTimeout(() => { turned = true; bothDone(); }, 220);            // matches the CSS duration
+}
 function updateTourMapActive() {
   if (!els.tourMapDots || !state.tourView) return;
   els.tourMapDots.querySelectorAll('.tour-map-dot').forEach((b) => {
     b.classList.toggle('is-here', b.dataset.nodeId === state.tourView.nodeId);
   });
   // Park the cone on the room the visitor is actually in; updateTourMapCone aims it.
-  const tour = curTourView();
-  const p = tour && (tour.map?.points || []).find((q) => q.nodeId === state.tourView.nodeId);
+  const map = activeTourMap();
+  const p = map && (map.points || []).find((q) => q.nodeId === state.tourView.nodeId);
   if (tourMapCone) {
     tourMapCone.hidden = !p;
     if (p) {
@@ -5697,7 +5863,8 @@ function updateTourMapActive() {
 function updateTourMapCone() {
   if (!tourMapCone || tourMapCone.hidden || !state.tourView) return;
   const tour = curTourView(); if (!tour) return;
-  const p = (tour.map?.points || []).find((q) => q.nodeId === state.tourView.nodeId);
+  const map = activeTourMap();
+  const p = map && (map.points || []).find((q) => q.nodeId === state.tourView.nodeId);
   const node = tour.nodes.find((n) => n.id === state.tourView.nodeId);
   if (!p || !node) return;
   const lonDeg = state.view.lon * 180 / Math.PI;
@@ -5749,32 +5916,33 @@ function refreshTourList() {
       add.addEventListener('click', (e) => { e.stopPropagation(); els.axTourNodeFile?.click(); });
       ed.appendChild(add);
 
-      // ── Tour map (one isometric / floor plan per tour) ──
+      // ── Tour map (one OR MORE isometrics / floor plans per tour, 2026-09-18) ──
       // Sits right under Add-node because it's the same kind of action (upload an asset
       // that belongs to this tour), and because placing dots only makes sense once the
-      // rooms it points at exist.
+      // rooms it points at exist. Each isometric gets its own row — the client shows a
+      // switch button to flip between them once there are 2+ (see renderClientTourMap).
       const mapBox = document.createElement('div'); mapBox.className = 'ax-tour-map';
-      if (tourHasMap(t)) {
-        const placed = (t.map.points || []).filter((p) => t.nodes.some((n) => n.id === p.nodeId)).length;
+      const maps = t.maps || [];
+      maps.forEach((m, mi) => {
+        const placed = (m.points || []).filter((p) => t.nodes.some((n) => n.id === p.nodeId)).length;
         const row = document.createElement('div'); row.className = 'ax-tour-maprow';
-        const thumb = document.createElement('img'); thumb.className = 'ax-tour-mapthumb'; thumb.src = tourMapSrc(t); thumb.alt = '';
+        const thumb = document.createElement('img'); thumb.className = 'ax-tour-mapthumb'; thumb.src = tourMapSrc(m); thumb.alt = '';
         const meta = document.createElement('span'); meta.className = 'ax-tour-mapmeta';
-        meta.textContent = `${placed}/${t.nodes.length} room${t.nodes.length === 1 ? '' : 's'} placed`;
-        const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'ax-lm-del'; rm.textContent = '×'; rm.title = 'Remove this tour’s map';
-        rm.addEventListener('click', (e) => { e.stopPropagation(); clearTourMap(t.id); });
-        row.append(thumb, meta, rm); mapBox.appendChild(row);
-        const openMap = document.createElement('button'); openMap.type = 'button'; openMap.className = 'btn btn-ghost ax-tour-mapopen';
-        openMap.textContent = '🗺 Open map to place dots';
-        openMap.title = 'Place one dot per room on the map — visitors use it to jump between rooms';
-        openMap.addEventListener('click', (e) => { e.stopPropagation(); openTourMapEditor(t.id); });
-        mapBox.appendChild(openMap);
-      } else {
-        const upl = document.createElement('button'); upl.type = 'button'; upl.className = 'btn btn-ghost ax-tour-mapadd';
-        upl.textContent = '🗺 Upload isometric / floor plan';
-        upl.title = 'One map image per tour — then place a dot for each room on it';
-        upl.addEventListener('click', (e) => { e.stopPropagation(); els.axTourMapFile?.click(); });
-        mapBox.appendChild(upl);
-      }
+        meta.textContent = `Isometric ${mi + 1} · ${placed}/${t.nodes.length} placed`;
+        const openMap = document.createElement('button'); openMap.type = 'button'; openMap.className = 'ax-tour-mapopenrow';
+        openMap.textContent = '🗺'; openMap.title = 'Place rooms on this isometric';
+        openMap.addEventListener('click', (e) => { e.stopPropagation(); openTourMapEditor(t.id, m.id); });
+        const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'ax-lm-del'; rm.textContent = '×'; rm.title = 'Remove this isometric';
+        rm.addEventListener('click', (e) => { e.stopPropagation(); clearTourMap(t.id, m.id); });
+        row.append(thumb, meta, openMap, rm); mapBox.appendChild(row);
+      });
+      const addMap = document.createElement('button'); addMap.type = 'button'; addMap.className = 'btn btn-ghost ax-tour-mapadd';
+      addMap.textContent = maps.length ? '＋ Add another isometric' : '🗺 Upload isometric / floor plan';
+      addMap.title = maps.length
+        ? 'Add another view (e.g. a different floor or angle) — visitors get a switch button to flip between them'
+        : 'Upload an isometric or floor-plan image, then place a dot for each room on it';
+      addMap.addEventListener('click', (e) => { e.stopPropagation(); els.axTourMapFile?.click(); });
+      mapBox.appendChild(addMap);
       ed.appendChild(mapBox);
 
       // ── Hotspot authoring, only while this tour is open in the viewer ──
@@ -6562,7 +6730,12 @@ function renderClientSidebar() {
       ? tree.find((n) => n.contentType === 'aerial' && n.enabled !== false)?.id
       : null;
     const html = tree
-      .filter((node) => node.enabled !== false)
+      // The VIRTUAL TOUR row itself is pointless while already inside one — reported
+      // 2026-09-18 from the single-tour/single-room case (the one scenario where the root
+      // list stays visible alongside "✕ EXIT TOUR", per the comment above): tapping it
+      // again would just re-open the same tour from the same room. `node.builtin==='tour'`
+      // is the one stable way to identify it regardless of what it's been renamed to.
+      .filter((node) => node.enabled !== false && !(state.tourView && node.builtin === 'tour'))
       .map((node) => {
         const title = (node.title || 'ITEM').trim().toUpperCase();
         const drills = menuRowOpensSubmenu(node);
@@ -6591,11 +6764,22 @@ function renderClientSidebar() {
 
     const currentParent = stack[stack.length - 1];
     const container = $('catSubMenuNav');
+    // The submenu heading (repeating the folder's own name back at the visitor — "GALLERY"
+    // atop the gallery list, "VIRTUAL TOUR" atop the tour picker) was dropped 2026-09-18 on
+    // request, across every folder: they've just tapped that exact row, so the name is
+    // still fresh on screen and the heading read as redundant. `hidden`, not emptied text —
+    // `.cat-drawer-head` is `justify-content: space-between` between this and the back
+    // button, and hiding it removes it from that flex layout entirely rather than leaving a
+    // zero-width span the back button has to share the row with for no reason.
     const titleEl = $('catSubMenuTitle');
-    if (titleEl) titleEl.textContent = (currentParent.title || 'SUB MENU').trim().toUpperCase();
+    if (titleEl) titleEl.hidden = true;
 
     if (!container) return;
-    const children = Array.isArray(currentParent.children) ? currentParent.children : [];
+    // Same exclusion as the root list, for a folder the admin has dragged the builtin
+    // VIRTUAL TOUR row into — it shouldn't turn up as a re-openable item inside a
+    // submenu while already touring either.
+    const children = (Array.isArray(currentParent.children) ? currentParent.children : [])
+      .filter((node) => !(state.tourView && node.builtin === 'tour'));
 
     if (!children.length) {
       container.innerHTML = `<p style="padding:14px; font-size:12px; color:var(--text-mute);">No items inside this category.</p>`;
@@ -8970,7 +9154,7 @@ function closeCustomModal(modalEl) {
 // Must match VERSION in sw.js — used to version the offline-banner localStorage keys so
 // bumping the SW version automatically re-shows the banner to users who dismissed it
 // under the old version (they need to re-download into the new cache namespace).
-const SW_VERSION = 'v8';
+const SW_VERSION = 'v12';
 // sw.js caches the app shell + project data + on-demand video so the client experience
 // keeps working with no signal once it's been opened at least once online. Never
 // registered on ?admin=1 pages — sw.js's own admin passthrough is a second guard for the
@@ -9148,7 +9332,7 @@ function collectOfflineAssets() {
   for (const t of state.tours || []) for (const n of t.nodes || []) if (n.pano) add(assetUrl(n.pano), 'image');
   // Tour minimap images — same reasoning as the room panoramas above: only requested once
   // a tour with a map is actually opened, so runtime caching alone would never reach them.
-  for (const t of state.tours || []) if (t.map?.file) add(assetUrl(t.map.file, t.map._ver), 'image');
+  for (const t of state.tours || []) for (const m of t.maps || []) if (m.file) add(assetUrl(m.file, m._ver), 'image');
 
   // Custom menu tree — mirrors server.py's scan_menu_for_online_content's walk of the same
   // shape, but collecting local files to prefetch instead of flagging external ones. Plot

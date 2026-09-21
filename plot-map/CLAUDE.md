@@ -556,29 +556,53 @@ Top-down, by section header:
   dispatches to `openClientPanoTour` — distinct from `tour`, which iframes an *external*
   3DVista/Kuula URL/file. Wizard: 🧭 card + `renderWizardTourPicker` (warns on a tour with
   no nodes / no links) + `wizardState.tourId`.
-  **Tour map / minimap (2026-09-17, modelled on the reference tour's top-right "radar"):**
-  one isometric-or-floor-plan image per tour (`t.map`, see the `tour.json` contract below)
-  with a dot per room. `tourMapSrc(t)` (blob > cache-busted committed path, mirroring
-  `renderSrc`), `tourHasMap`, `setTourMapFromFile`/`clearTourMap`; admin editor
-  `openTourMapEditor`/`renderTourMapEditor`/`setTourMapPoint`/`clearTourMapPoint` +
-  `tourMapNorm` (pointer → 0..1) driving the `#tourMapModal` — click a room to arm it, click
-  the map to drop its dot, drag to fine-tune. Client `renderClientTourMap()` (rebuilds
-  `#tourMap`, called from `openClientPanoTour`) + `updateTourMapActive()` (re-marks the
-  current room only, called from `tourGoTo` — same cheap-update split as
-  `refreshTourRoomMenu`). **The minimap OWNS the compass's top-right slot while it's up** —
-  `renderClientTourMap` toggles `body.tour-map-on`, whose only job is
+  **Tour map / minimap (2026-09-17, modelled on the reference tour's top-right "radar";
+  extended 2026-09-18 to MULTIPLE isometrics per tour with a client switch button):** each
+  tour holds an ARRAY of isometric-or-floor-plan images (`t.maps`, see the `tour.json`
+  contract below — `parseTours` also accepts the old singular `t.map` and migrates it),
+  each with its own dot per room. `tourMapSrc(m)` (takes ONE map object, not a tour — blob >
+  cache-busted committed path, mirroring `renderSrc`), `tourHasMaps`,
+  `setTourMapFromFile` (now APPENDS a new map rather than replacing)/`clearTourMap(tourId,
+  mapId)`; admin editor state `tourMapEdit` carries both `tourId` AND `mapId` (scoped to
+  ONE isometric at a time — opened per-row via `openTourMapEditor(tourId, mapId)` from the
+  admin's per-map row list, `curTourMapMap()` resolves the live object), driving
+  `renderTourMapEditor`/`setTourMapPoint`/`clearTourMapPoint`/`tourMapNorm` (pointer → 0..1)
+  inside `#tourMapModal` — click a room to arm it, click the map to drop its dot, drag to
+  fine-tune. Client `activeTourMap()` resolves which map is showing from
+  `state.tourView.mapIndex` (lives ON `state.tourView`, not a separate global, so it resets
+  to 0 automatically every fresh tour entry — `state.tourView` itself is rebuilt each time)
+  via `wrapIndex(i, len)` (wraps, doesn't clamp — a plain `+1` is always a valid "next").
+  `renderClientTourMap()` (rebuilds `#tourMap`, called from `openClientPanoTour`) +
+  `updateTourMapActive()` (re-marks the current room only, called from `tourGoTo` — same
+  cheap-update split as `refreshTourRoomMenu`). **The minimap OWNS the compass's top-right
+  slot while it's up** — `renderClientTourMap` toggles `body.tour-map-on`, whose only job is
   `body.tour-map-on .compass { display: none }` (revised 2026-09-17 from an earlier
   below-the-compass position, on request, matching the reference tour which shows a map
-  there and no compass). It renders nothing unless the tour has a map AND at least one
-  placed dot. **The `<img>` must stay `width:100%; height:auto`** (no `object-fit`): the
-  dots are positioned in % of that box, so a letterboxed image would silently offset every
-  dot. It is drawn **bare** — no panel/border/background, `drop-shadow` filter (not
-  `box-shadow`, which would outline the transparent rectangle instead of the render), and
-  the map image is imported as **PNG** precisely to keep that transparency (JPEG would bake
-  an opaque white box behind it). The container is `pointer-events: none` so drags pan the
-  panorama straight through it; **the dots must keep `pointer-events: auto`** or `pick()`'s
-  `elementFromPoint` hit-test can't see them — see the pointer-capture gotcha below, which
-  is also why a dot's own click handler is not what navigates in the client.
+  there and no compass). It renders nothing unless the active map has at least one placed
+  dot. **The `<img>` must stay `width:100%; height:auto`** (no `object-fit`): the dots are
+  positioned in % of that box, so a letterboxed image would silently offset every dot. It is
+  drawn **bare** — no panel/border/background, `drop-shadow` filter (not `box-shadow`, which
+  would outline the transparent rectangle instead of the render), and every map image is
+  imported as **PNG** precisely to keep that transparency (JPEG would bake an opaque white
+  box behind it). The container is `pointer-events: none` so drags pan the panorama straight
+  through it; **the dots (and the switch button) must keep `pointer-events: auto`** or
+  `pick()`'s `elementFromPoint` hit-test can't see them — see the pointer-capture gotcha
+  below, which is also why a dot's/the switch's own click handler is not what navigates in
+  the client (`pick()` is, checked before the dots since it's drawn on top).
+  **The switch button (`#tourMapSwitch`) + pagination pips (`#tourMapPips`) are only shown
+  with 2+ maps**, and — critically — **both sit OUTSIDE `#tourMapInner`, as its siblings, not
+  its children**: `switchTourMap()` rotates `#tourMapInner` (image + dots as one unit) via
+  `.is-flipping { transform: rotateY(90deg) }` for 220ms, swaps the image/dots while it's
+  edge-on/invisible, then removes the class to reveal the new one — if the switch button were
+  INSIDE that rotating element it would spin away with it instead of staying put as a fixed
+  control. `perspective` lives one level up, on `.tour-map` itself, since a 3D transform
+  needs perspective on an ANCESTOR, not the transformed element — putting it on
+  `#tourMapInner` directly reads as a flat squash instead of a turn. The 220ms `setTimeout`
+  in `switchTourMap` and the CSS `transition: transform .22s` must stay in lockstep if either
+  is ever changed. The switch is ALSO wired with a plain `click` listener once in
+  `wireViewControls` (not just `pick()`) — a keyboard Enter/Space on a focused real
+  `<button>` fires `click` directly without ever touching `#pano`'s pointer capture, so
+  `pick()` alone would leave it unreachable from the keyboard.
 - **Brochure PDF viewer** — `openClientBrochureModal` (iframe on iOS/desktop; pdf.js
   canvases on Android, which has no inline PDF viewer — see **Conventions & gotchas**),
   `loadPdfJs` (on-demand classic-script load of the vendored UMD build; sets
@@ -800,6 +824,13 @@ carries a `seen` set + 8-hop cap because a round-tripped tree could point a fold
 ancestor and walking that inside a click handler hangs the page. Autoplay is NOT part of
 this — `openClientVideoModal` already calls `play()` and the YouTube/Vimeo embed builders
 already append `autoplay=1`; the extra tap was the whole problem.
+**The submenu no longer shows a heading** (2026-09-18, on request, applied to every
+folder): `renderClientSidebar`'s submenu branch sets `#catSubMenuTitle`'s `hidden` rather
+than writing the folder's name into it — the name is what the visitor just tapped, so
+repeating it as a title read as redundant. Just the back arrow remains in
+`.cat-drawer-head`. If this ever needs reverting, note `#catSubMenuTitle` has no `display`
+rule anywhere (checked against the repeated `[hidden]`-vs-class-`display` trap below before
+relying on `hidden` alone), so it's safe to toggle via the attribute either way.
 `activateMenuNode`/`openNodeContent`/`openClientVideoModal` all take an **`autoOpen`**
 flag (added 2026-09-09, threaded through from `fireAutoOpen` — see the boot section) that
 a real click never sets. **A click IS the user gesture browser autoplay policies require
@@ -940,7 +971,7 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
 - **`tour.json`** (added 2026-09-08, VIRTUAL-TOUR Phase 1) — `{ version, tours:[{ id, name,
   startNode, nodes:[{ id, name, pano{file}, defaultView{lonDeg,latDeg,fov} }],
   links:[{ from, to, hotspot{lonDeg,latDeg}, label, icon, rot }],
-  map?:{ file, points:[{ nodeId, x, y }] } }] }`. **Many independent tours per
+  maps?:[{ id, file, points:[{ nodeId, x, y, rot }] }] }] }`. **Many independent tours per
   project** (OQ-4); each node's `pano` is a texture-safe `.web.jpg` (basename-resolved, named
   `tour-<tourId>-<nodeId>.web.jpg` on import). Absent ⇒ no tours. `links` is the hotspot
   graph (authored in the viewer — next step); today it's written but empty. A menu item will
@@ -948,21 +979,27 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   A link's **`icon`** (`chevron`|`stairs`|`door`|`ring`) and **`rot`** (degrees clockwise
   from "up", only meaningful for the aimable icons) were added 2026-09-18 — absent ⇒ an
   unaimed chevron, so links written before it need no migration.
-  **`map`** (added 2026-09-17) is the tour's optional isometric / floor-plan image
-  (`tour-<tourId>-map.web.png` — **PNG, to keep the render's transparency**, see the
-  `resizeImageToBlob` gotcha) plus one dot per room. Each point also carries **`rot`**: the
-  on-map direction (degrees clockwise from "up") the camera faces at that room's SAVED
-  START VIEW, which drives the live view cone (`updateTourMapCone`). **It is anchored to
-  the map image, NOT to `northDeg`/`facingDir`** — compass calibration is optional and was
-  unset on every room of the only mapped tour when this shipped, so deriving the cone from
-  it would have aimed them all arbitrarily; don't "improve" this by routing it through the
-  compass unless every room is guaranteed calibrated. **`x`/`y` are NORMALISED 0..1, not
-  pixels** — deliberately, so the one stored position renders correctly in both the admin
-  editor (~900px wide) and the client minimap (~190px) with no rescaling step; keep any new
-  consumer reading them as fractions of the rendered image box. Absent ⇒ no minimap, and
-  `buildToursData` omits the key entirely so pre-existing tour.json files round-trip
-  unchanged. Dots whose `nodeId` no longer exists are dropped on load (`parseTours`) and on
-  delete (`deleteTourNode`) — a dot that jumps nowhere is worse than no dot.
+  **`maps`** (added 2026-09-17, plural since 2026-09-18) is the tour's isometric / floor-plan
+  image(s) — a tour can now carry SEVERAL (e.g. separate floors, or different angles of the
+  same site), and the client gets a switch button to flip between them (see the code map's
+  Virtual tours section for the flip mechanics). Each is a PNG (`tour-<tourId>-map-<id>.web.png`
+  — **PNG specifically, to keep the render's transparency**, see the `resizeImageToBlob`
+  gotcha) plus one dot per room. **`parseTours` also accepts the legacy singular `map` key**
+  (every tour.json written before 2026-09-18) by wrapping it as a one-item `maps` array — no
+  existing file needs migrating, and it gets written back out under the new key on next save.
+  Each point carries **`rot`**: the on-map direction (degrees clockwise from "up") the camera
+  faces at that room's SAVED START VIEW, which drives the live view cone (`updateTourMapCone`).
+  **It is anchored to the map image, NOT to `northDeg`/`facingDir`** — compass calibration is
+  optional and was unset on every room of the only mapped tour when this shipped, so deriving
+  the cone from it would have aimed them all arbitrarily; don't "improve" this by routing it
+  through the compass unless every room is guaranteed calibrated. **`x`/`y` are NORMALISED
+  0..1, not pixels** — deliberately, so the one stored position renders correctly in both the
+  admin editor (~900px wide) and the client minimap (~190px) with no rescaling step; keep any
+  new consumer reading them as fractions of the rendered image box. Absent/empty ⇒ no
+  minimap, and `buildToursData` omits the key entirely so a project that never touches this
+  feature round-trips unchanged. Dots whose `nodeId` no longer exists are dropped on load
+  (`parseTours`) and on delete (`deleteTourNode`) — a dot that jumps nowhere is worse than no
+  dot; both now loop over every map in the array, not just one.
 - **Images** — the pano (`panoImage.file`) and drape/plan PNG; auto-resized on import to
   texture-safe `.web.jpg`/`.web.png`. No pano ⇒ a generated `fallbackPanoTexture()` (plain
   sky) so the app still runs. The repo `.gitignore` ignores `*.png/*.jpg/*.jpeg`, so

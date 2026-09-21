@@ -10,3 +10,7 @@
 __pycache__/
 plot-map/cloudflared.exe
 plot-map/tools/
+
+# Source video originals - too large for GitHub (100 MB limit); kept locally only
+plot-map/projects/*/.originals/
+plot-map/projects/*/_originals/

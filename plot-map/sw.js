@@ -37,8 +37,21 @@
 // isRangedCacheablePath names since "video" no longer describes what they cover. PDFs were
 // previously falling through to the plain staleWhileRevalidate path, where pdf.js's several
 // different-byte-range 206 responses for the same file kept overwriting each other under
-// one cache key — the brochure could never actually be reconstructed offline.
-const VERSION = 'v8';
+// one cache key — the brochure could never actually be reconstructed offline. v9: a batch
+// of client-side app.js fixes (2026-09-18, incl. the VIRTUAL TOUR menu-row fix below) were
+// reported as "still there" on a mobile client — an already-installed worker was still
+// serving the OLD app.js out of its v8 shell cache, since a plain page reload never re-hits
+// the network for anything the shell cache already has an entry for. Bumped so that shell
+// gets discarded and re-fetched; per the policy above, this does NOT touch a visitor's
+// downloaded offline content (data/media aren't version-namespaced). v10: same session,
+// one more app.js change (submenu header text removed) landed right after v9 — bumped
+// again rather than assuming no client had already picked up v9 in between. v11: tour
+// maps went from one isometric per tour to several, with a client switch button + a 3D
+// flip transition (2026-09-18) — a substantial app.js/index.html/styles.css change,
+// bumped per this file's policy of one per shell-affecting change. v12: fixes to that
+// same feature (switching to a dot-less isometric hid the whole minimap; the flip revealed
+// an image that hadn't downloaded yet).
+const VERSION = 'v12';
 // Only the SHELL is version-namespaced. The shell is CODE (app.js/styles/vendor) — a new
 // deploy genuinely invalidates it, and it's ~2MB, cheap to re-fetch.
 //

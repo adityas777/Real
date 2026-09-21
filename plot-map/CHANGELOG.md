@@ -5,6 +5,240 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-18 (Fix: switching isometrics showed nothing)
+
+Reported immediately after the feature below shipped. Two independent causes, either of
+which produces the same "the isometric is not visible" symptom:
+
+**1. The visibility gate required the ACTIVE map to have dots.** `renderClientTourMap`
+computed `show` from `(map.points || []).length` — correct while a tour had exactly one
+map (a lone dot-less map does nothing), but with several it meant switching to a
+just-added isometric the admin hadn't placed dots on yet hid the ENTIRE minimap — switch
+button included, so there was no way to switch back. Now gated on the TOUR having at least
+one map with dots (`maps.some(...)`), so an unplaced map still displays; it just draws no
+dots until dots are placed. A tour whose maps are ALL unplaced still shows nothing, which
+preserves the original intent.
+
+**2. The flip revealed an image that hadn't downloaded.** `switchTourMap` swapped `src` and
+rotated back in the same tick. An isometric is a ~1–2MB PNG that isn't in cache the first
+time it's shown, so the reveal landed on a blank `<img>`. It now preloads the next image
+**in parallel with** the 220ms rotation and reveals only once BOTH are done — so a cached
+image costs nothing extra, while a cold one waits. Guarded three ways: `onerror` counts as
+"ready" (a broken image must not wedge the flip), a 1500ms hard cap reveals regardless
+rather than leaving the map stranded edge-on/invisible on a slow network, and a
+`tourMapFlipping` flag ignores taps mid-flip instead of stacking overlapping flips.
+Exiting the tour mid-flip is handled too — the pending timer outlives the tour, so `commit`
+clears the class and flag BEFORE bailing on the index write, or the next tour would open to
+a minimap stuck edge-on and permanently un-switchable.
+
+Verified with a Node simulation of the real commit-gating across four scenarios: a cached
+image reveals at ~224ms (the turn is the limit, no added latency), a 600ms image waits for
+the image not just the turn, a never-loading image is rescued by the cap at ~1500ms, and a
+mid-flip tour exit neither crashes nor leaves the flag/class set. Also re-verified the
+visibility gate directly: active-map-with-dots shows, active-map-without-dots now ALSO
+shows (the bug), a tour with no dots anywhere stays hidden, and no open tour stays hidden.
+`sw.js`/`SW_VERSION` bumped v11→v12 so this reaches already-installed mobile clients.
+Files: `app.js`, `sw.js`.
+
+---
+
+## 2026-09-18 (Tours: multiple isometrics per tour, with a client switch button + 3D flip)
+
+On request: admin can now add several isometric/floor-plan images to one tour (e.g.
+separate floors, or different angles of the same site), and the client gets a small switch
+button in the minimap's corner to flip between them with a smooth rotation.
+
+**Data model — `map` (singular) → `maps` (array), with the old format still readable.**
+`parseTours` now accepts either the new `maps` array or the legacy singular `map` key
+(every tour.json written before today), wrapping the latter as a one-item array — so
+anandman's existing 9-dot MODERN VILLA isometric loads and works unchanged, and simply
+gets written back out as `maps: [...]` the next time it's saved (`buildToursData` no
+longer emits the old key at all). Every function that touched `t.map` was updated to work
+across `t.maps` instead: `deleteTourNode`'s dot cleanup, `tourNodeBlobFiles`/
+`fetchReferencedImages`/`collectOfflineAssets` (export, save-as-clone, offline download),
+`buildSession` (IndexedDB). Along the way, found and fixed two **real memory leaks**
+predating this change — `setTours`/`deleteTour` revoked a blob URL under the since-removed
+`t.map` key, which was already dead code doing nothing; now they revoke every map's URL.
+
+**Admin:** each tour's map section now lists every isometric as its own row (thumbnail,
+"Isometric N · X/Y placed", an open-editor icon, a delete), with **"＋ Add another
+isometric"** always available. The dot-placement editor (`tourMapEdit`) gained a `mapId`
+alongside `tourId`, so it's scoped to exactly one isometric at a time — opened per-row
+rather than the editor offering its own picker, since deciding "which isometric" before
+opening it is much clearer than switching mid-edit. `setTourMapFromFile` now APPENDS a new
+map (unique id via the same timestamp pattern the area-filter ids use) instead of replacing
+the tour's one map; `clearTourMap(tourId, mapId)` removes just that one.
+
+**Client:** `activeTourMap()` tracks which isometric is showing on `state.tourView.mapIndex`
+— not a separate global, so it's naturally scoped to this viewing of this tour and resets
+to 0 automatically next time, since `state.tourView` is rebuilt fresh on every tour entry.
+The switch button and its pagination pips (`#tourMapSwitch`/`#tourMapPips`) are hidden
+outright with fewer than 2 maps — nothing to switch to. **Both sit OUTSIDE
+`#tourMapInner`** so they stay fixed and readable while the image flips rather than
+spinning along with it. Same pointer-capture trap as the dots (`.tour-map-switch` hit-tested
+in `pick()`, checked before the dots since it's visually on top) — PLUS a real `click`
+listener wired once in `wireViewControls`, because a keyboard Enter/Space on a focused
+`<button>` fires `click` directly and never touches `#pano`'s pointer capture at all, so
+`pick()` alone would have left it keyboard-inaccessible.
+
+**The flip:** `.tour-map-inner` (image + dots together, so they turn as one unit rather
+than dots floating flat over a spinning picture) gets `rotateY(90deg)` for 220ms, the
+image/dots are swapped while edge-on (i.e. invisible) to the viewer, then the class comes
+off and the same transition reveals the new one rotating back to 0deg — a single clean
+turn, not a cut. `perspective` lives one level up on `.tour-map` (a 3D transform needs
+perspective on an ancestor, not itself, or it reads as a flat squash). Timed via
+`setTimeout` matched to the CSS transition duration (220ms both places) rather than a
+`transitionend` listener — this codebase already times its other CSS transitions (drawer/
+gallery fades) the same way, and a single-property transition has no multi-event ambiguity
+to worry about.
+
+**Icon:** a two-arrow cycle/sync glyph (not the app's amenity/landmark emoji sets — SVG,
+matching the same reasoning the tour-hotspot icons used: needs to look crisp and consistent
+regardless of platform font), on a small dark circular badge overlapping the isometric's
+own bottom-right corner — the same compact icon-button language `.zoom-controls` already
+uses elsewhere in this app, so it reads as native to the UI rather than bolted on.
+
+Verified via `node --check`, a CSS brace-balance check, an id-existence check for the two
+new elements, SVG tag-balance, and Node tests against the real extracted functions: legacy
+single-map files migrate correctly and round-trip stably through save/load, the new
+multi-map format parses directly, a tour with no maps emits no `maps` key, dots for deleted
+rooms drop per-map, `wrapIndex`/`activeTourMap` clamp and wrap correctly (including a
+wildly out-of-range stored index), and the switch's next-index math cycles A→B→A→B on 2
+maps, wraps 3→0 on three, and is a no-op with 0 or 1 map. Confirmed the CSS transition
+duration and the JS timeout are both exactly 220ms, and that `pick()` checks the switch
+before the dots. The actual look/feel of the flip needs a real browser.
+Files: `index.html`, `app.js`, `styles.css`, `sw.js`.
+
+---
+
+## 2026-09-18 (Submenu heading removed for every folder — not the row from the entry above)
+
+Turned out "still there" wasn't the menu row from the entry below at all — a screenshot
+clarified it: the visible text was the **submenu heading** (`#catSubMenuTitle`), a
+completely separate piece of markup that repeats the folder's own name back as a title
+above its item list ("GALLERY" atop the gallery list, "VIRTUAL TOUR" atop the tour picker).
+Asked directly whether to scope this to just Virtual Tour or every folder; answer was
+every folder.
+
+`renderClientSidebar`'s submenu branch now sets `titleEl.hidden = true` instead of writing
+`currentParent.title` into it — `hidden`, not emptied text, so `.cat-drawer-head`'s
+`justify-content: space-between` drops it from the flex row entirely rather than leaving a
+zero-width span the back button shares the row with for nothing. Checked first for the
+`[hidden]`-vs-`display` specificity trap this file has hit four times before: neither
+`#catSubMenuTitle`'s two id rules nor any class rule sets `display`, so the UA default
+`[hidden]{display:none}` applies cleanly here — safe to rely on `hidden` alone. Every
+folder's submenu now shows just the back arrow above its list, no repeated name.
+
+Bumped `sw.js`'s `VERSION`/`app.js`'s `SW_VERSION` again (v9→v10, see the entry below for
+why this matters) since this is a second app.js change in the same session after the first
+bump — didn't want to assume no mobile client had already picked up v9 in between.
+Files: `app.js`, `sw.js`.
+
+---
+
+## 2026-09-18 (Fix: today's client fixes not reaching an already-installed mobile client)
+
+The VIRTUAL TOUR fix below was reported still visible after shipping. Root cause found in
+`sw.js`, not `app.js`: mobile clients register a service worker that precaches `app.js`
+itself into a version-namespaced shell cache (`b91-shell-v8`) — a plain reload never re-hits
+the network for anything already in that cache, so an already-installed worker keeps serving
+the OLD `app.js` regardless of what's on the server. This is a known mechanism in this file
+(every prior shell-affecting fix has bumped `VERSION` for exactly this reason); today's batch
+of client-side changes didn't.
+
+`sw.js`'s `VERSION` and `app.js`'s `SW_VERSION` both bumped `v8` → `v9`, kept in lockstep per
+the existing documented rule. Per the same file's own design, this only discards and
+re-fetches the small shell (~2MB of code) — a visitor's downloaded offline content (project
+images/video, the big ~200MB "Includes offline access" download) is untouched, since data/
+media caches are deliberately NOT version-namespaced (a past bump wiping that content
+wholesale is exactly what the current design avoids). Files: `sw.js`, `app.js`.
+
+---
+
+## 2026-09-18 (Fix: VIRTUAL TOUR row no longer shown while already inside a tour)
+
+Reported from a screenshot: a "VIRTUAL TOUR" row sitting in the menu while a tour was
+already open. Traced to the single-tour/single-room case — the one scenario where the root
+menu list stays visible alongside the "✕ EXIT TOUR" row while `state.tourView` is set (see
+`renderClientSidebar`'s own comment) — where the builtin row was rendered exactly like any
+other, so tapping it again would have just re-opened the same tour from its own start room.
+
+Both client render paths that build a row list — the root menu and the generic submenu
+(for a project where the admin has dragged the builtin into a folder) — now filter out
+`node.builtin === 'tour'` whenever `state.tourView` is truthy, leaving every other row
+(including "✕ EXIT TOUR") untouched. `builtin` is the identifier used because it's stable
+regardless of what the admin has renamed the row to. Verified with a Node run of both
+filter expressions: the row disappears only while touring and only that one row, in both
+the root list and a submenu. Files: `app.js`.
+
+---
+
+## 2026-09-18 (Fix: darkened the actual compass's view cone, not the tour-minimap one)
+
+The previous entry darkened `.tour-map-cone`/`.tourmap-cone` — the tour minimap's view cone
+on the blue-dot map — on the assumption "the compass" meant that feature, since it sits in
+the compass's own corner slot. A follow-up screenshot showed the literal compass dial
+(N/E/S/W, needle) still faint, which is a different element entirely: `.cp-cone`, the
+shaded wedge inside the compass SVG (`#compassCone`) marking which way the camera faces.
+It was at `.12` alpha — lightened there in an earlier redesign specifically for a see-
+through glass look, which turned out too faint to read.
+
+`.cp-cone` raised to `rgba(10,12,16,.45)`, past even the `.20` that redesign lightened it
+from. The tour-minimap cone from the previous entry is a separate, correctly-darkened
+feature and was left as is. Files: `styles.css`.
+
+---
+
+## 2026-09-18 (Tour minimap: view cone darkened further)
+
+On request: the black cone (from the earlier white→black recolour) was too faint to read
+against a light-coloured render. Both the client `.tour-map-cone` and the admin editor's
+`.tourmap-cone` preview raised their peak/mid stops from `.58`/`.32` to `.88`/`.6` and the
+radial mask's inner stop from `.9` to `.95`, kept identical between the two so the editor
+preview matches what the visitor actually sees. Files: `styles.css`.
+
+---
+
+## 2026-09-18 ("Keep open" control: dropped the text label, switch only)
+
+On request. `buildKeepMenuToggle` no longer creates the "KEEP OPEN" text span — the row is
+now just the switch, tucked to its own edge (`justify-content: flex-end`) rather than
+stretched across the row with a label. Accessibility is unaffected: the input keeps its
+`aria-label` for screen readers, and the wrap's `title` still gives a sighted hover the same
+explanation the label used to provide visually. Removed the now-dead `.cat-keep-lbl` CSS
+(base rule and the mobile-drawer font-size override) rather than leaving it as unreferenced
+styling. Verified in Node that the built element has no label child, the input/track sibling
+order the CSS still depends on holds, and the accessible name/title are both intact.
+Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-18 ("Keep open" control restyled as a real switch)
+
+On request: the "KEEP OPEN" control was a bespoke checkbox-look button (a bordered box
+that filled gold with a checkmark). Replaced with the exact `.ui-switch` markup/CSS the
+admin already uses in two other places — the landmark "show by default" row and the menu
+builder's built-in-row toggle — rather than inventing a second checkbox pattern.
+
+`buildKeepMenuToggle` now builds `<label class="cat-keep ui-switch">` containing the label
+text, a real `<input type="checkbox" class="ui-switch-input">`, and the track/thumb spans,
+in that exact order — the switch's own CSS drives the thumb via
+`.ui-switch-input:checked + .ui-switch-track`, an adjacent-sibling selector, so the input
+must be immediately followed by the track with nothing between. `syncKeepMenuToggles` sets
+`input.checked` on every copy instead of toggling a class. The track/thumb are scaled down
+from the admin sidebar's default 34×18px (via extra `.cat-keep` specificity, not
+declaration order, since this override doesn't hit the equal-specificity trap noted
+elsewhere in this file) so the switch doesn't dwarf the label in a menu row, with a further
+step down at the 140px mobile drawer width.
+
+Verified in Node against the real functions: the built element has the exact structure and
+sibling order the CSS selector depends on, starts unchecked, and a simulated change event
+updates `state.keepMenuOpen`, persists it to `localStorage`, and is reflected back on the
+input — plus confirmed no stale references to the removed checkbox-box styling remain.
+Files: `app.js`, `styles.css`.
+
+---
+
 ## 2026-09-18 ("Keep open" toggle in every menu level that holds a choice)
 
 On request: a small toggle controlling whether picking an item auto-collapses the drawer,

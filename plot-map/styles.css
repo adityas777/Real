@@ -589,7 +589,11 @@ body.is-admin .compass { display: none; }
    so it reads as light glass, not an opaque sticker. Label fill stays solid navy with a
    white halo for legibility — a fully transparent label would vanish over a bright sky. */
 .cp-face { fill: rgba(255,255,255,.09); }       /* lighter than the original .16 — more pano visible through the face */
-.cp-cone { fill: rgba(30,34,42,.12); }          /* the sweeping "shadow" that marks the view — lighter than the original .20 */
+/* Darkened (2026-09-18, on request — .12 read as barely-there against a bright pano).
+   Reverted past the original .20 the 2026-09-10 redesign lightened it FROM, since that
+   value was also reported too faint; .45 with a darker base colour is the first version
+   that actually reads as a shadow rather than a hint of one. */
+.cp-cone { fill: rgba(10,12,16,.45); }
 .cp-ring { fill: none; stroke: rgba(255,255,255,.75); stroke-width: 1.5; filter: drop-shadow(0 0 2px rgba(255,255,255,.5)); }
 .cp-ring-2 { fill: none; stroke: rgba(255,255,255,.32); stroke-width: 1; }
 .cp-lt { fill: rgba(255,255,255,.92); }
@@ -1193,10 +1197,11 @@ body.is-admin .compass { display: none; }
      unsafe tap targets are the worse problem of the two. */
   .cat-drawer .cat-nav { gap: 6px; margin-top: 2px; justify-content: flex-start; }
   .cat-drawer .cat-btn { padding: 7px 6px; font-size: 9.5px; line-height: 1.2; letter-spacing: .2px; }
-  /* Same squeeze as the rows around it — at 140px wide the label has to give up its
-     tracking to stay on one line next to the checkbox. */
-  .cat-drawer .cat-keep { padding: 4px 6px 6px; font-size: 8px; letter-spacing: .3px; gap: 5px; }
-  .cat-drawer .cat-keep-box { width: 10px; height: 10px; }
+  /* The switch itself shrinks further at 140px wide, same squeeze as the rows around it. */
+  .cat-drawer .cat-keep { padding: 4px 6px 6px; }
+  .cat-drawer .cat-keep .ui-switch-track { width: 22px; height: 12px; }
+  .cat-drawer .cat-keep .ui-switch-thumb { width: 8px; height: 8px; }
+  .cat-drawer .cat-keep .ui-switch-input:checked + .ui-switch-track .ui-switch-thumb { transform: translateX(10px); }
   .cat-drawer .cat-btn-arrow { font-size: 11px; }
   .cat-drawer .cat-drawer-brand { margin-bottom: 6px; }
   .cat-drawer .cat-drawer-head { padding-bottom: 6px; }
@@ -1735,31 +1740,27 @@ body.is-admin .cat-drawer { display: none !important; }
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
-/* "Keep open" pin, prepended to any menu level holding 2+ rows (see addKeepMenuToggle).
-   Deliberately quieter than a .cat-btn — it's a preference about the menu, not an item in
-   it, so it must not read as another destination. */
+/* "Keep open" pin, prepended to any menu level holding 2+ rows (see addKeepMenuToggle) —
+   built from the same `.ui-switch` markup/CSS the admin's landmark "show by default" row
+   and menu-builder built-in-row toggle already use. Icon-only (2026-09-18, on request —
+   the "KEEP OPEN" text was dropped; the accessible name lives on the input's aria-label
+   and a sighted hover gets the wrap's `title` instead). Deliberately quiet and tucked to
+   the row's own edge rather than styled like a `.cat-btn` — it's a preference about the
+   menu, not an item in it. */
 .cat-keep {
-  display: flex; align-items: center; gap: 7px;
-  background: none; border: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: flex-end;
+  cursor: pointer;
   padding: 6px 12px 8px; margin-bottom: 2px;
-  font: inherit; font-size: 9.5px; font-weight: 700; letter-spacing: .8px;
-  color: rgba(229, 231, 235, .5);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .65);
+  color: rgba(229, 231, 235, .55);
 }
-.cat-keep:hover { color: rgba(255, 255, 255, .8); }
-.cat-keep-box {
-  width: 11px; height: 11px; flex: none; border-radius: 3px;
-  border: 1.5px solid currentColor; position: relative;
-}
-.cat-keep.is-on { color: var(--gold); }
-.cat-keep.is-on .cat-keep-box { background: var(--gold); border-color: var(--gold); }
-/* Tick drawn in the box only when on — a border-based check needs no extra element. */
-.cat-keep.is-on .cat-keep-box::after {
-  content: ''; position: absolute; left: 2.5px; top: 0px;
-  width: 3px; height: 6px; border: solid #111; border-width: 0 2px 2px 0;
-  transform: rotate(43deg);
-}
-.cat-keep-lbl { white-space: nowrap; }
+.cat-keep:hover { color: rgba(255, 255, 255, .85); }
+/* Scaled down from the admin sidebar's default 34x18 switch — a menu row is narrower than
+   a full-width settings list. The extra `.cat-keep` in each selector outweighs the base
+   `.ui-switch-*` rule's specificity, so no declaration-order care is needed here (contrast
+   the media-query trap noted elsewhere in this file, which is about EQUAL specificity). */
+.cat-keep .ui-switch-track { width: 26px; height: 14px; }
+.cat-keep .ui-switch-thumb { width: 10px; height: 10px; }
+.cat-keep .ui-switch-input:checked + .ui-switch-track .ui-switch-thumb { transform: translateX(12px); }
 .cat-btn.is-active {
   background: #9ab33b; /* Vibrant lime-gold category highlight matching reference design */
   color: #111111;
@@ -3340,13 +3341,27 @@ body.is-admin .cat-drawer { display: none !important; }
      must stay hit-testable by document.elementFromPoint, which is how pick() finds them
      (see the pointer-capture gotcha). */
   pointer-events: none;
+  /* Ancestor of the 3D-flipped .tour-map-inner (2026-09-18) — perspective has to live
+     here, one level up, or the child's rotateY reads as a flat squash instead of a turn. */
+  perspective: 900px;
 }
 .tour-map[hidden] { display: none; }
 body.tour-map-on .compass { display: none; }
 /* inline-block so it shrink-wraps the image exactly; line-height:0 kills the inline
    baseline gap that would otherwise make this box taller than the image and push every
-   dot's y% slightly off. */
-.tour-map-inner { position: relative; display: inline-block; line-height: 0; }
+   dot's y% slightly off. transform-style:preserve-3d + the transition are what the
+   isometric-switch flip (switchTourMap) animates — image AND dots rotate together as one
+   unit, rather than the dots floating flat over a spinning picture. */
+.tour-map-inner {
+  position: relative; display: inline-block; line-height: 0;
+  transform-style: preserve-3d;
+  transition: transform .22s ease-in-out;
+}
+/* Mid-flip: rotated edge-on to the viewer (so it reads as "gone" for an instant) while
+   switchTourMap swaps the image/dots underneath; removing this class transitions BACK to
+   0deg, which is the reveal half of the same flip. Keep this duration in sync with the
+   220ms setTimeout in switchTourMap if either ever changes. */
+.tour-map-inner.is-flipping { transform: rotateY(90deg); }
 /* The <img> defines the box the dots are positioned in, so it must keep its true aspect
    ratio — a dot at 0.5/0.5 has to land exactly at the image's centre, with no letterbox
    offset to correct for. Don't switch this to object-fit/cover. Sized by max-width AND
@@ -3372,12 +3387,13 @@ body.tour-map-on .compass { display: none; }
   border-radius: 50%;
   /* Black, not white (2026-09-17, on request) — it reads as a cast shadow over a bright
      isometric render, which is what the reference does; white washed out against the
-     render's own light interiors. */
+     render's own light interiors. Darkened further (2026-09-18, on request — the .58/.32
+     version was too faint to actually read against a light-coloured render). */
   background: conic-gradient(from -32deg,
-    rgba(0, 0, 0, .58), rgba(0, 0, 0, .32) 26deg, rgba(0, 0, 0, 0) 64deg,
+    rgba(0, 0, 0, .88), rgba(0, 0, 0, .6) 26deg, rgba(0, 0, 0, 0) 64deg,
     rgba(0, 0, 0, 0) 360deg);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
-  mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .95) 42%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .95) 42%, transparent 78%);
   /* Deliberately NO transition on left/top (2026-09-17, on request): animating those made
      the cone glide across the plan from the old room to the new one, which reads as the
      visitor sliding through walls. It closes and reopens instead — the position change is
@@ -3402,6 +3418,80 @@ body.tour-map-on .compass { display: none; }
   background: var(--gold, #d4af37);
   box-shadow: 0 0 0 4px rgba(212, 175, 55, .32), 0 1px 6px rgba(0, 0, 0, .55);
 }
+/* Isometric switch (2026-09-18) — flips between a tour's multiple maps. Sits OUTSIDE
+   .tour-map-inner on purpose, as a sibling: it must stay fixed and readable while the
+   image flips, not spin along with it. Positioned as a small badge overlapping the
+   image's own bottom-right corner, matching the compact circular icon-button language
+   this app already uses elsewhere (.zoom-controls .btn-icon). */
+.tour-map-switch {
+  position: absolute; right: 3px; bottom: 3px;
+  width: 30px; height: 30px; padding: 0; z-index: 1;
+  border-radius: 50%; cursor: pointer;
+  pointer-events: auto;                  /* the map container itself is pointer-events:none */
+  display: grid; place-items: center;
+  background: rgba(15, 18, 26, .78);
+  border: 1.5px solid rgba(255, 255, 255, .55);
+  color: #fff;
+  box-shadow: 0 2px 9px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  transition: transform .15s ease, background-color .15s ease, border-color .15s ease;
+}
+.tour-map-switch svg { width: 17px; height: 17px; display: block; }
+.tour-map-switch:hover { background: rgba(15, 18, 26, .92); border-color: var(--gold, #d4af37); transform: scale(1.08); }
+.tour-map-switch:active { transform: scale(.92); }
+.tour-map-switch[hidden] { display: none; }
+/* Position pips — "which of N isometrics is this", a light unobtrusive row tucked just
+   under the switch button. Decorative only (pointer-events:none); the switch button is
+   the whole interaction, this is purely a status readout. */
+.tour-map-pips {
+  position: absolute; right: 6px; bottom: -13px;
+  display: flex; gap: 4px; pointer-events: none;
+}
+.tour-map-pips[hidden] { display: none; }
+.tour-map-pip {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(255, 255, 255, .4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+  transition: background-color .15s ease, transform .15s ease;
+}
+.tour-map-pip.is-on { background: var(--gold, #d4af37); transform: scale(1.3); }
+/* Dismiss / restore the minimap (2026-09-18). Same circular badge language as the switch,
+   sitting just left of it so the two read as one small control cluster. */
+/* Sits in the corner on its own by default; only shifts left to make room when the switch
+   button is actually present (2+ isometrics), which `.has-switch` marks — otherwise it
+   would float with a conspicuous empty gap beside it. A JS-set class rather than `:has()`
+   so support isn't a question. */
+.tour-map-hide {
+  position: absolute; right: 3px; bottom: 3px;
+  width: 30px; height: 30px; padding: 0; z-index: 1;
+  border-radius: 50%; cursor: pointer;
+  pointer-events: auto;                  /* the map container itself is pointer-events:none */
+  display: grid; place-items: center;
+  background: rgba(15, 18, 26, .78);
+  border: 1.5px solid rgba(255, 255, 255, .55);
+  color: #fff;
+  box-shadow: 0 2px 9px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  transition: transform .15s ease, background-color .15s ease, border-color .15s ease;
+}
+.tour-map.has-switch .tour-map-hide { right: 38px; }
+.tour-map-hide svg { width: 17px; height: 17px; display: block; }
+.tour-map-hide:hover { background: rgba(15, 18, 26, .92); border-color: var(--gold, #d4af37); transform: scale(1.08); }
+.tour-map-hide:active { transform: scale(.92); }
+.tour-map-hide[hidden] { display: none; }
+/* Icon halves — only one shows at a time, swapped by the container's state class rather
+   than by rewriting the button's contents (textContent would wipe the inline SVG, the
+   mistake the audio button's own comment warns about). */
+.tm-ico-show { display: none; }
+.tour-map.is-map-hidden .tm-ico-hide { display: none; }
+.tour-map.is-map-hidden .tm-ico-show { display: block; }
+/* Dismissed: everything except the restore button collapses. The button is re-anchored to
+   the top-right corner because .tour-map shrink-wraps its (now hidden) image — leaving it
+   on `bottom` would place it against a zero-height box and push it off-screen. */
+.tour-map.is-map-hidden .tour-map-inner,
+.tour-map.is-map-hidden .tour-map-switch,
+.tour-map.is-map-hidden .tour-map-pips { display: none; }
+.tour-map.is-map-hidden .tour-map-hide { top: 10px; right: 10px; bottom: auto; }
 /* Phone sizing — deliberately placed AFTER the base rules above, not up with the other
    landscape overrides earlier in this file. A media query carries no extra specificity, so
    an override declared before these single-class rules loses to them outright; that's
@@ -3414,6 +3504,14 @@ body.tour-map-on .compass { display: none; }
   .tour-map { max-width: min(140px, 26vw); }
   .tour-map-inner img { max-height: 24vh; }
   .tour-map-dot { width: 10px; height: 10px; border-width: 1.5px; }
+  .tour-map-switch { width: 22px; height: 22px; right: 2px; bottom: 2px; }
+  .tour-map-switch svg { width: 13px; height: 13px; }
+  .tour-map-hide { width: 22px; height: 22px; right: 2px; bottom: 2px; }
+  .tour-map.has-switch .tour-map-hide { right: 28px; }
+  .tour-map-hide svg { width: 13px; height: 13px; }
+  .tour-map.is-map-hidden .tour-map-hide { top: 6px; right: 8px; bottom: auto; }
+  .tour-map-pips { bottom: -9px; gap: 3px; }
+  .tour-map-pip { width: 4px; height: 4px; }
 }
 
 /* ── Tour map editor (admin modal) ── */
@@ -3428,11 +3526,13 @@ body.tour-map-on .compass { display: none; }
   position: absolute; width: 120px; aspect-ratio: 1; pointer-events: none;
   transform: translate(-50%, -50%) rotate(var(--rot, 0deg));
   border-radius: 50%; opacity: .45;
+  /* Same darkened stops as the client's .tour-map-cone (2026-09-18) — kept identical so
+     the editor preview matches what the visitor actually sees. */
   background: conic-gradient(from -32deg,
-    rgba(0, 0, 0, .58), rgba(0, 0, 0, .32) 26deg, rgba(0, 0, 0, 0) 64deg,
+    rgba(0, 0, 0, .88), rgba(0, 0, 0, .6) 26deg, rgba(0, 0, 0, 0) 64deg,
     rgba(0, 0, 0, 0) 360deg);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
-  mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .9) 42%, transparent 78%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .95) 42%, transparent 78%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 8%, rgba(0, 0, 0, .95) 42%, transparent 78%);
 }
 .tourmap-cone.is-armed { opacity: 1; }
 /* Drag handle that aims the selected room's cone. Parked at the cone's outer edge via a
@@ -3480,7 +3580,12 @@ body.tour-map-on .compass { display: none; }
 .ax-tour-maprow { display: flex; align-items: center; gap: 8px; }
 .ax-tour-mapthumb { width: 46px; height: 32px; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); flex: none; }
 .ax-tour-mapmeta { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .4px; }
-.ax-tour-mapadd, .ax-tour-mapopen { width: 100%; justify-content: center; font-size: 12px; }
+/* One row per isometric now (2026-09-18, multiple per tour) — the "open editor" action
+   shrank from a full-width button to an inline icon matching .ax-lm-del's own size/shape,
+   since it now sits beside a delete button on every row rather than alone below the list. */
+.ax-tour-mapopenrow { width: 24px; height: 24px; flex: none; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 13px; line-height: 1; }
+.ax-tour-mapopenrow:hover { color: var(--gold); border-color: var(--gold); }
+.ax-tour-mapadd { width: 100%; justify-content: center; font-size: 12px; }
 
 /* A nav hotspot: a ring on the doorway it leads through + a label under it.
    pointer-events:auto so admin drags work; the client's TAP is routed through

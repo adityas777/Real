@@ -1,0 +1,495 @@
+{
+  "version": 1,
+  "note": "Build91 plot-map overlay alignment",
+  "savedAt": "2026-09-18T10:42:22.444Z",
+  "transform": {
+    "tx": 0.3345,
+    "ty": 0.7635,
+    "scale": 0.5,
+    "rotationDeg": 180
+  },
+  "view": {
+    "lonDeg": 0.96,
+    "latDeg": -86.95,
+    "fov": 120
+  },
+  "opacity": 1,
+  "groundImage": {
+    "file": "scener 11 (1).web.png",
+    "opacity": 1
+  },
+  "panoImage": {
+    "file": "sample/Commercial.web.webp"
+  },
+  "brand": {
+    "name": "ANANDMAN",
+    "tagline": "ELEGANZA",
+    "logo": {
+      "file": "sample/logo.web.png"
+    }
+  },
+  "audio": {
+    "file": "sample/audio.mp3"
+  },
+  "bootImage": {
+    "file": "sample/loading.web.jpg"
+  },
+  "data": {
+    "source": "sheet",
+    "sheet": {
+      "url": "https://docs.google.com/spreadsheets/d/1I-TEyiU7Gty047XdI9AB8vIYmA6gMlNjcHfwLeHTeT0/edit?gid=1469711861#gid=1469711861"
+    }
+  },
+  "area": {
+    "unit": "sq.ft",
+    "filters": [
+      {
+        "id": "afmu6ijrbs0",
+        "name": "Type 1",
+        "color": "#fb50ab",
+        "min": 1000,
+        "max": 1200
+      },
+      {
+        "id": "afmu6ikwk01",
+        "name": "Type 2",
+        "color": "#f67f6a",
+        "min": 1300,
+        "max": 2000
+      }
+    ]
+  },
+  "plotOverrides": {
+    "Plot-A101": {
+      "size": "1500 sq.ft",
+      "media_json": "[]"
+    },
+    "Plot-A102": {
+      "size": "1600 sq.ft",
+      "media_json": "[]"
+    },
+    "Plot-A103": {
+      "media_json": "[]"
+    },
+    "Plot-A104": {
+      "media_json": "[]"
+    },
+    "Plot-A105": {
+      "size": "1800 sq.ft",
+      "media_json": "[]"
+    },
+    "Plot-A106": {
+      "media_json": "[]"
+    },
+    "Plot-A107": {
+      "media_json": "[]"
+    },
+    "Plot-A108": {
+      "media_json": "[]"
+    },
+    "Plot-A109": {
+      "media_json": "[]"
+    },
+    "Plot-A110": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A111": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A112": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A113": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A114": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A115": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A116": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A117": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A118": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A119": {
+      "status": "available",
+      "media_json": "[]"
+    }
+  },
+  "menuConfig": {
+    "tree": [
+      {
+        "id": "builtin-aerial",
+        "title": "AERIAL VIEW",
+        "kind": "child",
+        "contentType": "aerial",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "aerial",
+        "enabled": true
+      },
+      {
+        "id": "builtin-landmarks",
+        "title": "LANDMARKS",
+        "kind": "child",
+        "contentType": "landmarks",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "landmarks",
+        "enabled": true
+      },
+      {
+        "id": "builtin-tour",
+        "title": "VIRTUAL TOUR",
+        "kind": "child",
+        "contentType": "virtualtour",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "tour",
+        "enabled": true
+      },
+      {
+        "id": "node_1788500503125_693",
+        "title": "LOCATION INTELLIGENCE",
+        "kind": "parent",
+        "children": [
+          {
+            "id": "node_1788506148915_511",
+            "title": "location intelligence",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "Anandam Eleganza Film V2.mp4"
+            }
+          }
+        ]
+      },
+      {
+        "id": "node_1788500519685_61",
+        "title": "WALKTHROUGH VIDEO",
+        "kind": "parent",
+        "children": [
+          {
+            "id": "node_1788506170701_82",
+            "title": "walkthrough video",
+            "kind": "child",
+            "contentType": "video",
+            "content": {
+              "url": "",
+              "fileName": "anandam eleganza english 04.mp4"
+            }
+          }
+        ]
+      },
+      {
+        "id": "node_1788505956369_38",
+        "title": "gallery",
+        "kind": "parent",
+        "children": [
+          {
+            "id": "node_1788506067474_274",
+            "title": "GALLERY 1",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sectop-A Kids Play Area .png"
+            }
+          },
+          {
+            "id": "node_1788506067474_509",
+            "title": "GALLERY 2",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A .Multi-Purpose Court.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_905",
+            "title": "GALLERY 3",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A Forest Garden .png"
+            }
+          },
+          {
+            "id": "node_1788506067474_808",
+            "title": "GALLERY 4",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A Jogging Track.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_671",
+            "title": "GALLERY 5",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A Kids Play Area.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_190",
+            "title": "GALLERY 6",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A Lawn.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_779",
+            "title": "GALLERY 7",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A Pets Park.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_732",
+            "title": "GALLERY 8",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-A Seating Space .png"
+            }
+          },
+          {
+            "id": "node_1788506067474_947",
+            "title": "GALLERY 9",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D  lawn.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_851",
+            "title": "GALLERY 10",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Club House Pool.png"
+            }
+          },
+          {
+            "id": "node_1788506067474_498",
+            "title": "GALLERY 11",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D club house.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_555",
+            "title": "GALLERY 12",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Cycling pathway.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_805",
+            "title": "GALLERY 13",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Gazebo Garden.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_14",
+            "title": "GALLERY 14",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Gazebo Garden2.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_565",
+            "title": "GALLERY 15",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Gazebo.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_354",
+            "title": "GALLERY 16",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Gym .png"
+            }
+          },
+          {
+            "id": "node_1788506067475_364",
+            "title": "GALLERY 17",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Gym -2.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_640",
+            "title": "GALLERY 18",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D lawn.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_792",
+            "title": "GALLERY 19",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Swimming pool .png"
+            }
+          },
+          {
+            "id": "node_1788506067475_621",
+            "title": "GALLERY 20",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Swimming pool 2 .png"
+            }
+          },
+          {
+            "id": "node_1788506067475_868",
+            "title": "GALLERY 21",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Swimming Poolside Seating Area.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_52",
+            "title": "GALLERY 22",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Temple.png"
+            }
+          },
+          {
+            "id": "node_1788506067475_760",
+            "title": "GALLERY 23",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Temple-2 .png"
+            }
+          },
+          {
+            "id": "node_1788506067475_768",
+            "title": "GALLERY 24",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-D Walkways .png"
+            }
+          },
+          {
+            "id": "node_1788506067475_476",
+            "title": "GALLERY 25",
+            "kind": "child",
+            "contentType": "image",
+            "content": {
+              "url": "",
+              "fileName": "Sector-Open Lawn View.png"
+            }
+          }
+        ]
+      },
+      {
+        "id": "node_1788500581379_450",
+        "title": "BROCHURE",
+        "kind": "parent",
+        "children": [
+          {
+            "id": "node_1788506383575_582",
+            "title": "Anandam brochure landscape 02",
+            "kind": "child",
+            "contentType": "pdf",
+            "content": {
+              "url": "",
+              "fileName": "Anandam brochure landscape 02.pdf"
+            }
+          }
+        ]
+      },
+      {
+        "id": "node_1788507103825_324",
+        "title": "CONTACT US",
+        "kind": "contact",
+        "contact": {
+          "title": "Anandam Eleganza - Premium Villa Plots",
+          "about": "Site Address: Beside Loha Market, Sondongari\nMain Road, Hirapur, Raipur, Chhattisgarh",
+          "phone": "+91 7389705477",
+          "email": "anandameleganza@gmail.com",
+          "image": "sample/Screenshot 2026-09-04 130123.png",
+          "imageName": "Screenshot 2026-09-04 130123.png"
+        }
+      }
+    ]
+  }
+}
