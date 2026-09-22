@@ -1,21 +1,21 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-09-21T12:44:52.801Z",
+  "savedAt": "2026-09-22T09:18:58.439Z",
   "transform": {
-    "tx": 0.3028,
-    "ty": 0.5037,
-    "scale": 0.64,
-    "rotationDeg": 180
+    "tx": -0.4359,
+    "ty": -0.0703,
+    "scale": 2.98,
+    "rotationDeg": 179.5
   },
   "view": {
-    "lonDeg": 31.39,
-    "latDeg": -85.94,
+    "lonDeg": -359.59,
+    "latDeg": -90,
     "fov": 120
   },
   "opacity": 1,
   "groundImage": {
-    "file": "sample/scener 11 (1).web.png",
+    "file": "Final (2).web.png",
     "opacity": 1
   },
   "panoImage": {
@@ -34,6 +34,7 @@
   "bootImage": {
     "file": "sample/loading.web.jpg"
   },
+  "northDeg": 128.6,
   "data": {
     "source": "sheet",
     "sheet": {
@@ -60,16 +61,6 @@
     ]
   },
   "plotOverrides": {
-    "Plot-A1": {
-      "status": "available",
-      "facing": "East",
-      "size": "1200 sq.ft",
-      "dimensions": "30x40",
-      "price": "1800000",
-      "block": "A",
-      "media_json": "[]",
-      "notes": "Corner plot"
-    },
     "Plot-A102": {
       "dimensions": "30x40",
       "price": "1800000",
@@ -101,31 +92,25 @@
       "media_json": "[]"
     },
     "Plot-A108": {
-      "status": "available",
       "dimensions": "30x40",
       "price": "1800000",
       "media_json": "[]"
     },
     "Plot-A109": {
-      "status": "available",
+      "status": "reserved",
       "dimensions": "30x40",
-      "media_json": "[]"
-    },
-    "Plot-A101": {
-      "dimensions": "30x40",
-      "price": "1800000",
       "media_json": "[]"
     },
     "Plot-A110": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A111": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A112": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A113": {
@@ -151,23 +136,23 @@
       "media_json": "[]"
     },
     "Plot-A119": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A120": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A121": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A122": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A123": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A124": {
@@ -198,7 +183,7 @@
       "media_json": "[]"
     },
     "Plot-A131": {
-      "status": "available",
+      "status": "reserved",
       "media_json": "[]"
     },
     "Plot-A132": {
@@ -363,11 +348,7 @@
     },
     "Plot-A172": {
       "status": "available",
-      "facing": "East",
-      "size": "1349.81",
-      "block": "A",
-      "media_json": "[]",
-      "notes": "Corner plot"
+      "media_json": "[]"
     },
     "Plot-A173": {
       "status": "available",
@@ -404,6 +385,1394 @@
     "Plot-A181": {
       "status": "available",
       "media_json": "[]"
+    },
+    "Plot-A182": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A183": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A184": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A185": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A186": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A187": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A188": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A189": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A190": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A191": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A192": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A193": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A194": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A195": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A196": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A197": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A198": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A199": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A200": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A201": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A202": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A203": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A204": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A205": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A206": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A207": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A208": {
+      "media_json": "[]"
+    },
+    "Plot-A209": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A210": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A211": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A212": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A213": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A214": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A215": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A216": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A217": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A218": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A219": {
+      "media_json": "[]"
+    },
+    "Plot-A220": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A221": {
+      "media_json": "[]"
+    },
+    "Plot-A222": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A223": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A224": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A225": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A226": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A227": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A228": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A229": {
+      "media_json": "[]"
+    },
+    "Plot-A230": {
+      "media_json": "[]"
+    },
+    "Plot-A231": {
+      "media_json": "[]"
+    },
+    "Plot-A232": {
+      "media_json": "[]"
+    },
+    "Plot-A233": {
+      "media_json": "[]"
+    },
+    "Plot-A234": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A235": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A236": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A237": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A238": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A239": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A240": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A241": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A242": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A243": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A244": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A245": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A246": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A247": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A248": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A249": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A250": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A251": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A252": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A253": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A254": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A255": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A256": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A257": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A258": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A259": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A260": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A261": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A262": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A263": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A264": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A265": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A266": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A267": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A268": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A269": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A270": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A271": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A272": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A273": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A274": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A275": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A276": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A277": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A278": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A279": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A280": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A281": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A282": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A283": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A284": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A285": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A286": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A287": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A288": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A289": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A290": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A291": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A292": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A293": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A294": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A295": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A296": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A297": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A298": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A299": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A300": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A301": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A302": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A303": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A304": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A305": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A306": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A307": {
+      "media_json": "[]"
+    },
+    "Plot-A308": {
+      "media_json": "[]"
+    },
+    "Plot-A309": {
+      "media_json": "[]"
+    },
+    "Plot-A310": {
+      "media_json": "[]"
+    },
+    "Plot-A311": {
+      "media_json": "[]"
+    },
+    "Plot-A312": {
+      "media_json": "[]"
+    },
+    "Plot-A313": {
+      "media_json": "[]"
+    },
+    "Plot-A314": {
+      "media_json": "[]"
+    },
+    "Plot-A315": {
+      "media_json": "[]"
+    },
+    "Plot-A316": {
+      "media_json": "[]"
+    },
+    "Plot-A317": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A318": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A319": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A320": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A321": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A322": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A323": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A324": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A325": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A326": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A327": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A328": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A329": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A330": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A331": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A332": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A333": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A334": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A335": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A336": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A337": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A338": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A339": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A340": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A341": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A342": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A343": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A344": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A345": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A346": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A347": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A348": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A349": {
+      "media_json": "[]"
+    },
+    "Plot-A350": {
+      "media_json": "[]"
+    },
+    "Plot-A351": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A352": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A353": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A354": {
+      "media_json": "[]"
+    },
+    "Plot-A355": {
+      "media_json": "[]"
+    },
+    "Plot-A356": {
+      "media_json": "[]"
+    },
+    "Plot-A357": {
+      "media_json": "[]"
+    },
+    "Plot-A358": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A359": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A360": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A361": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A362": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A363": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A364": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A365": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A366": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A367": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A368": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A369": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A370": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A371": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A372": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A373": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A374": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A375": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A376": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A377": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A378": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A379": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A380": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A381": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A382": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A383": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A384": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A385": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A386": {
+      "media_json": "[]"
+    },
+    "Plot-A387": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A388": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A389": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A390": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A391": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A392": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A393": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A394": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A395": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A396": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A397": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A398": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A399": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A400": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A401": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A402": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A403": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A404": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A405": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A406": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A407": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A408": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A409": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A410": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A411": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A412": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A413": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A414": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A415": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A416": {
+      "media_json": "[]"
+    },
+    "Plot-A417": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A418": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A419": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A420": {
+      "media_json": "[]"
+    },
+    "Plot-A421": {
+      "media_json": "[]"
+    },
+    "Plot-A422": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A423": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A424": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A425": {
+      "media_json": "[]"
+    },
+    "Plot-A426": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A427": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A428": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A429": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A430": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A431": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A432": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A433": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A434": {
+      "media_json": "[]"
+    },
+    "Plot-A435": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A436": {
+      "media_json": "[]"
+    },
+    "Plot-A437": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A438": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A439": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A440": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A441": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A442": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A443": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A444": {
+      "media_json": "[]"
+    },
+    "Plot-A445": {
+      "media_json": "[]"
+    },
+    "Plot-A446": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A447": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A448": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A449": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A450": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A451": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A452": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A453": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A454": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A455": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A456": {
+      "media_json": "[]"
+    },
+    "Plot-A457": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A458": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A459": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A460": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A461": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A462": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A463": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A464": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A465": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A466": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A467": {
+      "media_json": "[]"
+    },
+    "Plot-A468": {
+      "media_json": "[]"
+    },
+    "Plot-A469": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A470": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A471": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A472": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A473": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A474": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A475": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A476": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A477": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A478": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A479": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A480": {
+      "media_json": "[]"
+    },
+    "Plot-A481": {
+      "media_json": "[]"
+    },
+    "Plot-A482": {
+      "media_json": "[]"
+    },
+    "Plot-A483": {
+      "media_json": "[]"
+    },
+    "Plot-A484": {
+      "media_json": "[]"
+    },
+    "Plot-A485": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A486": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A487": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A488": {
+      "media_json": "[]"
+    },
+    "Plot-A489": {
+      "media_json": "[]"
+    },
+    "Plot-A490": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A491": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A492": {
+      "media_json": "[]"
+    },
+    "Plot-A493": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A494": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A495": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A496": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A497": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A498": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A499": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A500": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A501": {
+      "media_json": "[]"
+    },
+    "Plot-A502": {
+      "media_json": "[]"
+    },
+    "Plot-A503": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A504": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A505": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A506": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A507": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A508": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A509": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A510": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A511": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A512": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A513": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A514": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A515": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A516": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A517": {
+      "status": "reserved",
+      "media_json": "[]"
+    },
+    "Plot-A518": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A519": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A520": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A521": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A522": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A523": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A524": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A525": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A526": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A527": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A528": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A529": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A530": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A531": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A532": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A533": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A534": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A535": {
+      "status": "available",
+      "media_json": "[]"
+    },
+    "Plot-A536": {
+      "media_json": "[]"
+    },
+    "Plot-A101": {
+      "dimensions": "30x40",
+      "price": "1800000",
+      "media_json": "[]"
+    },
+    "Plot-A1": {
+      "status": "available",
+      "facing": "East",
+      "size": "1200 sq.ft",
+      "dimensions": "30x40",
+      "price": "1800000",
+      "block": "A",
+      "media_json": "[]",
+      "notes": "Corner plot"
     }
   },
   "menuConfig": {
@@ -764,6 +2133,18 @@
           "image": "sample/Screenshot 2026-09-04 130123.png",
           "imageName": "Screenshot 2026-09-04 130123.png"
         }
+      },
+      {
+        "id": "builtin-menuimage",
+        "title": "MENU IMAGE",
+        "kind": "child",
+        "contentType": "menuimage",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "menuimage",
+        "enabled": true
       }
     ]
   }

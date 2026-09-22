@@ -1,6 +1,216 @@
 {
   "version": 1,
   "note": "Build91 in-layout amenities",
-  "savedAt": "2026-09-21T12:44:52.802Z",
-  "amenities": []
+  "savedAt": "2026-09-22T09:18:58.439Z",
+  "amenities": [
+    {
+      "id": "am1",
+      "name": "Seating  Area",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-seating-area.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -44.24,
+        "latDeg": -42.86
+      }
+    },
+    {
+      "id": "am2",
+      "name": "Open Lawn",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-open-lawn.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -5.98,
+        "latDeg": -46.84
+      }
+    },
+    {
+      "id": "am3",
+      "name": "Jogging Track",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-jogging-track.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -12.94,
+        "latDeg": -56.99
+      }
+    },
+    {
+      "id": "am4",
+      "name": "Multipurpose Play Court",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-multipurpose-play-court.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -18.93,
+        "latDeg": -67.84
+      }
+    },
+    {
+      "id": "am5",
+      "name": "Kids Play Area",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-kids-play-area.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": -32.33,
+        "latDeg": -78.21
+      }
+    },
+    {
+      "id": "am6",
+      "name": "Cycling Track",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-cycling-track.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 111.78,
+        "latDeg": -79.73
+      }
+    },
+    {
+      "id": "am7",
+      "name": "Gazebo",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-gazebo.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 120.52,
+        "latDeg": -68.38
+      }
+    },
+    {
+      "id": "am8",
+      "name": "Swimming Pool",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-swimming-pool.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 107.34,
+        "latDeg": -54.14
+      }
+    },
+    {
+      "id": "am9",
+      "name": "Mandir",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-mandir.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 96.24,
+        "latDeg": -57.36
+      }
+    },
+    {
+      "id": "am10",
+      "name": "Club House",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-club-house.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 95.87,
+        "latDeg": -47.39
+      }
+    },
+    {
+      "id": "am11",
+      "name": "Gym",
+      "icon": "clubhouse",
+      "facing": "",
+      "size": "",
+      "dimensions": "",
+      "price": "",
+      "block": "",
+      "tour_url": "",
+      "notes": "",
+      "render": {
+        "file": "sample/amenity-gym.web.jpg"
+      },
+      "hotspot": {
+        "lonDeg": 104.29,
+        "latDeg": -45.62
+      }
+    }
+  ]
 }

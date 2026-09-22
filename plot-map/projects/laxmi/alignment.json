@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "note": "Build91 plot-map overlay alignment",
+  "savedAt": "2026-09-22T06:46:08.054Z",
+  "transform": {
+    "tx": 0,
+    "ty": 0,
+    "scale": 1,
+    "rotationDeg": 0
+  },
+  "view": {
+    "lonDeg": -179.51,
+    "latDeg": -0.16,
+    "fov": 106
+  },
+  "opacity": 0.5,
+  "menuConfig": {
+    "tree": [
+      {
+        "id": "builtin-aerial",
+        "title": "AERIAL VIEW",
+        "kind": "child",
+        "contentType": "aerial",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "aerial",
+        "enabled": false
+      },
+      {
+        "id": "builtin-landmarks",
+        "title": "LANDMARKS",
+        "kind": "child",
+        "contentType": "landmarks",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "landmarks",
+        "enabled": false
+      },
+      {
+        "id": "builtin-tour",
+        "title": "VIRTUAL TOUR",
+        "kind": "child",
+        "contentType": "virtualtour",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "tour",
+        "enabled": true
+      },
+      {
+        "id": "builtin-menuimage",
+        "title": "MENU IMAGE",
+        "kind": "child",
+        "contentType": "menuimage",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "menuimage",
+        "enabled": false
+      }
+    ]
+  }
+}

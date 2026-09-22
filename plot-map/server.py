@@ -530,9 +530,19 @@ class Handler(SimpleHTTPRequestHandler):
         import email.utils
         path = self.translate_path(self.path)
 
-        # Let the base class deal with directory redirects / index.html / listings
+        # A directory URL ending in "/" (the app's own entry point, "/?project=...") is served
+        # as its index.html through THIS path, so it gets the same Cache-Control: no-cache as
+        # /index.html. Handing it to the base class sent no Cache-Control at all, so browsers
+        # heuristically cached the page: a fresh app.js (always ?v=-busted) then ran against a
+        # stale index.html missing newly added elements — a button with nothing to act on.
+        # Anything else about directories (the /dir -> /dir/ redirect, listings) still goes to
+        # the base class.
         if os.path.isdir(path):
-            return super().do_GET()
+            idx = os.path.join(path, "index.html")
+            if self.path.split("?", 1)[0].endswith("/") and os.path.isfile(idx):
+                path = idx
+            else:
+                return super().do_GET()
 
         if not os.path.isfile(path):
             self.send_error(404, "File not found")
@@ -548,6 +558,22 @@ class Handler(SimpleHTTPRequestHandler):
                 pass
         size     = os.path.getsize(path)
         last_mod = email.utils.formatdate(os.path.getmtime(path), usegmt=True)
+        # Conditional GET (2026-09-22): a browser re-checking a file it already holds gets a 304
+        # with no body instead of the whole file again. Every static file here is sent no-cache, so
+        # each reuse IS a re-check — without this, a revisit re-downloaded the pano, the site plan
+        # and every tour room in full. Whole-second granularity, as HTTP dates are.
+        ims = self.headers.get("If-Modified-Since")
+        if ims and not self.headers.get("Range"):
+            try:
+                since = email.utils.parsedate_to_datetime(ims).timestamp()
+                if int(os.path.getmtime(path)) <= int(since):
+                    self.send_response(304)
+                    self.send_header("Last-Modified", last_mod)
+                    self.send_header("Cache-Control", "public, max-age=31536000, immutable" if "/vendor/" in path.replace("\\", "/") else "no-cache")
+                    self.end_headers()
+                    return
+            except Exception:
+                pass
         # Only /vendor/* (third-party libraries this project never edits in place — a
         # version bump means a new filename, not a content change) gets long-lived
         # caching. Everything else — app.js/styles.css/index.html (already cache-busted

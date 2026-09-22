@@ -5,6 +5,393 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-22 (Faster loading: lossless site plan, real caching, 304s, first tour warmed)
+
+Requested: cut loading time wherever possible without lowering quality.
+
+Measured first (anandman): the loading screen waited on a **38.5 MB PNG** site plan
+(`Final (2).web.png`, 7680x5223 RGBA); the client fetched the pano, the site plan and every tour
+room with `cache: 'no-store'` (tours also with a `?v=Date.now()` bust), so they were re-downloaded
+in full on EVERY visit; server.py never answered a conditional GET with 304; and nothing touched
+a tour until the visitor tapped it.
+
+- **Site plan -> lossless WebP**: 38.5 MB -> 23.2 MB (40% smaller). Verified: alpha channel
+  identical and every visible pixel identical (only the invisible colour under fully transparent
+  pixels — 60% of this image — is discarded). New file `Final (2).web.webp`; anandman's
+  alignment.json points at it (savedAt bumped so an older admin session can't win over it); the
+  PNG is left in place as a fallback.
+- **Caching**: `fetchBlobWithProgress(url, onBytes, { fresh })` — admin stays `no-store`; the
+  client now fetches VERSIONED URLs (`?v=<alignment savedAt>` for pano / site plan; tours already
+  carried `?v=<tour.json savedAt>`) with normal caching, so an unchanged file comes from the
+  browser / service worker / CDN or a 304, and an admin change still produces a new URL.
+  `loadPanoTexture` keeps its cache-bust for the admin only.
+- **server.py 304s**: `If-Modified-Since` on a static file now returns 304 with no body.
+- **First tour warmed**: `warmFirstTourRoom()` — after boot, once idle (~1.5s + idle callback),
+  downloads (bytes only; no decode, no GPU memory) the room VIRTUAL TOUR opens first. Client only;
+  skipped on Save-Data / 2G and if a tour is already open.
+
+Measured in a real browser (CDP), anandman at 4 MB/s, fresh profile, old code vs new:
+- First visit, loading screen gone: 13.6s -> 10.5s; downloaded 47.9 MB -> 32.6 MB.
+- First tap on VIRTUAL TOUR, room on screen: 4.7s -> 2.3s; downloaded at the tap 17.4 MB -> 0.
+- Second visit, loading screen gone: 14.5s -> 2.3s; downloaded 46.7 MB -> 0.3 MB. server.log
+  confirms: the new second visit got 304s for the site plan, pano and audio; the old one
+  re-downloaded the 38.5 MB PNG, the pano and the audio in full.
+
+Not changed: tour panoramas (79 MB of 8K JPEGs) — no lossless JPEG optimiser is available here,
+and re-encoding would cost quality. Site-plan uploads in the admin are still stored as uploaded.
+
+SW v42. Files: `app.js`, `server.py`, `sw.js`; anandman `alignment.json` + `Final (2).web.webp`.
+
+---
+## 2026-09-22 (Amenity card / viewer never flash the previous amenity's picture; lighter renders)
+
+Reported: tapping an amenity first shows the LAST amenity's image, then switches to the right one.
+
+Cause: the card's single <img> is reused; setting a new `src` leaves the previous picture on
+screen until the new one has downloaded and decoded (~1 MB each). The full-size viewer
+(`updateGallerySlide`) had the same flaw by design — it kept the old picture at 30% while the new
+one loaded — plus a race: a slower, earlier load could land last and overwrite the one asked for.
+
+- `setCardImage` (card, used by openAmCard and openLmCard): hides the old picture the moment
+  another is requested (`.am-card-thumb.is-loading`: image transparent, gold spinner, min height),
+  reveals the new one on load; a token stops a stale load from un-hiding a card that has moved on.
+- Viewer: a fresh `openClientGalleryModal` clears the previous picture and shows the spinner;
+  `galleryImgToken` makes only the latest request able to land. Slide-to-slide fading inside a
+  gallery is unchanged.
+- Render uploads (landmark + amenity) now 1600px / 82% (`RENDER_CAP` / `RENDER_QUALITY`), were
+  2000px / 90%.
+- anandman's 11 amenity images re-encoded from their originals at 1600px / 80% progressive, same
+  filenames: 9.2 MB -> 5.2 MB (44% smaller, ~0.3–0.6 MB each). Originals kept in
+  `projects/anandman/.originals/amenity-renders-2026-09-22/` (git-ignored, not deployed).
+
+Verified in a real browser (CDP) on anandman with real taps: card opened on Multipurpose Play
+Court (1600px compressed image), then Mandir on a throttled network — the picture slot showed
+only the spinner for 2.3s, then Mandir, never the previous picture; the viewer opened on Mandir,
+then on Multipurpose Play Court showed that image straight away, never Mandir's.
+
+Noticed, not changed: at the opening view Gym's and Club House's pins sit under a neighbouring
+name, so a tap there hits the neighbour's label instead.
+
+SW v41. Files: `app.js`, `styles.css`, `sw.js`; anandman amenity images.
+
+---
+## 2026-09-22 (Background music downloads during the loading screen)
+
+Reported: the audio arrives long after the website has loaded. Asked for it to be part of the
+first-visit loading time.
+
+Cause: `<audio id="siteAudio" preload="none">` pointed at the file's URL, and browsers refuse
+sound before a first tap — so the 4 MB track (anandman `audio.mp3`) only started downloading on
+that tap and played after a visible delay.
+
+- Boot (client only; not admin, which never auto-plays; not a file:// bundle) now downloads the
+  track with `fetchBlobWithProgress` in the same `Promise.all` as the pano and ground image, so
+  the loading screen waits for it and the progress bar counts it (the 90 points are split
+  equally between whatever actually needs downloading). It then plays from an in-memory object
+  URL (`state.audio.preloadedUrl`, preferred by `siteAudioSrc`).
+- While that download runs, `startSiteAudio` does nothing (`state.audio.preloading`), so the
+  element can't start a second, streaming download of the same file; boot calls
+  `applySiteAudio()` again when it lands. A tap made during loading has already given the page
+  the activation play() needs. A failed download falls back to streaming, as before.
+- A preloaded (blob:) source sets `preload="auto"` so it's decoded before the first tap.
+- `fetchBlobWithProgress` now keeps the response's content type on the Blob (an untyped audio
+  blob can be refused by Safari).
+- The offline precache list uses the file's real URL for the music, not `siteAudioSrc()`, which
+  now returns the blob: URL.
+
+Trade-off: the loading screen stays up until the track has arrived too — on a slow connection,
+roughly the time the extra 4 MB takes, since it shares bandwidth with the pano.
+
+Verified in a real browser (CDP) on anandman at ~1 MB/s with the normal user-gesture autoplay
+policy: audio.mp3 was downloaded exactly once, during the loading screen (1.2s -> 13.1s, in
+parallel with the pano), before the screen lifted; the element's source is the blob; with the
+network then switched OFF, a real tap started the music 226 ms later (760 ms before the
+preload=auto change).
+
+SW v40. Files: `app.js`, `sw.js`.
+
+---
+## 2026-09-22 (Amenity and landmark markers moved by transform, to stop them shaking on auto-rotate)
+
+Reported: amenity pointers vibrate in place while the view auto-rotates.
+
+Cause (by inspection): markers were repositioned every frame with `left`/`top`. That re-lays them
+out and paints them snapped to whole pixels — the pin and the label inside a marker each snapping
+on their own — so during a slow rotation they tick between pixels at different moments and
+shimmer against the ground and each other. The fractional zoom scale added the same day
+(`--am-s`) makes the label re-rasterise at a slightly different sub-pixel offset every frame,
+which likely made it more visible. The render loop order was checked and is fine (camera ->
+render -> DOM markers from the same camera), so this is not a frame of lag.
+
+Fix: `renderAmenities` sets `transform: translate3d(x, y, 0) scale(var(--am-s))` on the marker
+(left/top pinned at 0, `will-change: transform`), so it moves as one composited layer with
+sub-pixel precision. Landmark pins and banners were positioned the same way and get the same
+treatment (`translate3d(...)`, the banner keeping its own `translate(-50%, -50%)` centring).
+Nothing read those left/top values back.
+
+NOT verified to make a visible difference. Screenshot bursts around a pin in headless Chrome
+(software GL), both during real auto-rotate and with the view stepped deterministically, showed
+no difference outside the test's own noise (the painted-centroid measurement wobbles ~±0.4px as
+the photo behind the pin shifts) — before 4 backward steps / mean error 0.59px, after 2 / 0.48px
+under auto-rotate; indistinguishable when stepped. Needs checking by eye on a real GPU.
+
+SW v39. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Amenity markers: shrink further, never hide any)
+
+Feedback on the entry below: don't hide any amenities — just make the markers smaller when
+zoomed out, since they're clearly visible there.
+
+- Declutter removed entirely (`.is-collapsed`, the overlap pass and its CSS). Every amenity is
+  always drawn.
+- Scale range widened to 0.5–1.1 with the 1:1 reference at 12 px/deg, which also puts the opening
+  view back at ~1.0 (the previous version showed it 15% larger).
+
+Verified in a real browser (CDP) on anandman, 1280x800: opening view 0.995 (pin 14px, label
+12.4px), all 11 shown; zoomed fully out 0.556 (pin 8px, label 7px), all 11 shown; zoomed in 1.1
+(pin 15px, label 13.8px).
+
+SW v38. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Zoom-responsive amenity markers + declutter)
+
+Reported: zoomed out, the amenity markers pile on top of each other. Asked for them to shrink
+when zoomed out (while staying readable) and grow the pointer sensibly when zoomed in.
+
+- **Scale** (`amenityScale`): pixels-per-degree of view (`H / fov`) against a 1:1 reference of
+  10, clamped to 0.74–1.15. It follows zoom AND screen size (a phone sits nearer the minimum).
+  Applied as `--am-s` on the layer; `.am-marker` scales about its own point, so pin and chip
+  shrink/grow around the amenity's exact spot. 0.74 keeps the label at ~9.3px.
+- **Declutter**: a marker whose name would overlap one already placed collapses to its gold dot
+  (`.is-collapsed`). Hovering the dot shows the name; tapping still opens the card. Names come
+  back as zooming in makes room. Placement order = the admin's amenity order with the selected
+  one first, so the same names win every frame (no flicker while panning). Chip sizes are measured
+  once per chip (`amChipSize`), not every frame.
+- Off in the admin's Amenities tab (scale 1, nothing collapsed — every marker must stay
+  draggable) and when names are switched off.
+
+Verified in a real browser (CDP) on anandman, 1280x800: opening view scale 1.15, 10 names + 1
+dot, 0 overlaps; zoomed fully out scale 0.74, label 9.3px, 6 names + 5 dots, 0 overlapping names
+(measured from the rendered chip boxes); hovering a collapsed dot ("Kids Play Area") showed its
+name and a real click opened its card; zoomed in scale 1.15, all names, 0 overlaps.
+
+SW v37. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Tour entry: the last screen fades under the spinner instead of a black screen)
+
+Requested: keep the spinner, but instead of a black screen while a tour loads, keep the screen the
+visitor was on, fading, with the loading animation on top.
+
+- The plot-map takeover is now `applyTourTakeover()`. A tour-to-tour switch still applies it at
+  once; a FRESH entry defers it to the handoff in `tourGoTo`, so the plot map (plots, landmarks,
+  amenities) stays on screen while the first room downloads.
+- Loader modes: `immediate` (entry, or a tap made before tours loaded) is a 60% dim over the live
+  current screen with the bare spinner + "Loading …"; the delayed light veil for slow room moves
+  is unchanged. At the handoff `tourLoaderToDark()` dips to dark for 260ms (TOUR_DIP_MS), the
+  takeover and the camera snap happen unseen, then the veil fades out into the room.
+- The tour's isometric minimap now appears at the handoff (`renderClientTourMap` also requires
+  `body.tour-open`), not over the loading plot map.
+
+Verified in a real browser (CDP) on anandman, throttled to ~300 KB/s, tapping before tour.json had
+arrived: veil `fading` "Loading tour…" with the plot map and landmarks still shown; plot map kept
+through the whole download; then dark -> plot map hidden -> veil off into the Mandir room. A
+tour-to-tour switch (GYM) still works.
+
+SW v36. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Tour loading: fade + spinner instead of a "random" screen; early taps wait for tours)
+
+Reported: the first time a virtual tour opens, the screen shows "something random"; wanted a
+fading transition with a loading animation for tour loads, without touching the site's own
+loading screen (#bootCurtain — unchanged).
+
+**Cause.** Entering a tour hides the plot map at once, but the first room's panorama is still
+downloading — so the visitor saw the bare drone photo with nothing on it, then a hard cut.
+
+**Tour loading veil** (`showTourLoader` / `hideTourLoader`, built on demand inside #pano):
+- Entering a tour: solid dark veil with a gold spinner and "Loading <room>…" appears at once;
+  the room is swapped in underneath and the veil fades out (0.46s, same as the room crossfade).
+- Room / tour switch, view hotspot, furnished-unfurnished swap: a light veil + spinner over the
+  current room, but only if the download takes longer than 180ms, so cached moves (the usual
+  case, thanks to neighbour prefetch) never flicker. It lifts right before the crossfade.
+- Always cleared on error, on exiting mid-load, and on tour exit.
+
+**Early taps.** The loading screen lifts before tours are loaded (anandman fetches its Google
+Sheet first; tour.json arrived 5.2s after the screen lifted in testing), so tapping VIRTUAL TOUR in
+that window said "This project has no virtual tours yet". Tour menu taps now wait on
+`toursReady` behind the solid veil ("Loading tour…") and proceed once tours arrive; a boot failure
+releases them too.
+
+Verified in a real browser (CDP) on anandman's client with the network throttled to ~300 KB/s:
+an early tap showed "Loading tour…" (no false notice), then "Loading mandir_front_view…", then
+faded into the room; a slow room move traced the veil 0 -> 1 after the delay, held at 1, then
+faded to 0 after load; switching to MODERN VILLA and moving to Kitchen showed "Loading 4.Living
+Room…" / "Loading 9.Kitchen…"; moving back to the cached Living Room never showed the veil.
+
+SW v35. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Names off = just the gold amenity dot)
+
+Requested: with 🏛 names off, don't keep the building-icon badge — leave only the gold pin dot.
+`.amenities.names-off .am-chip { display: none }` replaces the shrink-to-icon-badge rule. The dot
+(`.am-pin`) already takes pointer events, so tapping it still opens the amenity card.
+
+Verified in a real browser (CDP) on anandman: names off -> 11 dots, 0 icons, 0 names, 0 chips;
+a real mouse click on a dot (through #pano's capture and pick()) opened that amenity's card
+("Seating Area"). Landmarks unaffected.
+
+SW v34. Files: `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Correction: 📍 = amenity POINTS, 🏛 = amenity NAMES; landmarks untouched)
+
+Clarified after the entry below, which had it wrong: both buttons are AMENITY controls. 📍 shows
+or hides each amenity's point (pin + icon); 🏛 shows or hides its name. Landmarks are not
+controlled by either button and always show pins, banners and lines again.
+
+- The 📍 button is now `#amenityPointToggle` (was `#landmarkToggle`), with its own state
+  `state.showAmenityPoints` and a NEW localStorage key `b91-show-amenity-points` — deliberately not
+  the old `b91-show-landmarks`, so a visitor who had once hidden landmarks doesn't open to find
+  amenity points hidden.
+- `applyAmenityVisibility` sets `.points-off` / `.names-off` independently. One off shrinks the
+  chip to what's left (round icon badge, or the name alone — pointer tail removed); both off hides
+  the marker and closes any open amenity card. Admin's Amenities tab always shows both.
+- `applyLandmarkVisibility` no longer has a toggle; the landmark `.names-off` styles are removed.
+
+Verified in a real browser (CDP) on anandman's client, all four combinations, 11 amenities and
+the landmarks in frame: on/on 11 pins·11 names; points off 0·11; both off 0·0 (markers gone);
+names off 11·0; back on 11·11 — landmark pins, names and lines shown throughout.
+
+SW v33. Files: `app.js`, `index.html`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (📍 / 🏛 buttons hide the NAMES, keep the points)
+
+Reported: "these two buttons aren't working — the use case was to keep the points but hide the
+names." They did work, but did something else: each hid its whole layer, pins included. (In the
+admin's Landmarks/Amenities tab the layer is forced on for editing, so there they appeared to
+do nothing at all.)
+
+Now `state.showLandmarks` / `state.showAmenities` mean "show NAMES" and toggle a `.names-off`
+class; the layers themselves are always shown (except inside a tour, now guarded explicitly by
+`state.tourView` since the layer no longer hides itself). Landmarks keep their pin and lose the
+banner + connector line; amenities keep pin + icon and lose the text, the chip shrinking to a
+round icon badge. Names always show in the admin's editing tab (that's where banners are
+dragged). The 🏛 button no longer closes an open amenity card — the point is still there. Button
+titles/labels now read "Hide/Show landmark names" etc. Each visitor's choice is still remembered
+(same localStorage keys, so a visitor who had hidden a layer now gets its names hidden instead).
+
+Verified in a real browser (CDP) on anandman's client, with the view tilted so landmarks were in
+frame: 📍 -> landmark pins 5 stay, names 5 -> 0, lines hidden; 🏛 -> amenity pins/icons 11 stay,
+names 11 -> 0; clicking both again restores all names.
+
+SW v32. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 ("Add hotspot with view" — renamed, and fixed: the button did nothing)
+
+Requested: rename "＋ Add view here (upload pano)" to "＋ Add hotspot with view", make it work,
+and make the hotspot it creates identical to one from "＋ Add hotspot here" — the only difference
+being that the admin uploads the panorama it opens, and that panorama is not listed in the menu.
+
+**Why it did nothing.** The button clicked a hidden `<input type=file>` declared in index.html.
+server.py served `/` (the app's real entry URL, `/?project=…`) through the base class's directory
+handler, which sent no Cache-Control, so browsers cached the page heuristically; app.js is always
+fetched fresh (`?v=` busted). A fresh app.js against a stale page meant the button existed but its
+input didn't — `els.axTourViewFile?.click()` on null, silently. `/index.html` was already
+`no-cache`; only `/` wasn't.
+
+Fixed twice over:
+- server.py serves a `/`-terminated directory's index.html through `_serve_static`, so it gets the
+  same `Cache-Control: no-cache`.
+- `pickFile(accept, onFile)` builds the file input on the spot. The view upload, the unfurnished
+  upload and the menu-image upload all use it, and their three static inputs (plus `els` refs and
+  change listeners) are gone from index.html, so a cached page can never strand them again.
+
+The view's hotspot now uses the same default marker as a normal hotspot (was the ring), and gets
+the same row of controls.
+
+Verified by driving a real headless Chrome over CDP against the admin (not the iframe harness,
+which is what hung before): Tour tab -> open room -> the real button click (as a user gesture)
+opened a file chooser -> file supplied -> a view owned by Living Room was created, with a hotspot
+from Living Room using the default marker; its admin row has label, target (shown as
+"↳ … (view)"), marker, aim and delete; the hotspot is drawn in the room; the room list shows the
+view indented under Living Room.
+
+SW v31. Files: `app.js`, `index.html`, `server.py`, `sw.js`.
+
+---
+## 2026-09-22 (Fix: admin loaded a stale session instead of the project)
+
+Reported: "admin panel is not loaded, but the client link is working". The admin showed scale
+1.00 / rotate 0 / "Using the default panorama" / uncoloured plots, while anandman's
+alignment.json on disk has scale 0.64, rotation 180 and its own panorama.
+
+Cause: on load the admin restores the newer of its working SESSION (IndexedDB) and DRAFT
+(localStorage) over the committed files. Both are a single slot per browser shared by every
+project, and neither recorded which project it came from — so a session saved at 10:50 today
+(default placement, no panorama) beat the file saved yesterday and replaced the whole project in
+the admin. The client never reads sessions, which is why it was unaffected. How that snapshot
+was produced isn't certain (a Reset, or a load while WebGL was down would both fit); the bug is
+that any snapshot could override any project.
+
+Fix: `buildSession` and the draft now carry `projectId: BOOT_PROJECT`, and `belongsToThisProject`
+gates both restores. A snapshot from another project, or an unstamped one from before this
+change, is ignored rather than trusted — so the stale one here stops applying on the next reload
+with no manual step. Checked by running the real `belongsToThisProject`/`readDraft` against
+unstamped, other-project and same-project snapshots.
+
+Side effect: unsaved (never-Saved) admin work sitting in a pre-fix session will not be restored
+on its next reload. Saved work is unaffected — it lives in the project files.
+
+SW v30. Files: `app.js`, `sw.js`.
+
+---
+## 2026-09-22 (Tour VIEWS: panoramas reached only through a hotspot)
+
+Requested: a second kind of tour hotspot that swaps to a panorama which is NOT a room — e.g.
+"Curtains Close" (same room, curtains drawn) or "Window View" (a close-up) — and so must not
+appear in the menu's room list or on the isometric.
+
+Built as a node flagged `isView: true` with `viewOf` = the node it opens from, rather than a
+picture hung off the hotspot: a view needs a start angle, its own hotspots (the way back is one)
+and optionally its own unfurnished render, all of which a node already has. Loading, crossfade,
+cache, save, export and offline precache therefore need no changes.
+
+Decisions (from the request): the admin places and names the return hotspot themselves (no
+automatic back button); each view has its own start view, set like any room; views can carry an
+unfurnished render; views can open further views.
+
+**Client.** Views are excluded from the drawer's room list and the room-choice count. While in a
+view, "you are here" stays on the owning room (`owningRoomId` walks `viewOf` up, cycle-guarded):
+menu highlight and minimap dot. The view cone is hidden in a view — a view is its own panorama
+with its own lon 0, so aiming the room's cone from it would point arbitrarily. Tapping the
+owning room in the menu always leaves a view, so a visitor can't get stuck even without a return
+hotspot.
+
+**Admin.** "＋ Add view here (upload pano)" beside "＋ Add hotspot here": uploads the panorama,
+creates the view owned by the room open in the viewer, and drops a ring-marker hotspot to it at
+the centre of the current view. Views list indented under their room with ↳ instead of the start
+star (a tour can't start in one — also enforced in `parseTours`). Hotspot target dropdowns label
+views "↳ name (view)". Isometric editor and placed-counts list rooms only. Deleting a room
+deletes its views, their views, and every link and map dot touching them.
+
+Verified in a browser (client, real render pixels) on a throwaway tour with a room, a view and a
+nested view: room list shows only the two rooms; entering Curtains Close and then Window View
+swaps the pano while the menu and minimap stay on Living Room with the cone hidden; the admin's
+"Curtains Open" hotspot returns; the menu room row leaves a view; save round-trips
+`isView`/`viewOf`. Admin logic (ordering, nested ownership, cycle guard, cascade delete) verified
+by running the real functions in Node — the admin page itself hangs inside the headless test
+harness even on the pre-change code, so its rendering and the upload flow were not exercised.
+
+SW v29. Files: `app.js`, `index.html`, `styles.css`, `sw.js`.
+
+---
 ## 2026-09-21 (New builtin: MENU IMAGE — a picture drawn inside the menu, e.g. a QR code)
 
 Requested: show an image in the client menu under CONTACT US (a QR code), managed from admin

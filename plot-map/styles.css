@@ -699,6 +699,7 @@ body.is-admin .compass { display: none; }
 .lm-lines line.is-sel { stroke: #9ab33b; stroke-width: 2.5; opacity: 1; }
 .lm-pin {
   position: absolute;
+  left: 0; top: 0; will-change: transform;   /* placed by renderLandmarks with translate3d — see .lm-banner */
   width: 9px; height: 9px;
   margin: -4.5px 0 0 -4.5px;
   border-radius: 50%;
@@ -709,6 +710,7 @@ body.is-admin .compass { display: none; }
 .lm-pin::after { display: none; }
 .lm-banner {
   position: absolute;
+  left: 0; top: 0; will-change: transform;   /* placed by renderLandmarks with translate3d(x, y) translate(-50%, -50%) */
   transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
@@ -782,7 +784,11 @@ body.is-admin .compass { display: none; }
 .lm-overflow-hint[hidden] { display: none; }
 .amenities[hidden] { display: none; }
 /* 0-size anchor sits exactly on the hotspot; its children (pin + label) position off it */
-.am-marker { position: absolute; width: 0; height: 0; pointer-events: none; }
+.am-marker { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none;
+  /* Placed by renderAmenities with translate3d(x, y) scale(--am-s): the 0x0 marker sits exactly
+     on the amenity's spot and scales about it. A transform, not left/top, so it moves sub-pixel
+     smoothly on the compositor during auto-rotate instead of snapping pixel to pixel. */
+  transform-origin: 0 0; will-change: transform; }
 /* the pin dot marks the exact spot (mirrors the landmark pin) */
 .am-pin {
   position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
@@ -810,6 +816,18 @@ body.is-admin .compass { display: none; }
 .am-chip:hover { transform: translateX(-50%) scale(1.05); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 1px var(--gold-soft); }
 .am-ico { font-size: 18px; line-height: 1; flex: none; }
 .am-label { font-weight: 700; font-size: 12.5px; color: #fff; letter-spacing: .2px; }
+/* Amenity marker parts (2026-09-22): 📍 toggles the POINT, 🏛 the NAME.
+   - names off (`.names-off`): only the gold pin dot remains — the whole chip goes, icon included
+     (on request: no building badge, just the dot). The dot is itself tappable (pointer-events on
+     .am-pin), so the amenity card still opens.
+   - points off (`.points-off`): pin and icon go, the chip shows the name alone.
+   - both off: the whole marker goes. */
+.amenities.names-off .am-chip { display: none; }
+.amenities.points-off .am-pin,
+.amenities.points-off .am-ico { display: none; }
+.amenities.points-off .am-chip { padding: 5px 11px; }
+.amenities.points-off .am-chip::after { display: none; }   /* the little pointer down to the pin */
+.amenities.points-off.names-off .am-marker { display: none; }
 .am-empty-label { color: var(--text-mute); font-weight: 600; font-style: italic; }
 .am-marker.is-sel .am-chip { border-color: var(--gold); box-shadow: 0 10px 26px rgba(0,0,0,.6), 0 0 0 2px var(--gold); }
 .am-marker.is-sel .am-pin { box-shadow: 0 0 0 4px rgba(212,175,55,.5), 0 2px 7px rgba(0,0,0,.55); }
@@ -824,6 +842,16 @@ body.is-admin .compass { display: none; }
 }
 .am-card-thumb[hidden] { display: none; }
 .am-card-thumb img { display: block; width: 100%; max-height: 168px; object-fit: cover; }
+/* Loading a different picture (see setCardImage): the previous one is hidden, never shown, and a
+   spinner holds the space until the new one has loaded. */
+.am-card-thumb.is-loading { min-height: 120px; }
+.am-card-thumb.is-loading img { opacity: 0; }
+.am-card-thumb.is-loading::before,
+.gallery-lightbox-container .is-loading::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+  border-radius: 50%; border: 3px solid rgba(255, 255, 255, .16); border-top-color: var(--gold, #d4af37);
+  animation: tour-loader-spin .8s linear infinite; z-index: 1;
+}
 .am-card-thumb-hint {
   position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 999px;
   background: rgba(8,10,14,.72); color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .3px;
@@ -3624,6 +3652,42 @@ body.tour-map-on .compass { display: none; }
 .builtin-mi-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .builtin-mi-actions .btn { flex: 1 1 auto; justify-content: center; font-size: 11px; }
 
+/* ── Tour loading veil (2026-09-22) — see showTourLoader. Sits over the panorama and its
+   hotspots, under the minimap, the version toggle and the drawer. Never blocks input: tv.busy
+   already stops a second move. Fade length matches the room crossfade (TOUR_FADE_MS). ── */
+.tour-loader {
+  position: absolute; inset: 0; z-index: 12;
+  display: grid; place-items: center;
+  pointer-events: none;
+  opacity: 0; visibility: hidden;
+  background-color: rgba(8, 10, 14, .35);
+  transition: opacity .46s ease, visibility 0s linear .46s, background-color .26s ease;
+}
+.tour-loader.is-on { opacity: 1; visibility: visible; transition: opacity .2s ease, visibility 0s, background-color .26s ease; }
+/* Entering a tour: the visitor's CURRENT screen stays visible, fading darker, with the spinner
+   over it (2026-09-22, on request — was a solid black screen). */
+.tour-loader.is-fading { background-color: rgba(8, 10, 14, .6); }
+/* The handoff: a quick dip to dark (TOUR_DIP_MS) while the room is swapped in underneath,
+   then the whole veil fades out into the room. */
+.tour-loader.is-dark { background-color: #0b0d12; }
+.tour-loader-box {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 16px 22px; border-radius: 14px;
+  background: rgba(15, 18, 26, .72);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .45);
+}
+.tour-loader.is-fading .tour-loader-box { background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.tour-loader-spin {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, .16);
+  border-top-color: var(--gold, #d4af37);
+  animation: tour-loader-spin .8s linear infinite;
+}
+@keyframes tour-loader-spin { to { transform: rotate(360deg); } }
+.tour-loader-txt { color: rgba(255, 255, 255, .85); font-size: 12.5px; font-weight: 600; letter-spacing: .3px; }
+@media (prefers-reduced-motion: reduce) { .tour-loader-spin { animation-duration: 2.4s; } }
+
 /* ── Furnished / unfurnished toggle (client, 2026-09-21) ─────────────────────
    Top-CENTRE: the two upper corners are already taken (compass + minimap right, drawer
    toggle left), and centring is also what the reference tour does. The bar is a child of
@@ -3895,6 +3959,12 @@ body.tour-open .lm-overflow-hint { display: none !important; }
 .ax-tour-hsadd { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .ax-tour-hsadd .ax-tour-hsto { width: 100%; }
 .ax-tour-hsadd .btn { width: 100%; justify-content: center; }
+/* Views (2026-09-22): indented under the room that owns them, with a ↳ in place of the
+   start star — a tour can't start in a view. */
+.ax-tour-node.is-view { position: relative; }
+.ax-tour-viewtag { width: 22px; flex: none; text-align: center; color: var(--gold, #d4af37); font-size: 13px; }
+.ax-tour-node.is-view .ax-tour-nodename { font-style: italic; }
+.ax-tour-addview { border-style: dashed; }
 .ax-tour-dv, .ax-tour-openall, .ax-tour-exit { width: 100%; margin-top: 7px; }
 /* The compass-direction picker sits directly above the "Set as start view" button it's
    saved alongside — a labelled row rather than squeezing the select onto the button. */

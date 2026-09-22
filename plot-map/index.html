@@ -382,10 +382,11 @@
       </div>
       <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false" aria-label="Show plot numbers"
         title="Show plot numbers">#</button>
-      <button class="btn btn-icon" id="landmarkToggle" type="button" aria-pressed="false" aria-label="Show landmarks"
-        title="Show landmarks">📍</button>
-      <button class="btn btn-icon" id="amenityToggle" type="button" aria-pressed="true" aria-label="Show amenities"
-        title="Hide amenities">🏛️</button>
+      <!-- Both are AMENITY controls (2026-09-22): 📍 shows/hides each amenity's POINT, 🏛 its NAME. -->
+      <button class="btn btn-icon" id="amenityPointToggle" type="button" aria-pressed="true" aria-label="Hide amenity points"
+        title="Hide amenity points">📍</button>
+      <button class="btn btn-icon" id="amenityToggle" type="button" aria-pressed="true" aria-label="Hide amenity names"
+        title="Hide amenity names">🏛️</button>
       <button class="btn btn-icon" id="zoomIn" type="button" aria-label="Zoom in">+</button>
       <button class="btn btn-icon" id="zoomOut" type="button" aria-label="Zoom out">−</button>
       <button class="btn btn-icon" id="zoomReset" type="button" aria-label="Recenter on plots"
@@ -545,12 +546,7 @@
       <button class="btn btn-import" id="axTourAdd" type="button">＋ Add tour</button>
       <p class="ax-lm-empty" id="axTourEmpty">No tours yet.</p>
       <div class="ax-tour-list" id="axTourList" aria-label="Tours"></div>
-      <!-- MENU IMAGE builtin (2026-09-21): the picture drawn inside the client menu, e.g. a QR
-           code. Target node is state.menuImageTarget — a file input cannot carry it. -->
-      <input type="file" id="axMenuImageFile" accept="image/png,image/jpeg,image/webp,image/*" hidden />
       <input type="file" id="axTourNodeFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
-      <!-- Second render for the node named by state.tourAltTarget — see addTourNodeAltFromFile -->
-      <input type="file" id="axTourNodeAltFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
       <!-- one isometric / floor-plan image per tour (see setTourMapFromFile) -->
       <input type="file" id="axTourMapFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
       <div class="adminbar-actions">
