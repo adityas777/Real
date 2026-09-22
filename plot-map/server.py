@@ -148,6 +148,30 @@ def build_embedded_files_json(src_dir):
                 files[name] = fh.read()
     return json.dumps(files).replace("</", "<\\/")
 
+def prefer_webp_ground_image(raw, dest):
+    """Keep a project's site plan on its lossless WebP (2026-09-22). anandman's 38.5 MB PNG site plan
+    was converted to a pixel-identical 23 MB lossless WebP, but an admin page opened BEFORE that
+    change still held the PNG's name and, on its next Save, wrote it straight back into
+    alignment.json — which it did within the hour, undoing the saving on the live site. So when a
+    saved alignment points its groundImage at a .png and a same-named .webp exists beside it that is
+    NEWER than the PNG (i.e. a deliberate conversion), the reference is switched to the WebP. Any
+    other alignment is written through untouched, and a failure here never blocks the save."""
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+        gi = doc.get("groundImage") if isinstance(doc, dict) else None
+        f = gi.get("file") if isinstance(gi, dict) else None
+        if not f or not f.lower().endswith(".png"):
+            return raw
+        png = os.path.join(dest, os.path.basename(f))
+        webp = png[:-4] + ".webp"
+        if os.path.isfile(webp) and (not os.path.isfile(png) or os.path.getmtime(webp) > os.path.getmtime(png)):
+            gi["file"] = f[:-4] + ".webp"
+            sys.stderr.write(f"[save] groundImage kept on the lossless WebP: {os.path.basename(webp)}\n")
+            return json.dumps(doc, indent=2, ensure_ascii=False).encode("utf-8")
+    except Exception:
+        pass
+    return raw
+
 def tour_pano_basenames(src_dir):
     """Every virtual-tour node panorama in this project. These are WebGL textures exactly
     like the background pano, so under file:// they must be inlined as data: URIs too —
@@ -879,6 +903,8 @@ class Handler(SimpleHTTPRequestHandler):
             data = f.get("data", "")
             try:
                 raw = base64.b64decode(data) if f.get("encoding") == "base64" else str(data).encode("utf-8")
+                if name == "alignment.json":
+                    raw = prefer_webp_ground_image(raw, dest)
                 with open(path, "wb") as out:
                     out.write(raw)
                 try:

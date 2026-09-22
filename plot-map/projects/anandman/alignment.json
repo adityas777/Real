@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-09-22T09:18:58.439Z",
+  "savedAt": "2026-09-22T09:32:18.774Z",
   "transform": {
     "tx": -0.4359,
     "ty": -0.0703,
@@ -15,7 +15,7 @@
   },
   "opacity": 1,
   "groundImage": {
-    "file": "Final (2).web.png",
+    "file": "Final (2).web.webp",
     "opacity": 1
   },
   "panoImage": {
