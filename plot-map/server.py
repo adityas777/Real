@@ -148,14 +148,27 @@ def build_embedded_files_json(src_dir):
                 files[name] = fh.read()
     return json.dumps(files).replace("</", "<\\/")
 
+def _sha1_file(path):
+    import hashlib
+    h = hashlib.sha1()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
 def prefer_webp_ground_image(raw, dest):
     """Keep a project's site plan on its lossless WebP (2026-09-22). anandman's 38.5 MB PNG site plan
     was converted to a pixel-identical 23 MB lossless WebP, but an admin page opened BEFORE that
-    change still held the PNG's name and, on its next Save, wrote it straight back into
-    alignment.json — which it did within the hour, undoing the saving on the live site. So when a
-    saved alignment points its groundImage at a .png and a same-named .webp exists beside it that is
-    NEWER than the PNG (i.e. a deliberate conversion), the reference is switched to the WebP. Any
-    other alignment is written through untouched, and a failure here never blocks the save."""
+    change still holds the PNG — and on every Save it writes the PNG's NAME back into
+    alignment.json and re-sends the PNG FILE itself, undoing the saving on the live site.
+
+    So when a saved alignment points its groundImage at a .png that has a same-named .webp beside
+    it, the reference is switched to the WebP if the PNG on disk is the very image the WebP was
+    made from. That is decided by CONTENT: `<name>.webp.source.json` records the SHA-1 of the source
+    PNG (written when the WebP is made). An earlier version compared file times instead, and was
+    defeated within the hour because re-sending the same PNG makes it the newer file. A PNG with a
+    different hash is a genuinely new plan and is left alone. Without a record, falls back to
+    "the WebP is newer". Anything else is written through untouched; this never blocks a save."""
     try:
         doc = json.loads(raw.decode("utf-8"))
         gi = doc.get("groundImage") if isinstance(doc, dict) else None
@@ -164,7 +177,16 @@ def prefer_webp_ground_image(raw, dest):
             return raw
         png = os.path.join(dest, os.path.basename(f))
         webp = png[:-4] + ".webp"
-        if os.path.isfile(webp) and (not os.path.isfile(png) or os.path.getmtime(webp) > os.path.getmtime(png)):
+        if not os.path.isfile(webp):
+            return raw
+        same = False
+        rec = webp + ".source.json"
+        if os.path.isfile(rec) and os.path.isfile(png):
+            with open(rec, "r", encoding="utf-8") as fh:
+                same = json.load(fh).get("sha1") == _sha1_file(png)
+        elif not os.path.isfile(rec):
+            same = not os.path.isfile(png) or os.path.getmtime(webp) > os.path.getmtime(png)
+        if same:
             gi["file"] = f[:-4] + ".webp"
             sys.stderr.write(f"[save] groundImage kept on the lossless WebP: {os.path.basename(webp)}\n")
             return json.dumps(doc, indent=2, ensure_ascii=False).encode("utf-8")
@@ -891,6 +913,10 @@ class Handler(SimpleHTTPRequestHandler):
         real_root = os.path.realpath(PROJECTS_DIR)
         written, skipped = [], []
         import base64
+        # alignment.json LAST: prefer_webp_ground_image compares the site-plan PNG on disk, so any PNG
+        # arriving in this same save must already be written — otherwise a genuinely new plan would be
+        # judged against the old file.
+        files = sorted(files, key=lambda x: safe_filename(x.get("name")) == "alignment.json")
         for f in files:
             name = safe_filename(f.get("name"))
             if not name:

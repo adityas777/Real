@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 in-layout amenities",
-  "savedAt": "2026-09-22T09:18:58.439Z",
+  "savedAt": "2026-09-22T10:36:57.245Z",
   "amenities": [
     {
       "id": "am1",
@@ -56,8 +56,8 @@
         "file": "sample/amenity-jogging-track.web.jpg"
       },
       "hotspot": {
-        "lonDeg": -12.94,
-        "latDeg": -56.99
+        "lonDeg": -11.84,
+        "latDeg": -57.16
       }
     },
     {
@@ -113,8 +113,8 @@
         "file": "sample/amenity-cycling-track.web.jpg"
       },
       "hotspot": {
-        "lonDeg": 111.78,
-        "latDeg": -79.73
+        "lonDeg": 105.58,
+        "latDeg": -79.75
       }
     },
     {
@@ -132,8 +132,8 @@
         "file": "sample/amenity-gazebo.web.jpg"
       },
       "hotspot": {
-        "lonDeg": 120.52,
-        "latDeg": -68.38
+        "lonDeg": 117.98,
+        "latDeg": -68.53
       }
     },
     {
@@ -170,8 +170,8 @@
         "file": "sample/amenity-mandir.web.jpg"
       },
       "hotspot": {
-        "lonDeg": 96.24,
-        "latDeg": -57.36
+        "lonDeg": 95.13,
+        "latDeg": -57.07
       }
     },
     {
@@ -189,8 +189,8 @@
         "file": "sample/amenity-club-house.web.jpg"
       },
       "hotspot": {
-        "lonDeg": 95.87,
-        "latDeg": -47.39
+        "lonDeg": 95.28,
+        "latDeg": -47.21
       }
     },
     {
@@ -208,8 +208,8 @@
         "file": "sample/amenity-gym.web.jpg"
       },
       "hotspot": {
-        "lonDeg": 104.29,
-        "latDeg": -45.62
+        "lonDeg": 102.98,
+        "latDeg": -45.66
       }
     }
   ]

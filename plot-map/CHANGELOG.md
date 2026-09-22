@@ -5,6 +5,103 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-22 (Fix: landmark banners thrown to the top-left corner when a category is selected)
+
+Reported (desktop AND mobile, on the tunnel in incognito): in the landmarks view the lines rose
+from the pins to nothing and Suyash Hospital's banner sat jammed in the top-left corner.
+
+Cause — introduced earlier the same day by the anti-shimmer change, which moved banners from
+left/top to an inline `transform: translate3d(...) translate(-50%, -50%)`. styles.css had
+`.lm-banner.is-cat-matched { transform: scale(1.08) !important }` (and `.is-dimmed` a
+`transform: scale(0.9)` with a transform transition). Harmless while position was left/top; once
+position lived in `transform`, the !important rule replaced it wholesale, so every banner of the
+SELECTED category landed at left:0/top:0. The earlier tests only ever checked "All landmarks",
+never a single category, so they missed it.
+
+Fix: the highlight's size is a custom property, `--lm-s` (0.9 dimmed, 1.08 matched), multiplied
+into the positioning transform by renderLandmarks — `... translate(-50%, -50%) scale(var(--lm-s, 1))`.
+No stylesheet rule sets `transform` on a banner any more. `--lm-s` is registered with @property so
+the size still animates; the position is never transitioned (a transform transition would make
+banners trail behind the moving view).
+
+Verified in a real browser (CDP), anandman, 1907x940 desktop and 800x380 phone: aerial near the
+horizon, LANDMARKS (ALL), ALL with the menu collapsed, and the HEALTHCARE and EDUCATION categories
+— every visible banner on screen, not under the menu strip or pills, not overlapping, and centred
+on its own line's end (0 detached, 0 in the corner). Negative control: re-injecting the old
+`is-cat-matched` rule into the page reproduces the report exactly (HEALTHCARE: 2 of 2 banners in
+the corner, detached from their lines, under the menu strip).
+
+SW v45. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
+## 2026-09-22 (Mobile: landmark banners kept on screen and apart; readable amenity names; save guard)
+
+Reported with a landscape-phone screenshot: landmark lines ran up off the top of the screen to
+nothing, and the one visible banner sat half under the menu strip. Asked to fix mobile layout
+generally.
+
+**Landmark banners** (`renderLandmarks`, all screen sizes). Banners are authored high in the sky;
+on a short landscape phone that sky is cut off, so they sat above the top edge. Now, per frame:
+- `landmarkSafeArea` measures what's free: clear of the client menu strip on the left and of the
+  pill row pinned along the top on a phone (measured by bounding box — `offsetParent`, used at
+  first, is always null for position:fixed, so the pills were never seen and a banner slid under
+  the Filter pill).
+- Horizontally unchanged in spirit: never dragged sideways; one that won't fit (now also counting
+  the menu strip) is hidden.
+- Vertically, highest first: a banner above the safe top is lowered to just inside it, straight
+  above its pin; a banner that would overlap one already placed moves up past it, or down if
+  there's no room up. Banners already clear on screen aren't moved; lines follow.
+
+**Amenity names on phones**: the phone stylesheet shrinks labels to ~8.5px and the zoom scale
+(pixels-per-degree) read a phone's short screen as "zoomed far out", so the two stacked to ~4px.
+On a phone the scale now follows fov only, clamped 0.9–1.3. Desktop unchanged.
+
+**Server save guard** (server.py, local): `prefer_webp_ground_image` now decides by CONTENT — a
+`<name>.webp.source.json` records the SHA-1 of the PNG the WebP was made from — because a stale
+admin tab re-sends the same PNG with every save, making it the NEWER file and defeating the
+time-based rule. `/api/save` now writes alignment.json last so the check sees any PNG from the
+same save. Tested: same PNG re-sent -> WebP; no PNG in the save -> WebP; a different PNG -> PNG.
+
+Verified in a real browser (CDP), anandman: 800x380 landscape phone, aerial view tilted to the
+horizon — 7 banners, 0 above the top, 0 cut at an edge, 0 under the menu strip, 0 under the top
+pills, 0 overlapping (was 8 overlapping pairs and all above the top); LANDMARKS section 5 banners,
+all clean; 1280x800 desktop both views clean. Phone amenity names 7.9px at the opening view, 7.7px
+fully zoomed out (were ~4px). Amenity card, tour room with isometric, and room list checked by
+screenshot at phone size.
+
+SW v44. Files: `app.js`, `server.py`, `sw.js`; anandman `Final (2).web.webp.source.json`.
+
+---
+## 2026-09-22 (Area filter: own dropdown menu — gold hover border instead of the browser's blue)
+
+Requested: hovering an option in the "Filter: All sizes" dropdown should not turn it blue, just
+add a gold border. The native <select> popup is drawn by the browser/OS and ignores CSS for
+hover, so this can't be styled — the popup is replaced.
+
+- The <select> stays in the DOM, hidden (`display:none`), as the single source of truth: every
+  existing read/write of `sel.value` / `sel.hidden` / `.is-hidden` and its 'change' listener
+  (`setAreaFilter`) is unchanged. `syncAreaTrigger` puts a <button> right after it that copies its
+  classes — so all existing pill styles and show/hide rules apply unchanged — and mirrors its
+  label, band tint and visibility. It follows the desktop select when renderLegend re-parents it.
+- `openAreaMenu`: a fixed-position listbox under the pill (kept on screen, flips up if needed),
+  each option in its band colour; hover and keyboard focus share one look — a 2px gold inset
+  border with a soft gold glow; the current choice is ticked. Arrow keys / Home / End / Enter /
+  Space / Esc / Tab; outside click and resize close it; hiding the filter closes it.
+- Side effect: band colours now show on iOS too (its native picker ignored them).
+- The pill's label gets a fixed max-width (170px; 100px in the landscape-phone top row): a
+  percentage cap resolved against the button's own content width and truncated "Filter: All
+  sizes" with room to spare.
+
+Verified in a real browser (CDP) on anandman with real mouse and keyboard input: native select
+not shown; menu lists All sizes / Type 1 (pink) / Type 2 (salmon); hovering Type 1 keeps its pink
+and computes `rgb(212,175,55) 0 0 0 2px inset` + a gold glow; clicking it closes the menu, tints
+the pill and sets the filter; Enter opens on the current choice, ArrowUp moves, Enter picks, Esc
+closes; on an 800x380 landscape phone the menu stays fully on screen; the label is untruncated
+on both.
+
+SW v43. Files: `app.js`, `styles.css`, `sw.js`.
+
+---
 ## 2026-09-22 (Faster loading: lossless site plan, real caching, 304s, first tour warmed)
 
 Requested: cut loading time wherever possible without lowering quality.

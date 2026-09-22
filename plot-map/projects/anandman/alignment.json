@@ -1,21 +1,21 @@
 {
   "version": 1,
   "note": "Build91 plot-map overlay alignment",
-  "savedAt": "2026-09-22T09:32:18.774Z",
+  "savedAt": "2026-09-22T10:50:09.690Z",
   "transform": {
-    "tx": -0.4359,
-    "ty": -0.0703,
-    "scale": 2.98,
-    "rotationDeg": 179.5
+    "tx": -0.4406,
+    "ty": -0.053,
+    "scale": 2.94,
+    "rotationDeg": 179.6
   },
   "view": {
-    "lonDeg": -359.59,
-    "latDeg": -90,
-    "fov": 120
+    "lonDeg": -1.54,
+    "latDeg": -88.16,
+    "fov": 75
   },
   "opacity": 1,
   "groundImage": {
-    "file": "Final (2).web.webp",
+    "file": "sample/Final (2).web.webp",
     "opacity": 1
   },
   "panoImage": {
@@ -47,16 +47,37 @@
       {
         "id": "afmu6ijrbs0",
         "name": "Type 1",
-        "color": "#fb50ab",
-        "min": 1000,
-        "max": 1200
+        "color": "#c5b45a",
+        "min": 1800,
+        "max": 2142
       },
       {
         "id": "afmu6ikwk01",
         "name": "Type 2",
-        "color": "#f67f6a",
-        "min": 1300,
-        "max": 2000
+        "color": "#c4966c",
+        "min": 1400,
+        "max": 1600
+      },
+      {
+        "id": "afmuchnazv2",
+        "name": "Type 3",
+        "color": "#bf8371",
+        "min": 1200,
+        "max": 1399
+      },
+      {
+        "id": "afmuchnpao3",
+        "name": "Type 4",
+        "color": "#978c8c",
+        "min": 1000,
+        "max": 1199
+      },
+      {
+        "id": "afmucho2b74",
+        "name": "Type 5",
+        "color": "#a49179",
+        "min": 800,
+        "max": 999
       }
     ]
   },

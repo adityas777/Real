@@ -2429,7 +2429,7 @@ function renderLegend(counts) {
   // being pushed to the far edge of the header. MOVED, not recreated — appendChild relocates
   // the live element, keeping its change listener and current selection intact, which also
   // means it has to be re-adopted here on every legend rebuild (innerHTML='' above drops it).
-  if (els.areaFilterSel) els.legend.appendChild(els.areaFilterSel);
+  if (els.areaFilterSel) { els.legend.appendChild(els.areaFilterSel); syncAreaTrigger(els.areaFilterSel); }
   // Landscape's compact stand-in for the header legend (hidden there, see styles.css) —
   // keep all three counts in sync the same way the header chips just were.
   syncZoomStatusButtons(counts);
@@ -2462,7 +2462,9 @@ function updateLegendVisibility() {
     if (!s) return;
     s.hidden = !hasFilters;
     s.classList.toggle('is-hidden', !show);
+    syncAreaTrigger(s);
   });
+  if (!show || !hasFilters) closeAreaMenu();
 }
 // Text colour that stays readable on an admin-picked band colour (perceived-luminance test).
 function areaBandTextColor(hex) {
@@ -2475,6 +2477,103 @@ function tintAreaSelect(sel) {
   const f = (state.area.filters || []).find((x) => x.id === sel.value);
   sel.style.backgroundColor = f ? f.color : '';
   sel.style.color = f ? areaBandTextColor(f.color) : '';
+  syncAreaTrigger(sel);
+}
+// ── Custom area-filter menu (2026-09-22) ─────────────────────────────────────
+// The native <select> popup is drawn by the browser/OS: hovering an option painted it blue, and
+// no CSS can change that (asked for: a gold border instead). So the <select> stays in the DOM,
+// hidden, as the single source of truth — every existing line that reads/writes `sel.value`,
+// `sel.hidden` or `.is-hidden`, and its 'change' listener, keeps working — while a <button> that
+// copies its classes (so every existing style and show/hide rule applies to it unchanged) opens
+// this menu instead. Also shows the band colours on iOS, whose native picker ignored them.
+function syncAreaTrigger(sel) {
+  if (!sel) return;
+  let b = sel._areaTrigger;
+  if (!b) {
+    b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('aria-haspopup', 'listbox');
+    b.setAttribute('aria-expanded', 'false');
+    b.setAttribute('aria-label', sel.getAttribute('aria-label') || 'Filter');
+    b.innerHTML = '<span class="aft-label"></span><span class="aft-chev" aria-hidden="true"></span>';
+    b.addEventListener('click', (e) => { e.stopPropagation(); if (areaMenuSel === sel) closeAreaMenu(); else openAreaMenu(sel); });
+    b.addEventListener('keydown', (e) => {
+      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); e.stopPropagation(); openAreaMenu(sel); }
+    });
+    sel._areaTrigger = b;
+    sel.style.display = 'none';                          // never shown; holds the value and fires 'change'
+  }
+  if (sel.nextSibling !== b) sel.after(b);               // the desktop select is re-parented on every legend rebuild
+  b.className = `${sel.className} area-filter-trigger`;
+  b.hidden = sel.hidden;
+  const o = sel.options[sel.selectedIndex];
+  b.querySelector('.aft-label').textContent = o ? o.textContent : '';
+  b.style.backgroundColor = sel.style.backgroundColor;
+  b.style.color = sel.style.color;
+}
+let areaMenuEl = null, areaMenuSel = null;
+function closeAreaMenu() {
+  if (!areaMenuEl) return;
+  areaMenuEl.remove(); areaMenuEl = null;
+  if (areaMenuSel && areaMenuSel._areaTrigger) areaMenuSel._areaTrigger.setAttribute('aria-expanded', 'false');
+  areaMenuSel = null;
+  document.removeEventListener('pointerdown', onAreaMenuOutside, true);
+  window.removeEventListener('resize', closeAreaMenu);
+}
+function onAreaMenuOutside(e) {
+  if (areaMenuEl && !areaMenuEl.contains(e.target) && !(areaMenuSel && areaMenuSel._areaTrigger.contains(e.target))) closeAreaMenu();
+}
+function chooseArea(sel, value) {
+  closeAreaMenu();
+  if (sel.value !== value) { sel.value = value; sel.dispatchEvent(new Event('change')); }
+  sel._areaTrigger?.focus({ preventScroll: true });
+}
+function openAreaMenu(sel) {
+  closeAreaMenu();
+  const trigger = sel._areaTrigger; if (!trigger) return;
+  const m = document.createElement('div');
+  m.className = 'area-menu';
+  m.setAttribute('role', 'listbox');
+  m.setAttribute('aria-label', sel.getAttribute('aria-label') || 'Filter');
+  const items = [...sel.options].map((o, i) => {
+    const it = document.createElement('div');
+    it.className = 'area-menu-opt' + (i === sel.selectedIndex ? ' is-selected' : '');
+    it.setAttribute('role', 'option');
+    it.setAttribute('aria-selected', String(i === sel.selectedIndex));
+    it.tabIndex = -1;
+    it.textContent = o.textContent;
+    if (o.style.backgroundColor) { it.style.backgroundColor = o.style.backgroundColor; it.style.color = o.style.color; }
+    it.addEventListener('click', (e) => { e.stopPropagation(); chooseArea(sel, o.value); });
+    it.addEventListener('pointerenter', () => it.focus({ preventScroll: true }));   // hover and keyboard share one look
+    m.appendChild(it);
+    return it;
+  });
+  m.addEventListener('keydown', (e) => {
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[Math.min(items.length - 1, i + 1)].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[Math.max(0, i - 1)].focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (i >= 0) chooseArea(sel, sel.options[i].value); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeAreaMenu(); trigger.focus(); }
+    else if (e.key === 'Tab') closeAreaMenu();
+    e.stopPropagation();
+  });
+  m.addEventListener('pointerdown', (e) => e.stopPropagation());   // never let the pano behind steal it
+  document.body.appendChild(m);
+  // Under the pill, left-aligned, at least as wide as it; kept on screen, flipped above if needed.
+  const r = trigger.getBoundingClientRect();
+  m.style.minWidth = `${Math.round(r.width)}px`;
+  const w = m.offsetWidth, h = m.offsetHeight;
+  const left = Math.max(8, Math.min(r.left, innerWidth - w - 8));
+  let top = r.bottom + 6;
+  if (top + h > innerHeight - 8) top = Math.max(8, r.top - 6 - h);
+  m.style.left = `${left}px`; m.style.top = `${top}px`;
+  trigger.setAttribute('aria-expanded', 'true');
+  areaMenuEl = m; areaMenuSel = sel;
+  (items[sel.selectedIndex] || items[0])?.focus({ preventScroll: true });
+  document.addEventListener('pointerdown', onAreaMenuOutside, true);
+  window.addEventListener('resize', closeAreaMenu);
 }
 // Both dropdowns are built from one list so they can't drift — same reasoning as
 // syncZoomStatusButtons for the status pills.
@@ -4885,6 +4984,8 @@ function renderLandmarks() {
     if (hiddenCount > 0) els.lmOverflowHint.textContent = `+${hiddenCount} more — filter by category`;
   }
 
+  const safe = landmarkSafeArea(rect);
+  const placed = [];
   for (const lm of state.landmarks) {
     const d = lmDom.get(lm.id); if (!d) continue;
 
@@ -4907,25 +5008,79 @@ function renderLandmarks() {
     const show = hp && bp;
     d.line.style.display = d.pin.style.display = d.banner.style.display = show ? '' : 'none';
     if (!show) continue;
-    // A banner sits where its landmark actually is — never dragged inward to stay visible.
+    // A banner sits where its landmark actually is — never dragged SIDEWAYS to stay visible.
     // It used to be clamped to the viewport so a label couldn't be cut off at the edge, but
     // that made everything currently out of view pile up against the sides, tracking along
     // as you panned; a landmark that isn't in shot should simply not be in shot. So: no
-    // clamping, and one that won't fit fully is hidden rather than shown half-cut.
-    // offsetWidth is a layout read, but landmark counts are small (a handful to a few
-    // dozen), so this doesn't meaningfully add up per frame.
-    const halfW = d.banner.offsetWidth / 2, margin = 6;
-    if (bp.x - halfW < margin || bp.x + halfW > W - margin) {
+    // horizontal clamping, and one that won't fit fully is hidden rather than shown half-cut.
+    // The usable width now also excludes the client menu strip on the left (2026-09-22): on a
+    // phone a banner there was left half under it.
+    const halfW = d.banner.offsetWidth / 2;
+    if (bp.x - halfW < safe.left || bp.x + halfW > W - safe.right) {
       d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
       continue;
     }
+    placed.push({ d, hp, bp, halfW, halfH: d.banner.offsetHeight / 2 });
+  }
+  // VERTICAL is different (2026-09-22). Banners are authored high in the sky, and on a short
+  // screen — a landscape phone above all — that sky is cut off: every banner sat above the top edge
+  // with its line running up to nothing. And zoomed out, the landmarks bunch up near the horizon
+  // and their banners pile on each other. So, highest banner first:
+  //  - a banner above the safe top is lowered to just inside it, straight above its own pin;
+  //  - a banner that would overlap one already placed moves UP past it into open sky, or, if
+  //    that would leave the screen, DOWN past it instead.
+  // Banners that already sit clear on screen are not moved; lines always run to the final spot.
+  const boxes = [], GAP = 4, bottomLimit = H - 8;
+  placed.sort((a, b) => a.bp.y - b.bp.y);
+  for (const p of placed) {
+    const h = 2 * p.halfH, l = p.bp.x - p.halfW, r = p.bp.x + p.halfW;
+    const hit = (t) => boxes.find((o) => l < o.r + GAP && r > o.l - GAP && t < o.b + GAP && t + h > o.t - GAP);
+    const start = Math.max(safe.top, p.bp.y - p.halfH);
+    let t = start, o, n;
+    if (hit(start)) {
+      let up = start; n = 0; while ((o = hit(up)) && n++ < 20) up = o.t - GAP - h;
+      if (up >= safe.top && !hit(up)) t = up;
+      else {
+        let down = start; n = 0; while ((o = hit(down)) && n++ < 20) down = o.b + GAP;
+        if (down + h <= bottomLimit && !hit(down)) t = down;   // nowhere clear at all: leave it at `start`
+      }
+    }
+    p.bp = { x: p.bp.x, y: t + p.halfH };
+    boxes.push({ l, r, t, b: t + h });
+  }
+  for (const { d, hp, bp } of placed) {
     d.line.setAttribute('x1', hp.x); d.line.setAttribute('y1', hp.y); d.line.setAttribute('x2', bp.x); d.line.setAttribute('y2', bp.y);
     // Same fix as renderAmenities: a sub-pixel compositor transform instead of left/top, which
     // snapped pin and banner to whole pixels independently and made them shimmer while the
     // view auto-rotates. The banner keeps its own centring (was the stylesheet's transform).
     d.pin.style.transform = `translate3d(${hp.x}px, ${hp.y}px, 0)`;
-    d.banner.style.transform = `translate3d(${bp.x}px, ${bp.y}px, 0) translate(-50%, -50%)`;
+    // `--lm-s` carries the category highlight's size (styles.css). It must be folded in HERE: a
+    // stylesheet `transform` on .is-cat-matched (was `scale(1.08) !important`) replaced this whole
+    // positioning transform and threw every highlighted banner into the top-left corner.
+    d.banner.style.transform = `translate3d(${bp.x}px, ${bp.y}px, 0) translate(-50%, -50%) scale(var(--lm-s, 1))`;
   }
+}
+// The part of the pano a landmark banner may occupy: clear of the client's menu strip on the left
+// and of the status/filter pills that sit along the top on a landscape phone. Measured live, so it
+// follows the drawer opening/closing and the pills hiding outside the aerial view.
+function landmarkSafeArea(rect) {
+  const safe = { left: 6, right: 6, top: 8 };
+  if (state.admin) return safe;
+  // Not offsetParent: it is always null for position:fixed, which is exactly how the landscape
+  // phone pins its pill row — so the pills were never seen and banners slid under them.
+  const vis = (el) => { if (!el || el.hidden) return false; const cs = getComputedStyle(el); const r = el.getBoundingClientRect();
+    return cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 && r.height > 0; };
+  const drawer = els.catDrawer;
+  if (vis(drawer)) {
+    const dr = drawer.getBoundingClientRect();
+    if (dr.right > rect.left && dr.left <= rect.left + 4) safe.left = Math.max(safe.left, dr.right - rect.left + 6);
+  }
+  const pills = els.zoomStatusGroup;
+  if (vis(pills) && getComputedStyle(pills).position === 'fixed') {
+    const pr = pills.getBoundingClientRect();
+    if (pr.height && pr.top < rect.top + rect.height / 3) safe.top = Math.max(safe.top, pr.bottom - rect.top + 6);
+  }
+  return safe;
 }
 // Landmarks have no on/off button (the 📍 that used to hide them now controls amenity points),
 // so the layer simply shows — except inside a tour, which hides the plot-map layers and whose
@@ -5196,6 +5351,11 @@ const AM_SCALE_MIN = 0.5, AM_SCALE_MAX = 1.1;
 const AM_REF_PX_PER_DEG = 12;                     // the scene size at which markers are 1:1
 const amChipSize = new WeakMap();                 // label size never changes for a given chip — measure once
 function amenityScale(H) {
+  // Phones (2026-09-22): the phone stylesheet already shrinks amenity labels to ~8.5px, and a
+  // phone's short screen made pixels-per-degree read as "zoomed far out", so the two stacked and
+  // left ~4px, unreadable names. On a phone the size follows ZOOM only (fov), never dropping much
+  // below the phone size, and can still grow a little zoomed in.
+  if (isMobileLandscape() || isMobilePortrait()) return Math.max(0.9, Math.min(1.3, 70 / Math.max(1, state.view.fov)));
   const pxPerDeg = H / Math.max(1, state.view.fov);
   return Math.max(AM_SCALE_MIN, Math.min(AM_SCALE_MAX, pxPerDeg / AM_REF_PX_PER_DEG));
 }
