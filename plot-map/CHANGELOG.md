@@ -5,6 +5,462 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-23 (Standalone export: hand the zip to the browser instead of buffering it in memory)
+
+Reported: "I am not able to do export standalone site as before, which used to directly download
+the zip file."
+
+What is PROVEN, and what is not, because the difference matters here:
+- The server is fine. `/api/export-bundle?project=anadmanv2` returns 200 with
+  `Content-Disposition: attachment` and a correct Content-Length, building a 328 MB archive in
+  about 7 seconds; curl saves it whole. The access log shows every one of the reporter's attempts
+  answered 200. So the failure is on the browser side of that response.
+- The browser side could NOT be reproduced here. Every download in a CDP-driven Chrome on this
+  machine is cancelled at 0 bytes — including a 5-byte text blob created inside the page, a plain
+  same-origin file, and the zip, in both headless and a real visible window, with a genuine user
+  gesture and with a short download path. Downloads are blocked in this environment, so no
+  browser-side conclusion can be drawn from these runs, and an earlier note here claiming the
+  8-second revoke as the confirmed cause was an inference from exactly that artefact.
+
+Change (app.js `exportBundle`), which removes the two real hazards the old path carried regardless:
+the archive is no longer fetched through `fetchBlobWithProgress` into a JS Blob and handed over as
+a `blob:` URL that the code revoked 8 seconds later. A plain same-origin `<a href="/api/export-
+bundle?project=…" download>` now does the work: the browser streams it straight to disk with its
+own progress UI, nothing holds 314 MB in memory, and no revoke can pull the URL out from under a
+write that takes longer than 8 seconds (which a 314 MB file on a normal disk easily can). The
+in-app percentage is gone with it — the browser's download bar replaces it — and the notice now
+says the download starts by itself once the server finishes zipping.
+
+Left for the reporter to confirm, since it cannot be tested here: whether the export now works on
+their machine, and if not, exactly what Chrome shows (nothing at all / "Failed - Network error" /
+a cancelled entry in chrome://downloads). That distinction points at the next place to look.
+
+---
+
+## 2026-09-23 (Plot numbers: one size for all, centred on the plot's area)
+
+Reported with a zoomed screenshot: "look how uneven the plot number and their font size — make
+sure it is centered at every plot and their size should be the same". Confirmed first that these
+are the app's own labels (the `#` toggle) and not numbers printed into the site-plan artwork, by
+shooting the same view with the toggle off and on.
+
+Changes (app.js):
+- **Size.** `buildPlotObject` sized each label from ITS OWN plot (`worldDiam * 0.22`), so a big
+  corner plot's number was visibly larger than its neighbour's. `rebuildPlots` now measures every
+  plot, takes the MEDIAN diameter, and gives every label that one height (`labelWorldH`). Median,
+  not mean, so a few odd-shaped slivers can't drag the size for the whole layout — and because it
+  is still derived from the project's own plots, a layout of large plots or small ones each get a
+  sensible size without any per-project tuning.
+- **Centring.** The label sat at the average of the polygon's CORNERS, which is only the middle for
+  an evenly-sampled shape: a plot carrying extra vertices along one edge (a kink in a road
+  boundary, a traced curve) pulled its number towards that edge. It now uses the polygon's AREA
+  centroid (`plotAreaCentroid`, shoelace), falling back to the corner average for a degenerate
+  ring. Named apart from the trace tool's existing `polyCentroid` — which IS the corner average and
+  is left alone. (Adding a second function under that name was my first attempt and broke boot
+  outright with "Identifier 'polyCentroid' has already been declared"; caught by capturing the
+  page's exceptions after a screenshot showed the loader stuck at 0%.)
+
+Verified headless on anadmanv2 at 1280x800 (2x DPR), labels on, zoomed in: numbers 1-29 across
+several blocks all render at the same glyph size, each sitting in the middle of its plot.
+
+Known limit, stated rather than discovered later: with one shared size, a project mixing very
+large and very small plots will have the number look tight inside its smallest plots. Nothing in
+anandman or anadmanv2 comes close to that, and the alternative is the raggedness just fixed.
+
+---
+
+## 2026-09-23 (Size filter ANDs with the status filter; out-of-band plots carry no overlay)
+
+Requested: with a size band picked, matching plots take the band's colour and everything else was
+faded back. "Don't dim those available plots which don't come in that size bracket — keep the
+colour which is of the plot and treat it as any other plot."
+
+Change (app.js, `plotBaseStyle`): the non-matching branch now returns exactly what the no-filter
+branch returns — the plot's own available/reserved/sold colour at the normal overlay opacity and
+line strength. A band therefore only ADDS its colour to the plots inside it; it takes nothing away
+from the rest. `AREA_DIM` and `isAreaDimmed` stay: the constant is now unused by the painting
+path, and the predicate still marks out-of-band plots so they keep their resting look on hover and
+show no tooltip — both asked for separately (2026-09-14/18) and untouched here.
+
+Verified headless on anadmanv2 at 1280x800, camera parked on the home view (the ⊡ recenter button)
+before each screenshot so the frames line up — without that the idle auto-pan moves the map
+between shots and any pixel comparison is meaningless. Measuring how much of the map still carries
+strong plot colour with "Type 1 (1800-2142 sq.ft)" applied:
+
+| | strong plot colour |
+|---|---|
+| band applied, OLD code (dimming) | 8.3% |
+| band applied, NEW code | 19.7% |
+| no filter at all (reference) | 19.4% |
+
+i.e. the map with a band applied now reads exactly as it does unfiltered, except for the matched
+plots wearing the band's colour.
+
+**Follow-up, same day — that was still wrong.** Shown a screenshot of the undimmed result: "these
+green plots should not be seen, there should be an AND between the filters not OR". Keeping the
+status colour on out-of-band plots still answers "available" about a plot of the wrong size. The
+two filters are now ANDed properly:
+- `colorPlots` sets `group.visible = activeFilters.has(status) && (!band || plotMatchesAreaFilter)`,
+  so a plot that fails EITHER filter carries no overlay at all and the site plan's own artwork
+  shows through. Hiding the group also removes it from hit-testing — `pick()` already filters on
+  `m.parent.visible` — so those plots can't be hovered or opened, matching the tooltip rule that
+  was already in place for them.
+- `applyData` counts the status pills within the band too (and `setAreaFilter` now calls
+  applyData, not just colorPlots, so they refresh when the band changes). "Available 333" next to
+  twenty-odd visible plots was answering a question nobody asked.
+
+Verified headless on anadmanv2, camera parked on the home view for both shots, picking
+"Type 1 (1800-2142 sq.ft)": the pills went 333/63/40 -> 18/1/2, and of every pixel that was green
+(available) with no filter, 93.6% now shows the bare plan, 5.5% is repainted in the band's colour
+and 0.9% is anti-aliasing noise. That 5.5% matches the pill count independently: 18 of 333
+available plots = 5.4%.
+
+---
+
+## 2026-09-23 (anadmanv2: assets compressed — first visit 32.6 MB -> 10.4 MB)
+
+Asked to make everything load faster in the anadmanv2 project "without losing much quality".
+Originals are kept in `projects/anadmanv2/.originals/compress-2026-09-23/` (git-ignored), so any
+step here can be undone by copying a file back.
+
+What the FIRST VISIT has to download before the map is usable, measured in a clean browser profile
+against a copy of the project with the original files (`zbefore`, deleted afterwards):
+
+| | before | after |
+|---|---|---|
+| total first visit | 32.64 MB | 10.43 MB |
+| at 4 Mbps | ~65s | ~21s |
+| site plan | 23.21 MB | 5.04 MB |
+| 360 background | 3.86 MB | 2.52 MB |
+| audio | 4.07 MB | 1.78 MB |
+| loading image | 0.96 MB | 0.55 MB |
+
+- **Site plan** `Final (2).web.webp`: lossless WebP -> quality 92, SAME 7680x5223 pixels. Measured
+  as the app composites it (over the page background, which is the only way the comparison means
+  anything — in the fully transparent areas the RGB of a lossy WebP is free to be anything):
+  mean error 1.08/255, PSNR 39.0 dB, and the alpha channel came back bit-identical (max shift 0),
+  so the transparent surround still masks exactly the same pixels. q88 and q95 were measured too
+  (4.27 MB / 38.6 dB and 5.93 MB / 39.8 dB); q92 is the knee.
+- **Photographs** (29 files, including a 6000x4500 39 MB `FOOT BALL GROUND.jpg`): capped at 1600px
+  on the long edge at quality 82, progressive — the same setting anandman's amenity renders already
+  use, and still above the ~1200px these are ever displayed at. 47.7 MB saved in this pass alone.
+- **360 background** `Commercial.web.webp`: 8192 -> 6144 wide at q90. Phones cap textures at 4096
+  and were downscaling it on arrival anyway, so most of those bytes reached nobody's screen.
+- **Audio**: 256 kbps -> 112 kbps MP3 (4.07 -> 1.78 MB). It is background music behind a UI, and
+  it now sits on the boot path (it was deliberately moved there so the loading bar covers it).
+- **Tour minimap** `tour-t20-map.web.png`: 256-colour palette, 1.21 -> 0.24 MB. A flat graphic, so
+  the palette is exact for practical purposes.
+- **Videos (65 MB + 26 MB): NOT re-encoded.** x264 preset slow at CRF 26 — chosen after measuring
+  a 12s sample at CRF 26/28/30 (PSNR 40.2 / 38.7 dB) — produced only 62 -> 56 MB and 25 -> 23 MB on
+  the full files: the sources are already efficiently encoded, so it was a real quality loss for
+  ~10%. Both were instead REMUXED with `-movflags +faststart` (stream copy, zero quality change):
+  the moov atom now sits at byte 36 instead of after the media, so playback starts as soon as the
+  first chunk arrives rather than after a long prefetch. A 720p variant would halve them if the
+  owner ever wants that trade.
+- **Brochure PDF (4.1 MB)**: left alone. It is on-demand only, already named "compressed", and no
+  PDF-capable tool (ghostscript/pikepdf/pymupdf) is installed here to rebuild it honestly.
+
+Verified after the change: the client renders the plan, plot colours, amenities and landmarks
+correctly (screenshot), and no request failed.
+
+---
+
+## 2026-09-23 (Offline: download as often as you like; bottom controls survive fullscreen)
+
+Two reports from phones.
+
+**1. A second download was refused.** The "⬇ SAVE FOR OFFLINE" row added earlier today answered
+"Already saved for offline use — all N files are on this device" and stopped there when nothing was
+missing. A visitor tapping it again is usually trying to REPAIR a copy that is misbehaving offline,
+so that was a dead end. maybeOfferOfflineSave now treats a menu-driven request with everything
+present as a refresh: the banner opens, says "Already saved — fetch all N files again (approx. X)",
+and the button re-fetches the whole list. Tapping "Not now" on a banner the visitor opened
+themselves also no longer writes the declined flag — that flag is for the AUTOMATIC offer, and
+recording it there would silence the offer for good on the strength of second thoughts.
+
+**2. The bottom strip vanished after fullscreen.** The drawer footer, the zoom column and the
+offline banner are anchored to the bottom of the body grid, whose height was `100dvh`. Entering or
+leaving fullscreen changes the window by the height of the browser chrome, and `dvh` does not
+reliably settle during that transition, leaving the grid taller or shorter than the window with its
+bottom row off-screen — which fits the "sometimes" in the report. The height is now a measured
+pixel value, `--app-h`, written by `syncViewportHeight()` from `window.innerHeight` (100dvh remains
+the fallback) and re-applied on resize, orientationchange and fullscreenchange (including the
+webkit-prefixed event), plus at +60/200/500ms after those, because Android reports the new size in
+stages. `onResize()` rides along so the WebGL canvas follows the same box.
+
+Verified headless at 800x380, anandman/laxmi:
+- Viewport 380 → 440 → 380 (what fullscreen does to a phone window): `--app-h` and the body box
+  tracked every step, and the zoom column, drawer and offline banner all stayed inside the window
+  at every size. NOTE: the original disappearance did not reproduce in headless — the emulated
+  resize was already handled by dvh there — so this fixes the mechanism that best explains it
+  rather than a reproduction; worth a check on the reporter's phone.
+- laxmi (859 KB of assets): tapped the menu row, downloaded (19 files cached), tapped the row a
+  SECOND time — the banner opened again, the progress bar ran, and the download completed. Before
+  this change the second tap only produced the "already saved" notice.
+
+---
+
+## 2026-09-23 (Fix: the layout drifted by itself while pinch-zooming on a phone)
+
+Reported: "for the mobile users when they are zooming in the aerial view the layout is shifting or
+drifting slightly automatically... it should work the same way as the desktop version."
+
+Cause: the idle auto-pan (stepViewMotion's caller, 2.2s after `state.lastUserTouch`) was only ever
+held off by `pointerdown` and `wheel` — the two events wired to `touch()` in wireViewControls. A
+pinch fires `pointerdown` once and then nothing but `pointermove`, so any pinch lasting longer than
+2.2s had the camera start sweeping underneath the gesture. Desktop never showed it because every
+wheel notch bumps the timer.
+
+Changes (app.js, the #pano pointer handlers):
+- Any `pointermove` with at least one pointer down bumps `lastUserTouch`, as does every
+  `pointerup`/`pointercancel`. A gesture in progress now counts as activity, whatever kind it is.
+- A pinch also sets `didMove`, so lifting the fingers can't be mistaken for a tap on a plot.
+- Lifting ONE finger of a pinch re-anchors `panStart` to the finger still down (and clears the
+  flick). It was left pointing at where the FIRST finger landed, so the next move jumped the view
+  by everything that had happened since.
+
+Verified headless at 800x380 with real touch events, anandman: a ~6s two-finger pinch left the
+compass heading bit-identical (`rotate(-142.72 60 60)` before and after), while an untouched
+5s control drifted ~9° — so the probe does see drift. With the one-line bump disabled as a negative
+control, the same pinch drifted ~11° mid-gesture, i.e. exactly the reported behaviour.
+
+---
+
+## 2026-09-23 (The "names without points" amenity combination is no longer offered)
+
+Requested with a screenshot of amenity names floating over the plan: "lets not allow the user to
+set this combination which is lolypop off and building on". With 📍 off and 🏛 on, each amenity
+name hung in the air with nothing tying it to a place.
+
+Rather than disabling a button (a tap that does nothing reads as broken, and 🏛 also carries the
+landmarks), each button drags the other along:
+- 📍 off → amenity names go off with it. Landmarks are deliberately NOT touched: they are the
+  other half of 🏛's job, and hiding them from the points button would be a surprise.
+- 🏛 on → points come back on, so the names have their pins beneath them.
+- A browser that stored the forbidden pair under an older build is corrected at boot, so nobody is
+  left looking at a layout the buttons can no longer produce.
+
+Verified headless on anandman: 📍 off → names 0, points 0; 🏛 on → both back at 11; the same from
+the other direction; and with `b91-show-amenity-points=0` + `b91-show-amenities=1` forced into
+localStorage, the next load came up with both off and rewrote the stored pair.
+
+---
+
+## 2026-09-23 (Two plots may share a number; the duplicate no longer renders white)
+
+Reported with the site plan: every sector restarts its numbering at 1, so "1" exists in Sector A
+and again in Sector B. Renaming a plot to a number already in use changed the label but left the
+plot WHITE.
+
+Cause. The id is the key for everything: `state.plots`, `state.rows`, `labelCache`, the SVG export.
+`rebuildPlots` does `state.plots.set(g.id, o)` per polygon, so the second plot with an existing id
+REPLACED the first one's entry — while the first polygon's mesh stayed in the three.js scene.
+Orphaned: `colorPlots`/`applyData` iterate the Map, so it was never recoloured (keeping
+buildPlotObject's blank material), never filtered and never selectable.
+
+Changes (app.js):
+- Ids stay unique, labels do not. A clash gets an invisible tag — "Plot-1", "Plot-1#2" — added by
+  the new `uniquePlotId()`, and `plotNumber()` strips it (and the "Plot-" prefix) at every point a
+  plot is SHOWN: the 3D label sprites, the plot popover title, the trace canvas labels, media
+  titles, the admin's number box and the exported SVG's `<text>`. Both duplicates therefore read
+  "1" on screen while the app can still tell them apart.
+- `uniquePlotId` is applied wherever an id is minted, not just on rename: `addPlot` (re-tracing a
+  saved layout that already contains a duplicate) and the auto-trace label import (two polygons
+  labelled "1" must not collapse into one).
+- `canonPlotId` drops the tag too, so "Plot-1#2" still matches a sheet row for plot 1.
+- `indexRows` gives the second polygon its own COPY of that sheet row. They shared one object
+  before, so applyPlotOverrides writing to one would silently rewrite the other, and `r.plot_id`
+  could only name one of them. Each duplicate now carries its own status, price and media, and the
+  admin's edits (keyed by the unique id) stay independent.
+
+Follow-up the same day: the reporter's plot was STILL white, because their duplicate had been
+saved before any of the above existed — anandman's plots.svg genuinely holds two polygons with
+`id="Plot-A1"`. uniquePlotId only guards ids as they are minted, so the stored clash came straight
+back on load. `dedupeGeomIds()` now re-tags repeats wherever geometry is read — loadGeometry
+(plots.svg) and the admin session restore — keeping order and leaving the FIRST holder of a number
+on the untagged id so data keyed to it still matches.
+
+Verified headless on a throwaway copy of anandman whose plots.svg was edited to hold two polygons
+under one id (exactly the reported state): the legend counted 436 of 436 polygons; with
+dedupeGeomIds disabled as a control, the same project counted 434 — the orphaned polygon (plus one
+plot that has no data at all in this project, which pre-dates all of this) missing from every
+status, i.e. the white plot.
+
+Also verified on a throwaway copy of anandman (deleted afterwards): renamed the second plot in
+the list to the first one's number — both boxes then read "A2", and the saved plots.svg holds
+`id="Plot-A2"` and `id="Plot-A2#2"` with both `<text>` labels reading "A2". On the client, legend
+totals stayed at 435 of 436 polygons, exactly matching an untouched copy of the same project
+(that one uncoloured plot pre-dates this change), i.e. the duplicate is coloured like any other
+plot rather than dropping out as white.
+
+---
+
+## 2026-09-23 (🏛 now switches landmarks off with the amenity names)
+
+Requested: "when the client clicks this [🏛] the amenities along with landmark should be
+disabled". The building button was amenity NAMES only; landmarks had no control at all.
+
+Changes (app.js):
+- The 🏛 handler sets `state.showLandmarks` alongside `state.showAmenities` (persisted as
+  `b91-show-landmarks`) and calls applyLandmarkVisibility; its title/aria-label now read
+  "Hide/Show amenity names & landmarks". 📍 (amenity points) is untouched and still independent.
+- `applyLandmarkVisibility` honours the flag: `hidden = tourView || (!showLandmarks && !editing)`.
+  The `!editing` part matters — hiding the layer while the admin is placing landmark pins on it
+  would make that tab unusable.
+- Removed the unconditional `state.showLandmarks = true` from `applyCategoryFilter`. It is not
+  only called by a visitor picking a category: renderLandmarkCategoryNav re-applies the current
+  filter once landmark data has loaded, ~4s into a client boot, so it silently undid the saved OFF
+  state on every reload — caught by tracing the layer's `hidden` attribute across a reload
+  (`start hidden=false → 749ms hidden=true → 3936ms hidden=false`). The force now lives in
+  `showLandmarksForSection()`, called from the two places a visitor actually asks for landmarks
+  (the category buttons and openLandmarksCategoryPicker), and it also writes the preference, so
+  the button and the screen never disagree.
+
+Verified headless on anandman at 1280x800: 🏛 off → landmark layer hidden, amenity names 0,
+amenity POINTS still 11 (the other button is unaffected); reload → still off (this is what the
+applyCategoryFilter fix bought); opening LANDMARKS → banners back on screen; 🏛 on → names and
+landmarks both back. The button is deliberately not reachable inside the LANDMARKS section itself,
+where the plot-map controls are hidden by the 2026-09-14 change.
+
+---
+
+## 2026-09-23 (Fix: clearing a plot field in the admin did nothing on the client)
+
+Reported with two screenshots: plot A101's note "Corner plot" was deleted in the admin, the admin
+card showed it gone, the save succeeded — and the client still showed "Corner plot".
+
+Cause. anandman's plot data comes from a live Google Sheet (alignment.json `data.source = "sheet"`),
+and admin edits are stored as per-field OVERRIDES on top of it (computePlotOverrides diffs the
+admin's rows against the sheet at save time). The old rule was "a blank is never recorded": `""`
+could not be told apart from "never filled in", so recording it might let an untouched empty field
+mask a real sheet value. The consequence was that DELETING a value could not be expressed at all —
+no override was written, and the client, re-reading the sheet (which still says "Corner plot" for
+A101 — verified by fetching the sheet's CSV export), put the note straight back. The admin looked
+right only because its own in-memory row really was blank.
+
+Changes (app.js):
+- `computePlotOverrides` records a blank when — and only when — that field was deliberately
+  emptied: `mine !== theirs && (mine || state.clearedPlotFields.has(`${id}|${k}`))`.
+- `state.clearedPlotFields` is the new set of `plotId|field` marks. The plot editor's text inputs
+  add a mark when they are typed empty and drop it as soon as anything is typed back.
+  This is what stops the obvious foot-gun: without it, an admin tab opened BEFORE the sheet gained
+  a value would see `mine = ""` vs `theirs = "value"` on every such plot and record the whole lot
+  as cleared on its next save, blanking them for the client all at once.
+- `applyPlotOverrides` re-arms a mark for every override loaded as `""`, so a clear that was saved
+  in an earlier session is written out again by the next save instead of being dropped as an
+  ordinary empty field (which would hand the plot back to the sheet).
+- `parseAlignment` keeps `""` values for OVERRIDE_FIELDS instead of stripping them on the way in —
+  stripping them there would have undone the fix on the very next load.
+
+Known and accepted consequence, stated rather than hidden: once a field has been cleared this way,
+a value LATER added to that sheet cell stays invisible on the client until the admin edits that
+field again. That is the documented precedence (admin edits outrank the live sheet — see loadData);
+the alternative is an edit that silently does nothing, which is the bug being fixed.
+
+Second half of the same bug, found while testing the first: `autofillPlotFromSheet` fills any
+field the plot "doesn't already have a value for" straight from the sheet. A cleared field IS
+empty, so opening the plot editor again quietly put "Corner plot" back — the clear looked like it
+had never happened, and the next save would have recorded the sheet's text as if the admin had
+typed it. Autofill now skips fields carrying a clear mark. (The admin panel the report came from
+showed the note gone only because that session's own row was blank in memory.)
+
+Verified end-to-end on a throwaway copy of anandman (projects/ztestnote, deleted afterwards),
+driving the real admin UI headlessly, in two separate browser sessions:
+1. Opened A101's editor — notes read "Corner plot" (the sheet's value, autofilled) — emptied the
+   field, committed with "Use these plots →", pressed Save. The written alignment.json holds
+   `"Plot-A101": {..., "notes": ""}`, the ONLY blank among all 437 overrides (no mass-blanking).
+2. Fresh browser, fresh session, reopened the same editor: notes read "" — the sheet no longer
+   overwrites the clear — and the file still holds exactly that one blank.
+An earlier round-trip check also confirmed that simply reopening the admin and pressing Save,
+with no edits at all, leaves the cleared note cleared (parseAlignment keeps the "" on the way in,
+applyPlotOverrides re-arms its mark, computePlotOverrides writes it out again).
+
+---
+
+## 2026-09-23 (A permanent "SAVE FOR OFFLINE" row in the client menu)
+
+Reported: the offline download offer no longer appears for mobile visitors.
+
+Cause — not a regression, a one-way door by design. The offer is shown once by
+maybeOfferOfflineSave, and "Not now" writes `b91-offline-declined-<SW_VERSION>-<project>`, which is
+checked before anything else. SW_VERSION (app.js) is the key's version and was meant to be bumped
+with sw.js's own VERSION so a dismissal expires — it has sat at 'v12' while sw.js reached v46, so
+no dismissal has ever expired. A phone that tapped "Not now" once could not reach the download
+again by any route in the app. Confirmed both ways: a brand-new phone profile against the live
+CloudFront build was offered the download after 17s, so the feature itself works.
+
+Asked which behaviour was wanted (re-offer once / re-offer on new content / expire after 14 days /
+a permanent button); the answer was the permanent button.
+
+Changes:
+- `renderClientSidebar` appends "⬇ SAVE FOR OFFLINE" to the root menu, guarded by the new
+  `offlineSaveRowAvailable()`: client only, phone only, and only in a service-worker-capable secure
+  context — the exact conditions registerOfflineSupport itself requires, so the row never appears
+  where tapping it could do nothing. It is a synthetic row (`data-node-id="__offline_save__"`,
+  handled in wireClientSidebarButtons next to `__exit_tour__`), NOT a builtin menu node: no admin
+  surface, no menu-tree migration, nothing written into any project's saved config.
+- `maybeOfferOfflineSave({ force })` ignores the remembered "Not now"/"already saved" answers when
+  it comes from that row, and with nothing left to fetch says "Already saved for offline use — all
+  N files are on this device" instead of opening a banner whose buttons have no work to do.
+  Offline at the time, it says to reconnect rather than failing silently.
+- The banner opens immediately on the tap, reading "Checking what is already saved…", because the
+  probe of every asset plus the size estimate measured ~12s on anandman — the row looked dead for
+  that whole time in the first test of it.
+- `.cat-btn-util` in styles.css: hairline rule above, quieter and slightly smaller than the
+  project's own rows — a utility, not one of the client's sections (same reasoning as `.cat-keep`).
+
+Verified headless, anandman: at 800x380 the row is present and a real dispatched TAP (not .click())
+brought the offer up in 0.7s; at 1400x900 the row is absent; a reload with the row present still
+suppresses the automatic banner, i.e. the remembered dismissal is still respected everywhere else.
+
+NOT changed, still true and worth deciding on separately: SW_VERSION remains 'v12', so dismissals
+still never expire on their own, and content added after a visitor's download is only re-offered
+because countMissingOfflineAssets notices it is missing.
+
+---
+
+## 2026-09-23 (Landmark banners: zoom-responsive on phones, and never below their own pin)
+
+Reported with a landscape-phone screenshot of the AERIAL view: "Raipur - Bilaspur Highway" sat
+low, in front of the plots, its leader line running UP to a pin above it.
+
+Cause: the 2026-09-22 vertical clamp. A banner is authored high in the sky; on a short phone
+screen that sky is off-screen, so the clamp lowered the banner to `safe.top` (just under the
+fixed filter/status pills) — which on the aerial view is well BELOW the landmark's own pin, i.e.
+on top of the site plan. Visible-but-wrong instead of the earlier invisible.
+
+Changes (app.js `renderLandmarks`, styles.css):
+- A banner is now confined to the band between `safe.top` and its own pin
+  (`floor = min(H - 8, hp.y - 6) - h`): the initial clamp, the overlap search and the downward
+  fallback all respect it. Nothing can land in front of the plots any more. A landmark with no
+  sky at all above its pin drops its banner and keeps the gold pin, rather than covering the
+  layout — the user asked for the label to behave, not to be shown at any cost.
+- Phone banners are zoom-responsive, the same idea as `amenityScale` and requested in the same
+  words: `landmarkZoomScale()` = `clamp(70 / fov, 0.72, 1.15)` on phones only, published as
+  `--lm-z` on the `.landmarks` layer and multiplied into each banner's own transform as
+  `scale(calc(var(--lm-s, 1) * var(--lm-z, 1)))`. Zoomed out to the whole site the labels shrink
+  to ~0.72 (74x28px, measured), so more of them fit the thin strip of sky and they stop blanketing
+  the layout; zoomed in they return to full size and a little past it. Desktop stays at 1 — it has
+  the height, and the desktop banners were signed off as they are.
+- `--lm-z` is registered with `inherits: true` (it is set on the layer, read by the banners) and
+  is deliberately NOT transitioned: it changes every zoom frame, and easing it would leave the
+  collision boxes — measured from the live size — a step behind what is on screen.
+- The stacking maths now measures the SCALED banner size, or the gaps between stacked labels
+  would be wrong at any zoom factor other than 1.
+
+- Follow-up the same day, reported with a second screenshot: a dropped banner left its PIN behind
+  as a bare white dot in the sky, with nothing to explain it and not even at the landmark's real
+  place (it only shows the direction). The pin is now hidden with its banner — a landmark shows
+  as a labelled banner or not at all.
+
+Verified headless at 800x380 (landscape phone), anandman: 18 frames across three zoom levels and
+six tilt steps of the aerial view — 0 labels below their pin, 0 off-screen, 0 under the pills,
+0 pins without a label, up to 7 labels on screen at once; a negative control with the pin-hide
+line removed flagged 3-4 lone pins over the same sweep, so the check does bite; the landmarks view still shows its banners in the sky as before;
+`--lm-z` measured 0.72 zoomed out and 1.15 zoomed in. sw.js VERSION -> v46.
+
+---
+
 ## 2026-09-22 (Fix: landmark banners thrown to the top-left corner when a category is selected)
 
 Reported (desktop AND mobile, on the tunnel in incognito): in the landmarks view the lines rose

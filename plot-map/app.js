@@ -200,6 +200,12 @@ const state = {
   // Per-plot fields the admin has edited away from what the live sheet says. These WIN over
   // the sheet on both sides — see computePlotOverrides/applyPlotOverrides.
   plotOverrides: {},
+  // `${plotId}|${field}` for every field the admin has deliberately EMPTIED (typed it blank in
+  // the plot editor, or loaded a saved "" override). computePlotOverrides needs this to tell a
+  // real clear from a field that merely happens to be empty in a stale tab: without it, an admin
+  // page opened before the sheet gained a value would record that value as "cleared" on its next
+  // save, blanking it on the client across every plot at once.
+  clearedPlotFields: new Set(),
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
   showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
@@ -289,9 +295,41 @@ function parseCSV(text) {
 // 'unknown' at consume time in colorPlots/applyData). Other fields are used verbatim.
 function normalizeRow(r) { r.status = (r.status || '').trim().toLowerCase(); return r; }
 
+// Two plots may carry the SAME number (2026-09-23, on request): each sector here restarts its
+// numbering at 1, so "1" exists in sector A and again in sector B. Ids must still be unique —
+// state.plots, state.rows, the label cache and the SVG export are all keyed by id, and a second
+// plot with an existing id used to overwrite its entry in state.plots, leaving the first polygon
+// orphaned in the scene: never recoloured, never filtered, so it sat there WHITE, which is
+// exactly what was reported. So the id gets an invisible disambiguator — "Plot-1", "Plot-1#2" —
+// that `plotNumber` strips everywhere a plot is shown. Nothing the admin types contains it: it is
+// added only by uniquePlotId below.
+const DUP_TAG = /#\d+$/;
+// What a plot is CALLED: the id minus the "Plot-" prefix and minus the duplicate tag. Every
+// place that shows a plot to anyone (labels, popover, media titles, the SVG export's text, the
+// admin's number box) goes through this, so duplicates read identically on screen.
+const plotNumber = (id) => String(id == null ? '' : id).replace(/^Plot-/, '').replace(DUP_TAG, '');
+// A free id for `base` ("Plot-1"), skipping the one belonging to `exceptIdx` so re-confirming a
+// plot's own number is not treated as a clash. Second and later duplicates get #2, #3, …
+function uniquePlotId(base, plots, exceptIdx = -1) {
+  const taken = new Set(plots.map((q, i) => (i === exceptIdx ? null : q.id)).filter(Boolean));
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) { const cand = `${base}#${n}`; if (!taken.has(cand)) return cand; }
+}
+// Every polygon must own its id (state.plots/labelCache/state.rows are keyed by it), so any
+// repeat coming in from a saved layout gets the same invisible "#n" tag a rename would give it.
+// Order is preserved and the FIRST holder of a number keeps the untagged id, so existing data
+// keyed by it still matches.
+function dedupeGeomIds(geom) {
+  const out = [];
+  for (const g of geom) out.push({ ...g, id: uniquePlotId(g.id, out) });
+  return out;
+}
 // Canonical plot key: trims, lowercases, and drops an optional "Plot-" prefix, so a sheet
-// that lists bare numbers ("133") joins to a "Plot-133" polygon (and vice-versa).
-const canonPlotId = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(/^plot[\s_-]*/, '');
+// that lists bare numbers ("133") joins to a "Plot-133" polygon (and vice-versa). The duplicate
+// tag comes off too, so "Plot-1#2" still matches a sheet row for plot 1 — a sheet cannot express
+// two rows with the same id anyway, so both duplicates read that one row's data unless the admin
+// types their own values in.
+const canonPlotId = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(DUP_TAG, '').replace(/^plot[\s_-]*/, '');
 // Key parsed rows to the LAYOUT: match each polygon id by canonical form and rewrite the
 // row's plot_id to the polygon id, so a bare-number sheet joins and everything downstream
 // (colouring, popover, CSV snapshot, session) sees the canonical "Plot-XXX" id. Rows with no
@@ -300,7 +338,14 @@ function indexRows(rows) {
   const byCanon = new Map();
   for (const r of rows) { const k = canonPlotId(r.plot_id); if (k && !byCanon.has(k)) byCanon.set(k, r); }
   const map = new Map(), used = new Set();
-  for (const g of state.geom) { const k = canonPlotId(g.id); const r = byCanon.get(k); if (r) { r.plot_id = g.id; map.set(g.id, r); used.add(k); } }
+  // A plot number may legitimately appear twice (see DUP_TAG). Both polygons start from the one
+  // sheet row that matches the number, but each gets its OWN COPY: they share a Map otherwise, so
+  // applyPlotOverrides writing to one would silently rewrite the other, and r.plot_id could only
+  // ever name one of them. From here on the two are independent — the admin's own edits are keyed
+  // by the unique id, so each duplicate carries its own status, price and media.
+  for (const g of state.geom) { const k = canonPlotId(g.id); const r = byCanon.get(k); if (!r) continue;
+    if (used.has(k)) { map.set(g.id, { ...r, plot_id: g.id }); continue; }
+    r.plot_id = g.id; map.set(g.id, r); used.add(k); }
   for (const r of rows) { const k = canonPlotId(r.plot_id); if (!used.has(k) && r.plot_id != null && !map.has(r.plot_id)) map.set(r.plot_id, r); }
   return map;
 }
@@ -358,8 +403,16 @@ const OVERRIDE_FIELDS = ['status', 'facing', 'size', 'dimensions', 'price', 'blo
 // anything that no longer matches it is by definition an edit. That also makes it
 // self-cleaning — set a value back to what the sheet says and the override disappears.
 //
-// A blank is never recorded: "" can't be told apart from "never filled in", and recording
-// it would let an empty admin field permanently mask a real sheet value.
+// A blank IS recorded, but only where the sheet has something to clear (2026-09-23). Reported:
+// the admin emptied plot A101's "Corner plot" note, the admin panel showed it gone, the save
+// went through — and the client still showed the note, because the sheet still says "Corner
+// plot" and no override had been written to say otherwise. The old rule ("" is never recorded,
+// since it can't be told apart from "never filled in") is still respected where it matters: a
+// blank against a blank sheet cell records nothing, so an untouched empty field cannot invent an
+// override. The remaining cost is stated plainly: once a field has been cleared this way, a value
+// LATER added to that sheet cell stays hidden on the client until the admin edits that field
+// again — an admin edit outranking the sheet is the documented precedence (see loadData), and
+// the alternative is edits that silently do nothing.
 function computePlotOverrides(sheetRows) {
   if (!sheetRows) return state.plotOverrides || {};
   const out = {};
@@ -368,7 +421,7 @@ function computePlotOverrides(sheetRows) {
     OVERRIDE_FIELDS.forEach((k) => {
       const mine = (row?.[k] ?? '').toString().trim();
       const theirs = (s?.[k] ?? '').toString().trim();
-      if (mine && mine !== theirs) diff[k] = mine;
+      if (mine !== theirs && (mine || state.clearedPlotFields.has(`${id}|${k}`))) diff[k] = mine;
     });
     if (Object.keys(diff).length) out[id] = diff;
   });
@@ -378,6 +431,10 @@ function applyPlotOverrides() {
   const ov = state.plotOverrides || {};
   for (const [id, fields] of Object.entries(ov)) {
     const row = state.rows.get(id) || { plot_id: id };
+    // A saved "" is a remembered clear: re-arm it here so the NEXT save writes it out again
+    // instead of computePlotOverrides treating it as an ordinary empty field and dropping it,
+    // which would hand the plot straight back to the sheet's value.
+    for (const [k, v] of Object.entries(fields)) if (String(v) === '') state.clearedPlotFields.add(`${id}|${k}`);
     Object.assign(row, fields);
     row.plot_id = id;
     state.rows.set(id, normalizeRow(row));   // status may have been overridden — re-lower-case it
@@ -415,10 +472,14 @@ async function loadGeometry() {
   const doc = new DOMParser().parseFromString(await res.text(), 'image/svg+xml');
   const vb = (doc.querySelector('svg').getAttribute('viewBox') || '0 0 12000 6000').split(/\s+/).map(Number);
   state.imgW = vb[2]; state.imgH = vb[3];
-  state.geom = [...doc.querySelectorAll('polygon.plot')].map((poly) => ({
+  // dedupeGeomIds: a layout SAVED before the duplicate-number support existed (2026-09-23) can
+  // hold two polygons under the SAME id — the admin renamed one to a number already in use and
+  // nothing stopped it. Loading that as-is puts them back in collision, where the second wins the
+  // state.plots entry and the first renders white, so the tags are (re)applied here on the way in.
+  state.geom = dedupeGeomIds([...doc.querySelectorAll('polygon.plot')].map((poly) => ({
     id: poly.id,
     pts: poly.getAttribute('points').trim().split(/\s+/).map((p) => { const [x, y] = p.split(',').map(Number); return { x, y }; }),
-  }));
+  })));
   recomputeAnchorAndK();
 }
 // anchor = centroid of ALL vertices (deterministic → admin & client agree); kGround
@@ -1072,7 +1133,7 @@ function subdivPx(pts, perEdge = 6) {                             // subdivide p
 }
 function getLabel(id) {
   if (labelCache.has(id)) return labelCache.get(id);
-  const text = id.replace('Plot-', ''), c = document.createElement('canvas'); c.width = 256; c.height = 128;
+  const text = plotNumber(id), c = document.createElement('canvas'); c.width = 256; c.height = 128;
   const ctx = c.getContext('2d');
   ctx.font = 'bold 66px ui-sans-serif, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineWidth = 11; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.78)'; ctx.strokeText(text, 128, 66);
@@ -1081,8 +1142,31 @@ function getLabel(id) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   s.renderOrder = 20; labelCache.set(id, s); return s;
 }
+// The polygon's AREA centroid, not the average of its corners (2026-09-23). Named apart from the
+// trace tool's own `polyCentroid` (the corner average, used for the admin canvas overlay), which
+// is left as it is. The corner average is
+// only the middle for an evenly-sampled shape: a plot carrying extra vertices along one edge — a
+// kink in a road boundary, a traced curve — drags it towards that edge, which is why some numbers
+// sat off-centre. Falls back to the corner average for a degenerate (zero-area) ring.
+function plotAreaCentroid(pts) {
+  let a2 = 0, cx = 0, cy = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i], q = pts[(i + 1) % pts.length];
+    const f = p.x * q.y - q.x * p.y;
+    a2 += f; cx += (p.x + q.x) * f; cy += (p.y + q.y) * f;
+  }
+  if (Math.abs(a2) < 1e-9) return pts.reduce((m, p) => ({ x: m.x + p.x / pts.length, y: m.y + p.y / pts.length }), { x: 0, y: 0 });
+  return { x: cx / (3 * a2), y: cy / (3 * a2) };
+}
+// One size for every plot number (2026-09-23, on request: "make sure it is centered at every plot
+// and their size should be the same"). The height used to be `worldDiam * 0.22` — each label
+// scaled to ITS OWN plot — so a corner plot's number was visibly bigger than its neighbour's and
+// the map read as ragged. rebuildPlots now measures every plot, takes the MEDIAN, and gives all
+// the labels that one height: tied to the actual plot size of the project (so it still suits a
+// layout of big plots or small ones) without varying from plot to plot.
+let labelWorldH = 0;
 function buildPlotObject(g) {
-  const oc = g.pts.reduce((m, p) => ({ x: m.x + p.x / g.pts.length, y: m.y + p.y / g.pts.length }), { x: 0, y: 0 });
+  const oc = plotAreaCentroid(g.pts);
   const centerDir = placeOnSphere(oc), bdir = subdivPx(g.pts).map(placeOnSphere);
 
   const fillPos = [], cf = centerDir.clone().multiplyScalar(R_PLOT);
@@ -1100,12 +1184,13 @@ function buildPlotObject(g) {
 
   const label = getLabel(g.id);
   const worldDiam = bdir[0].clone().multiplyScalar(R_PLOT).distanceTo(bdir[(bdir.length / 2) | 0].clone().multiplyScalar(R_PLOT));
-  const lh = Math.max(8, worldDiam * 0.22); label.scale.set(lh * 2, lh, 1);
+  const lh = Math.max(8, labelWorldH || worldDiam * 0.22);   // labelWorldH is set by rebuildPlots
+  label.scale.set(lh * 2, lh, 1);
   label.position.copy(centerDir.clone().multiplyScalar(R_PLOT * 0.995));
   label.visible = state.showLabels;                  // plot-number annotation: shown only when toggled on
 
   const group = new THREE.Group(); group.add(fill, line, label);
-  return { group, fill, line, label, centerDir };
+  return { group, fill, line, label, centerDir, worldDiam };
 }
 
 // ─── Three.js init / rebuild ──────────────────────────────────────────────────
@@ -1123,6 +1208,7 @@ function initThree(texture) {
   Object.assign(state.view, state.savedView || state.home); // saved view = WYSIWYG; else auto-frame
   clampView();                                     // keep an old/steep saved view (e.g. fov 95, near-nadir) off the pole
   wireViewControls();
+  wireViewportHeight();   // --app-h now tracks the real window, fullscreen included
   renderLoop();
 }
 function disposeMeshGeoMat(o) { o.geometry?.dispose(); if (o.material) o.material.dispose(); }
@@ -1132,6 +1218,15 @@ function rebuildPlots() {
   state.plots.forEach((p) => { three.scene.remove(p.group); disposeMeshGeoMat(p.fill); disposeMeshGeoMat(p.line); }); // labels are cached/reused
   state.plots.clear(); three.fillMeshes.length = 0;
   state.geom.forEach((g) => { const o = buildPlotObject(g); three.scene.add(o.group); state.plots.set(g.id, o); three.fillMeshes.push(o.fill); });
+  // Second pass for the numbers: one height for all of them, from the median plot (see
+  // labelWorldH). Median rather than mean so a handful of odd-shaped corner plots or a stray
+  // sliver can't drag the size for the whole layout.
+  const diams = [...state.plots.values()].map((o) => o.worldDiam).filter((d) => d > 0).sort((a, b) => a - b);
+  if (diams.length) {
+    labelWorldH = Math.max(8, diams[diams.length >> 1] * 0.22);
+    const lh = labelWorldH;
+    state.plots.forEach((o) => o.label.scale.set(lh * 2, lh, 1));
+  }
   colorPlots();
 }
 
@@ -1340,7 +1435,15 @@ function wireViewControls() {
 
   el.addEventListener('pointermove', (e) => {
     if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointers.size === 2) { const d = pDist(pointers); if (pinch > 0) setFov(state.view.fov * (pinch / d)); pinch = d; hideTooltip(); return; }
+    // A gesture in progress counts as "the visitor is using this" (2026-09-23). Reported from a
+    // phone: the layout drifted by itself while pinch-zooming the aerial view, which desktop
+    // never did. Only `pointerdown` and `wheel` bumped lastUserTouch, and a pinch fires neither
+    // while the fingers are moving — so a pinch lasting more than the 2.2s idle delay had the
+    // auto-pan start sweeping the camera mid-zoom. (Desktop is immune: every wheel notch bumps
+    // it.) Any move with a finger/button down bumps it now, so the view holds still until the
+    // gesture is over.
+    if (pointers.size > 0) state.lastUserTouch = Date.now();
+    if (pointers.size === 2) { const d = pDist(pointers); if (pinch > 0) setFov(state.view.fov * (pinch / d)); pinch = d; hideTooltip(); didMove = true; return; }
     if (moveMode) {                                   // drag anywhere → slide the whole plan on the ground
       const g = rayToGround(e);
       if (g) {
@@ -1375,6 +1478,16 @@ function wireViewControls() {
   const end = (e) => {
     const wasClick = (panStart || moveMode) && !didMove, wasDrag = didMove && (moveMode || panStart);
     pointers.delete(e.pointerId); if (pointers.size < 2) pinch = 0;
+    state.lastUserTouch = Date.now();
+    // Lifting ONE finger of a pinch leaves the other mid-gesture against a panStart captured
+    // when the first finger landed — the next move jumped the view by the whole distance
+    // travelled since. Re-anchor on the finger that is still down (and kill any coast), so the
+    // pan carries on from where it actually is.
+    if (pointers.size === 1 && !moveMode) {
+      const [pt] = [...pointers.values()];
+      panStart = { x: pt.x, y: pt.y, lon: state.view.lon, lat: state.view.lat, t: performance.now() };
+      dragFlick = null;
+    }
     if (pointers.size === 0) {
       el.classList.remove('grabbing');
       if (wasClick) pick(e);
@@ -1405,19 +1518,41 @@ function wireViewControls() {
   });
   applyLabelVisibility();                            // sync sprite visibility + button state to the saved preference
   applyLandmarkVisibility();
-  // Both buttons are AMENITY controls (2026-09-22, as specified): 📍 shows/hides each amenity's
-  // POINT (pin + icon), 🏛 its NAME. Independent: both on is the full marker, both off hides it.
-  // Landmarks have no button and always show.
+  // 📍 shows/hides each amenity's POINT (pin + icon). 🏛 is the "names" button: amenity names AND
+  // (2026-09-23, on request) the landmark banners with it — the two kinds of label on the site
+  // plan now go off together, so one tap clears the map of text. Landmarks have no button of
+  // their own; opening the LANDMARKS section forces them back (applyCategoryFilter), since
+  // choosing a category and being shown nothing would be a dead end.
+  // ONE combination is not offered (2026-09-23, on request): points OFF with names ON. It leaves
+  // the amenity names floating over the plan with nothing tying them to a place, which reads as
+  // clutter rather than information. Each button therefore drags the other along rather than
+  // being blocked — a tap always does something visible:
+  //   📍 off  → names go off with it (landmarks are NOT touched; they are the 🏛 button's other job)
+  //   🏛 on   → points come back on, so the names have their pins under them.
+  const rememberAmenityPrefs = () => {
+    try {
+      localStorage.setItem('b91-show-amenity-points', state.showAmenityPoints ? '1' : '0');
+      localStorage.setItem('b91-show-amenities', state.showAmenities ? '1' : '0');
+      localStorage.setItem('b91-show-landmarks', state.showLandmarks ? '1' : '0');
+    } catch {}
+  };
   els.amenityPointToggle?.addEventListener('click', () => {
     state.showAmenityPoints = !state.showAmenityPoints;
-    try { localStorage.setItem('b91-show-amenity-points', state.showAmenityPoints ? '1' : '0'); } catch {}
+    if (!state.showAmenityPoints) state.showAmenities = false;
+    rememberAmenityPrefs();
     applyAmenityVisibility();
   });
   els.amenityToggle?.addEventListener('click', () => {
     state.showAmenities = !state.showAmenities;
-    try { localStorage.setItem('b91-show-amenities', state.showAmenities ? '1' : '0'); } catch {}
+    state.showLandmarks = state.showAmenities;
+    if (state.showAmenities) state.showAmenityPoints = true;
+    rememberAmenityPrefs();
     applyAmenityVisibility();
+    applyLandmarkVisibility();
   });
+  // A browser that stored the forbidden pair under an older build starts corrected, not stuck
+  // with a layout the buttons can no longer produce.
+  if (!state.showAmenityPoints && state.showAmenities) { state.showAmenities = false; rememberAmenityPrefs(); }
   applyAmenityVisibility();
 
   // Category Drawer & Controls wiring
@@ -1777,6 +1912,7 @@ function renderLandmarkCategoryNav() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       state.lastUserTouch = Date.now();
+      showLandmarksForSection();   // picking a category must never show an empty screen
       applyCategoryFilter(btn.dataset.cat);
       collapseClientDrawer();
     });
@@ -1902,7 +2038,16 @@ function openLandmarksCategoryPicker() {
   if (els.catLevel2) els.catLevel2.hidden = false;
   updateLegendVisibility();
   state.autoPan = true;
+  showLandmarksForSection();
   applyCategoryFilter('ALL');
+}
+// Entering the LANDMARKS section with the 🏛 labels button off would otherwise open on a blank
+// sky. The layer is turned back on for real (and remembered), so the button and the screen agree.
+function showLandmarksForSection() {
+  if (state.showLandmarks) return;
+  state.showLandmarks = true;
+  try { localStorage.setItem('b91-show-landmarks', '1'); } catch {}
+  applyLandmarkVisibility();
 }
 
 // A tour actually takes over the viewer, so SOME level of the drawer must always carry an
@@ -1962,8 +2107,11 @@ function applyCategoryFilter(cat, { moveCamera = true } = {}) {
     });
   }
 
-  // Force landmarks visible when filtering by category
-  state.showLandmarks = true;
+  // NOT "force landmarks visible" any more (2026-09-23). This function is also called with no
+  // user behind it — renderLandmarkCategoryNav re-applies the current filter once the landmark
+  // data has loaded, about 4s into a client boot — so forcing it here quietly undid the 🏛
+  // button's saved OFF state on every reload. The force now lives at the two places a visitor
+  // actually asks for landmarks: the category buttons and openLandmarksCategoryPicker.
   applyLandmarkVisibility();
 
   // Ensure DOM elements are initialized
@@ -2232,6 +2380,23 @@ function toggleFullscreen() {
     document.exitFullscreen?.().catch(() => {});
   }
 }
+// The app's height in real pixels (see the --app-h note in styles.css). Entering or leaving
+// fullscreen animates, and Android reports the new size in stages, so this is re-run a few times
+// after the event rather than once: cheap, and it removes the "sometimes" from the bug.
+function syncViewportHeight() {
+  const h = Math.round(window.innerHeight || 0);
+  if (h > 0) document.documentElement.style.setProperty('--app-h', h + 'px');
+  onResize();                      // the WebGL canvas follows the same box
+}
+function wireViewportHeight() {
+  syncViewportHeight();
+  const resync = () => { syncViewportHeight(); [60, 200, 500].forEach((ms) => setTimeout(syncViewportHeight, ms)); };
+  window.addEventListener('resize', syncViewportHeight);
+  window.addEventListener('orientationchange', resync);
+  document.addEventListener('fullscreenchange', resync);
+  document.addEventListener('webkitfullscreenchange', resync);   // iOS Safari still ships the prefixed event
+  window.visualViewport?.addEventListener('resize', syncViewportHeight);
+}
 function onResize() {
   if (!three) return;
   const w = els.pano.clientWidth, h = els.pano.clientHeight;
@@ -2360,7 +2525,14 @@ function areaReadableCount() {
 }
 const hexToInt = (s) => { const n = parseInt(String(s || '').replace('#', ''), 16); return isFinite(n) ? n : 0x888888; };
 
-const AREA_DIM = 0.22;                                  // how far a plot outside the active band fades back
+// Plots outside the active band are NOT faded any more (2026-09-23, on request): "don't dim those
+// available plots which don't come in that size bracket — keep the colour which is of the plot".
+// A band now only ADDS its colour to the plots inside it; everything else keeps the ordinary
+// available/reserved/sold colour it has with no filter at all, so the layout reads normally and
+// only the matches stand out. AREA_DIM is kept for the hover path's sake (nothing multiplies it
+// any more) — see isAreaDimmed, which still marks out-of-band plots so they keep their resting
+// look on hover and show no tooltip, both asked for separately.
+const AREA_DIM = 0.22;
 const isAreaDimmed = (id) => { const f = activeAreaFilter(); return !!f && !plotMatchesAreaFilter(state.rows.get(id), f); };
 // A plot's RESTING appearance right now: its status colour normally, the active band's
 // colour when it falls in that band, faded when a band is active and it doesn't.
@@ -2375,7 +2547,7 @@ function plotBaseStyle(id, status) {
   if (!f) return { color: STATUS_META[st].color, fill: state.overlayOpacity, line: 0.95 };
   return plotMatchesAreaFilter(state.rows.get(id), f)
     ? { color: hexToInt(f.color), fill: state.overlayOpacity, line: 0.95 }
-    : { color: STATUS_META[st].color, fill: state.overlayOpacity * AREA_DIM, line: AREA_DIM };
+    : { color: STATUS_META[st].color, fill: state.overlayOpacity, line: 0.95 };   // exactly the no-filter look
 }
 function paintPlot(p, id, status) {
   const s = plotBaseStyle(id, status);
@@ -2383,13 +2555,19 @@ function paintPlot(p, id, status) {
   p.line.material.color.setHex(s.color); p.line.material.opacity = s.line;
 }
 function colorPlots() {
-  // While a band is picked, matching plots wear ITS colour and everything else fades back —
-  // non-matching plots are dimmed rather than hidden so the layout still reads as a whole
-  // and you can see where the matches sit within it. Status filtering still applies on top
-  // (a plot must pass both), since "Type 1 AND available" is the real question being asked.
+  // The two filters are ANDed (2026-09-23, on request: "there should be an AND between the filters
+  // not OR"). A plot is painted only when it passes the STATUS filter AND falls in the picked size
+  // band; anything else carries no overlay at all, leaving the site plan's own artwork showing
+  // through. The earlier attempts at this — fading the others back, then giving them their plain
+  // status colour — both still answered "available" on plots of the wrong size, which is the
+  // opposite of what the band was picked to ask. Hiding the group also takes them out of
+  // hit-testing (pick() filters on `m.parent.visible`), so they can't be hovered or opened either,
+  // which is consistent with the tooltip rule already in place for out-of-band plots.
+  const band = activeAreaFilter();
   state.plots.forEach((p, id) => {
     const row = state.rows.get(id), status = STATUS_META[row?.status] ? row.status : 'unknown';
-    p.status = status; p.group.visible = state.activeFilters.has(status);
+    p.status = status;
+    p.group.visible = state.activeFilters.has(status) && (!band || plotMatchesAreaFilter(row, band));
     if (id === state.selectedId) applySelectStyle(p, status);
     else paintPlot(p, id, status);
   });
@@ -2404,8 +2582,13 @@ function applySelectStyle(p, status) {
   p.line.material.opacity = 1;
 }
 function applyData() {
+  // Counted within the picked size band, for the same reason the map is now drawn that way: with
+  // a band active, "Available 333" beside forty visible plots is answering a question nobody asked.
+  const band = activeAreaFilter();
   const counts = { available: 0, reserved: 0, sold: 0, unknown: 0 };
-  state.plots.forEach((p, id) => { const row = state.rows.get(id); counts[STATUS_META[row?.status] ? row.status : 'unknown']++; });
+  state.plots.forEach((p, id) => { const row = state.rows.get(id);
+    if (band && !plotMatchesAreaFilter(row, band)) return;
+    counts[STATUS_META[row?.status] ? row.status : 'unknown']++; });
   renderLegend(counts); colorPlots();
   if (state.selectedId && state.rows.has(state.selectedId)) openPanel(state.selectedId, true);
   requestRender();
@@ -2704,7 +2887,8 @@ function refreshAreaAdminUI() {
 function setAreaFilter(id) {
   state.areaFilterId = id || null;
   [els.areaFilterSel, els.areaFilterSelMobile].forEach((s) => { if (s) { s.value = state.areaFilterId || ''; tintAreaSelect(s); } });
-  colorPlots(); requestRender(true);
+  applyData();               // repaints AND re-counts the status pills for the new band
+  requestRender(true);
 }
 
 // The landscape status chips mirror the header legend's state; kept in one place so the
@@ -2746,7 +2930,7 @@ function showTooltip(id, e) {                            // plot info card, anch
     .filter(([, v]) => v != null && String(v).trim())
     .map(([k, v]) => `<div class="t-row"><span class="t-k">${k}</span><span class="t-v">${esc(v)}</span></div>`).join('');
   els.tooltip.innerHTML =
-    `<div class="t-head"><strong>${esc(id.replace('Plot-', 'Plot '))}</strong>` +
+    `<div class="t-head"><strong>${esc('Plot ' + plotNumber(id))}</strong>` +
     `<span class="t-status"><span class="t-dot" style="background:var(--${status})"></span>${STATUS_META[status].label}</span></div>` +
     (meta ? `<div class="t-meta">${meta}</div>` : '');
   els.tooltip.classList.add('show'); els.tooltip.setAttribute('aria-hidden', 'false');
@@ -2770,7 +2954,7 @@ function openPanel(id, keepScroll = false) {
   if (p) { applySelectStyle(p, status); requestRender(); }
   els.panel.dataset.status = status;
   els.panelBadge.textContent = STATUS_META[status].label; els.panelBadge.className = `status-badge ${STATUS_META[status].cls}`;
-  els.panelTitle.textContent = id.replace('Plot-', 'Plot ');
+  els.panelTitle.textContent = 'Plot ' + plotNumber(id);
   const block = (row.block || '').trim(); els.panelBlock.textContent = block ? `Block ${block}` : ''; els.panelBlock.hidden = !block;
   // Only render fields that actually have a value — blanks are hidden, not shown as "—".
   const val = (v) => (v != null && String(v).trim()) ? String(v).trim() : '';
@@ -2951,7 +3135,7 @@ function openModal(media, plotId = '') {
     if (!plotId && media.plot_id) plotId = media.plot_id;
   }
 
-  const plotName = plotId ? plotId.replace('Plot-', 'Plot ') : '';
+  const plotName = plotId ? 'Plot ' + plotNumber(plotId) : '';
   const mediaTypeName = type === 'youtube' ? 'YouTube Video' : type === 'vimeo' ? 'Vimeo Video' : type === 'image' ? 'Image' : '3D Walkthrough';
   const displayTitle = title ? `${title}${plotName ? ' · ' + plotName : ''}` : `${mediaTypeName}${plotName ? ' · ' + plotName : ''}`;
   noteIfExternal(rawUrl, mediaTypeName.toLowerCase()); // shared by plot tours/videos AND amenity tours — see openModal's callers
@@ -3358,7 +3542,10 @@ function parseAlignment(d) {
     for (const [id, fields] of Object.entries(po)) {
       if (!id || !fields || typeof fields !== 'object') continue;
       const clean = {};
-      OVERRIDE_FIELDS.forEach((k) => { if (fields[k] != null && String(fields[k]) !== '') clean[k] = String(fields[k]); });
+      // An empty string is KEPT (2026-09-23): computePlotOverrides now writes one to mean "the
+      // admin deliberately cleared this field", and dropping it here on the way back in would
+      // quietly restore the sheet's value on the next load — the very bug this fixes.
+      OVERRIDE_FIELDS.forEach((k) => { if (fields[k] != null) clean[k] = String(fields[k]); });
       if (Object.keys(clean).length) plotOverrides[id] = clean;
     }
   }
@@ -3513,7 +3700,7 @@ function applySessionGeometry(sess) {
   if (sess.imgW) state.imgW = sess.imgW;
   if (sess.imgH) state.imgH = sess.imgH;
   if (Array.isArray(sess.geom) && sess.geom.length) {
-    state.geom = sess.geom.map((g) => ({ id: g.id, pts: g.pts.map((p) => ({ x: +p.x, y: +p.y })) }));
+    state.geom = dedupeGeomIds(sess.geom.map((g) => ({ id: g.id, pts: g.pts.map((p) => ({ x: +p.x, y: +p.y })) })));
     recomputeAnchorAndK();
   }
   if (Array.isArray(sess.rows)) state.rows = new Map(sess.rows.map((r) => [r.plot_id, r]));
@@ -3558,7 +3745,7 @@ function buildPlotsSVG() {
   const body = state.geom.map((g) => {
     const pts = g.pts.map((p) => `${r1(p.x)},${r1(p.y)}`).join(' ');
     const c = g.pts.reduce((m, p) => ({ x: m.x + p.x / g.pts.length, y: m.y + p.y / g.pts.length }), { x: 0, y: 0 });
-    return `    <g class="plot-group">\n      <polygon id="${g.id}" class="plot" points="${pts}" />\n      <text class="plot-label" x="${r1(c.x)}" y="${r1(c.y)}">${g.id.replace('Plot-', '')}</text>\n    </g>`;
+    return `    <g class="plot-group">\n      <polygon id="${g.id}" class="plot" points="${pts}" />\n      <text class="plot-label" x="${r1(c.x)}" y="${r1(c.y)}">${plotNumber(g.id)}</text>\n    </g>`;
   }).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.round(state.imgW)} ${Math.round(state.imgH)}" class="plot-overlay" preserveAspectRatio="xMidYMid meet">\n  <!-- Exported by the Build91 admin trace tool. -->\n  <g class="plots">\n${body}\n  </g>\n</svg>\n`;
 }
@@ -3839,36 +4026,31 @@ async function exportBundle() {
     }
   } catch {}
 
-  // The project menu (this button's own parent) already hid itself the instant it was
-  // clicked (onProjAction), so there is NOTHING else on screen for the rest of this
-  // function to show through except the notice banner below — reported 2026-09-11 as "how
-  // can he see the downloading is even started, there is no downloading progress
-  // animation." Two real phases, both visible: the server builds the whole zip in memory
-  // before sending anything (slow for a big project — base64-embeds every pano/plan image
-  // inline), during which `fetch()` itself simply hasn't resolved yet; then it streams,
-  // during which fetchBlobWithProgress's real byte counts drive a live percentage. Both
-  // phases use `persist:true` so the message doesn't vanish on showNotice's normal 9s
-  // timer while the admin is still waiting — only the final result reverts to normal.
-  showNotice(`Building the standalone site for “${esc(id)}”… this can take a while for a large project.`, { persist: true });
+  // Handed to the BROWSER rather than buffered in a JS blob (2026-09-23). Reported: "I am not
+  // able to do export standalone site as before, which used to directly download the zip". The
+  // old path fetched the whole archive through fetchBlobWithProgress to drive an in-app
+  // percentage, then handed Chrome a blob: URL and revoked it 8 seconds later. anadmanv2's
+  // archive is 314 MB (every pano and plan is base64-embedded, which inflates them by a third),
+  // and a file that size does not finish writing to disk within those 8 seconds — the revoke
+  // pulled the URL out from under the write and the download was CANCELLED, while the app went
+  // on to claim "Downloaded". Seen directly in a headless run: `DOWNLOAD STARTED
+  // anadmanv2-plotmap.zip` followed immediately by `DOWNLOAD canceled 0 MB`, with the success
+  // notice on screen. It also held the entire archive in memory first, which on a phone or a
+  // modest laptop is its own failure.
+  //
+  // server.py already sends `Content-Disposition: attachment; filename="<id>-plotmap.zip"` and a
+  // Content-Length, so a plain same-origin link does the whole job: the browser streams straight
+  // to disk, shows its own progress, survives any size, and the file cannot be yanked away
+  // mid-write. The in-app percentage goes — the browser's own download UI replaces it.
+  const url = `/api/export-bundle?project=${encodeURIComponent(id)}`;
+  showNotice(`Building the standalone site for “${esc(id)}”… the download starts on its own once the server has zipped it (large projects take a while), and your browser will show the progress.`, { persist: true });
   try {
-    let lastTick = 0;
-    const blob = await fetchBlobWithProgress(`/api/export-bundle?project=${encodeURIComponent(id)}`, (loaded, total) => {
-      const now = Date.now();
-      if (now - lastTick < 250 && loaded !== total) return;   // throttle — a fast LAN transfer can fire this hundreds of times/sec
-      lastTick = now;
-      const loadedMB = (loaded / 1048576).toFixed(1);
-      if (total) {
-        const pct = Math.min(100, Math.round((loaded / total) * 100));
-        showNotice(`Downloading the standalone site… ${pct}% (${loadedMB} MB of ${(total / 1048576).toFixed(1)} MB)`, { persist: true });
-      } else {
-        showNotice(`Downloading the standalone site… ${loadedMB} MB so far`, { persist: true });
-      }
-    });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${id}-plotmap.zip`;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${id}-plotmap.zip`; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
     const embed = `<iframe src="https://YOUR-HOST/${id}/index.html" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen loading="lazy"></iframe>`;
     let copied = false; try { await navigator.clipboard.writeText(embed); copied = true; } catch {}
-    showNotice(`Downloaded <code>${id}-plotmap.zip</code>. Unzip the <code>${id}/</code> folder — <strong>open <code>index.html</code> directly, no server needed</strong> — or upload it to any static host. ${copied ? 'An <strong>&lt;iframe&gt; embed snippet is on your clipboard</strong>' : 'Embed it with an <code>&lt;iframe&gt;</code> pointing at <code>index.html</code>'} (replace <code>YOUR-HOST</code> with your domain).`);
+    showNotice(`Downloading <code>${id}-plotmap.zip</code> — watch your browser's downloads for progress. Unzip the <code>${id}/</code> folder — <strong>open <code>index.html</code> directly, no server needed</strong> — or upload it to any static host. ${copied ? 'An <strong>&lt;iframe&gt; embed snippet is on your clipboard</strong>' : 'Embed it with an <code>&lt;iframe&gt;</code> pointing at <code>index.html</code>'} (replace <code>YOUR-HOST</code> with your domain).`);
   } catch (e) {
     showNotice(`Couldn’t build the standalone site (${esc(String(e.message || e))}). This needs <code>python server.py</code> running — a plain static server can’t zip the bundle.`);
   }
@@ -4175,7 +4357,7 @@ function drawPoly(g, p, selected) {
   g.beginPath(); p.pts.forEach((pt, i) => { const s = toScr(pt.x, pt.y); i ? g.lineTo(s.x, s.y) : g.moveTo(s.x, s.y); }); g.closePath();
   g.fillStyle = col + '4d'; g.fill(); g.lineWidth = selected ? 3 : 2; g.strokeStyle = selected ? '#d4af37' : col; g.stroke();
   const cs = toScr(...Object.values(polyCentroid(p.pts))); g.font = 'bold 13px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.72)'; g.strokeText(p.id.replace('Plot-', ''), cs.x, cs.y); g.fillStyle = '#fff'; g.fillText(p.id.replace('Plot-', ''), cs.x, cs.y);
+  g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.72)'; g.strokeText(plotNumber(p.id), cs.x, cs.y); g.fillStyle = '#fff'; g.fillText(plotNumber(p.id), cs.x, cs.y);
   if (selected || trace.mode === 'edit') p.pts.forEach((pt) => { const s = toScr(pt.x, pt.y); g.beginPath(); g.arc(s.x, s.y, 4, 0, TAU); g.fillStyle = '#d4af37'; g.fill(); g.lineWidth = 1; g.strokeStyle = '#000'; g.stroke(); });
 }
 function drawDraft(g, pts) {
@@ -4257,6 +4439,11 @@ function autofillPlotFromSheet(p) {
   if (!p._sheetFilled) p._sheetFilled = new Set();
   let changed = false;
   SHEET_AUTOFILL_FIELDS.forEach((key) => {
+    // "Only fill if empty" would fight a DELIBERATE clear (state.clearedPlotFields, armed by the
+    // editor and by applyPlotOverrides for every saved ""): the admin empties a note, saves, and
+    // on the next open the sheet's value is quietly put back — so the clear appears not to have
+    // worked, and the following save would record the sheet's value as if it had been typed.
+    if (state.clearedPlotFields.has(`${p.id}|${key}`)) return;
     if (!p[key] && row[key]) { p[key] = row[key]; p._sheetFilled.add(key); changed = true; }
   });
   if (!p._statusTouched && STATUS_META[row.status] && p.status !== row.status) {
@@ -4265,7 +4452,9 @@ function autofillPlotFromSheet(p) {
   return changed;
 }
 function addPlot(pts, id, status) {
-  const p = { id: id || nextPlotId(), status: status || 'available', pts };
+  // uniquePlotId here too: loadCurrentLayoutIntoTrace re-adds a saved layout that may already
+  // contain a legitimate duplicate number, and re-tracing must not merge the two.
+  const p = { id: uniquePlotId(id || nextPlotId(), trace.plots), status: status || 'available', pts };
   autofillPlotFromSheet(p);
   trace.plots.push(p);
   trace.sel = trace.plots.length - 1; refreshTraceList(); drawTrace();
@@ -4335,9 +4524,11 @@ function refreshTraceList() {
     syncMedia();
 
     const li = document.createElement('li'); li.className = 'trace-li' + (i === trace.sel ? ' is-sel' : '');
-    const idIn = document.createElement('input'); idIn.className = 'trace-id'; idIn.value = p.id.replace('Plot-', ''); idIn.title = 'Plot number';
+    const idIn = document.createElement('input'); idIn.className = 'trace-id'; idIn.value = plotNumber(p.id); idIn.title = 'Plot number (two plots may share one — e.g. 1 in Sector A and 1 in Sector B)';
     idIn.addEventListener('change', () => {
-      p.id = 'Plot-' + idIn.value.trim();
+      // A number already in use is ALLOWED and keeps its own data: the clash is resolved with an
+      // internal "#n" tag that never reaches the screen (see plotNumber/uniquePlotId).
+      p.id = uniquePlotId('Plot-' + idIn.value.trim(), trace.plots, i);
       // Typing/confirming the real plot number is the moment a freshly-drawn plot can
       // finally be matched against an already-loaded sheet row (see autofillPlotFromSheet)
       // — its placeholder id at capture time never matched anything. Only the fields that
@@ -4413,6 +4604,11 @@ function refreshTraceList() {
         const inp = document.createElement('input'); inp.type = 'text'; inp.value = p[key] || ''; if (ph) inp.placeholder = ph;
         inp.addEventListener('input', () => {
           p[key] = inp.value;
+          // Typing a field empty is an instruction, not an absence of one (see
+          // computePlotOverrides): remember it so the save records the clear.
+          const mark = `${p.id}|${key}`;
+          if (inp.value.trim()) state.clearedPlotFields.delete(mark);
+          else state.clearedPlotFields.add(mark);
           if (p._sheetFilled) p._sheetFilled.delete(key);
           sheetBadge.hidden = true;
           if (onUpdate) onUpdate(inp.value);
@@ -4626,7 +4822,12 @@ function traceLoadDXFText(text, name) {
 function applyDXFLayer(layer) {
   const conv = dxfToPlots(trace.dxf, layer); if (!conv) { setTraceHint('No closed polylines on that layer.', true); return; }
   trace.W = conv.W; trace.H = conv.H; trace.draft = null; trace.sel = -1;
-  trace.plots = conv.plots.map((p) => { const lbl = conv.labels.find((t) => pointInPoly(t, p.pts)); return { id: lbl && lbl.text ? 'Plot-' + lbl.text.replace(/\s+/g, '') : nextPlotId(), status: 'available', pts: p.pts }; });
+  // Same-number labels are expected in a sectored plan, so the imported ids go through
+  // uniquePlotId as well — two polygons both labelled "1" must not collapse onto one id.
+  trace.plots = [];
+  conv.plots.forEach((p) => { const lbl = conv.labels.find((t) => pointInPoly(t, p.pts));
+    const base = lbl && lbl.text ? 'Plot-' + lbl.text.replace(/\s+/g, '') : nextPlotId();
+    trace.plots.push({ id: uniquePlotId(base, trace.plots), status: 'available', pts: p.pts }); });
   fitTrace(); refreshTraceList(); drawTrace();
 }
 
@@ -4965,10 +5166,24 @@ function projectDir(dir, cam, W, H) {
 // that's trivially re-enabled if density ever becomes a problem again at these smaller
 // sizes. #lmOverflowHint (still wired in wireViewControls) simply never shows any more.
 const LANDMARK_MOBILE_CAP = Infinity;
+// Zoom-responsive banners on phones (2026-09-23), the same idea as amenityScale: zoomed out to the
+// whole site (fov 120) the banners are big enough to blanket the layout and to fight each other for
+// the thin strip of sky, so they shrink; zoomed in they come back up to full size and a little past
+// it. Desktop is deliberately left at 1 — it has the screen height for the authored sizes, and the
+// desktop banners were signed off as they are.
+const LM_ZOOM_MIN = 0.72, LM_ZOOM_MAX = 1.15, LM_ZOOM_REF_FOV = 70;
+function landmarkZoomScale() {
+  if (!(isMobileLandscape() || isMobilePortrait())) return 1;
+  return Math.max(LM_ZOOM_MIN, Math.min(LM_ZOOM_MAX, LM_ZOOM_REF_FOV / Math.max(1, state.view.fov)));
+}
 function renderLandmarks() {
   if (!three || !els.landmarks || els.landmarks.hidden) return;
   const rect = els.pano.getBoundingClientRect(), W = rect.width, H = rect.height, cam = three.camera;
   const filterCat = state.selectedCategory || 'ALL';
+  // Every banner's own transform multiplies this in (styles.css registers it so it inherits);
+  // the measurements below must use the SCALED size or the stacking leaves visible gaps.
+  const zoom = landmarkZoomScale();
+  els.landmarks.style.setProperty('--lm-z', zoom.toFixed(3));
 
   let capSet = null, hiddenCount = 0;
   if (!state.admin && (isMobilePortrait() || isMobileLandscape())) {
@@ -5015,12 +5230,12 @@ function renderLandmarks() {
     // horizontal clamping, and one that won't fit fully is hidden rather than shown half-cut.
     // The usable width now also excludes the client menu strip on the left (2026-09-22): on a
     // phone a banner there was left half under it.
-    const halfW = d.banner.offsetWidth / 2;
+    const halfW = d.banner.offsetWidth * zoom / 2;
     if (bp.x - halfW < safe.left || bp.x + halfW > W - safe.right) {
       d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
       continue;
     }
-    placed.push({ d, hp, bp, halfW, halfH: d.banner.offsetHeight / 2 });
+    placed.push({ d, hp, bp, halfW, halfH: d.banner.offsetHeight * zoom / 2 });
   }
   // VERTICAL is different (2026-09-22). Banners are authored high in the sky, and on a short
   // screen — a landscape phone above all — that sky is cut off: every banner sat above the top edge
@@ -5030,25 +5245,40 @@ function renderLandmarks() {
   //  - a banner that would overlap one already placed moves UP past it into open sky, or, if
   //    that would leave the screen, DOWN past it instead.
   // Banners that already sit clear on screen are not moved; lines always run to the final spot.
-  const boxes = [], GAP = 4, bottomLimit = H - 8;
+  // A banner NEVER drops below its own pin (2026-09-23). The clamp above used to pull a banner
+  // whose sky was cut off down to just under the pills, which landed it in the middle of the site
+  // plan, below its own pin, with the leader line running upwards — it read as a label floating in
+  // front of the plots. Now every banner is kept in the band between the safe top and its own pin,
+  // and one with no room left there is dropped (its gold pin still marks the spot).
+  const boxes = [], GAP = 4, PIN_GAP = 6;
   placed.sort((a, b) => a.bp.y - b.bp.y);
+  const drawn = [];
   for (const p of placed) {
     const h = 2 * p.halfH, l = p.bp.x - p.halfW, r = p.bp.x + p.halfW;
+    const floor = Math.min(H - 8, p.hp.y - PIN_GAP) - h;   // lowest top edge this banner may take
+    if (floor < safe.top) {                                 // no sky at all above the pin
+      // The PIN goes with it (2026-09-23). Left on its own it is a bare white dot floating in the
+      // sky with nothing to explain it — and it is not even where the landmark is, only the
+      // direction of it. A landmark shows as a labelled banner or not at all.
+      p.d.line.style.display = p.d.pin.style.display = p.d.banner.style.display = 'none';
+      continue;
+    }
     const hit = (t) => boxes.find((o) => l < o.r + GAP && r > o.l - GAP && t < o.b + GAP && t + h > o.t - GAP);
-    const start = Math.max(safe.top, p.bp.y - p.halfH);
+    const start = Math.min(Math.max(safe.top, p.bp.y - p.halfH), floor);
     let t = start, o, n;
     if (hit(start)) {
       let up = start; n = 0; while ((o = hit(up)) && n++ < 20) up = o.t - GAP - h;
       if (up >= safe.top && !hit(up)) t = up;
       else {
         let down = start; n = 0; while ((o = hit(down)) && n++ < 20) down = o.b + GAP;
-        if (down + h <= bottomLimit && !hit(down)) t = down;   // nowhere clear at all: leave it at `start`
+        if (down <= floor && !hit(down)) t = down;   // nowhere clear at all: leave it at `start`
       }
     }
     p.bp = { x: p.bp.x, y: t + p.halfH };
     boxes.push({ l, r, t, b: t + h });
+    drawn.push(p);
   }
-  for (const { d, hp, bp } of placed) {
+  for (const { d, hp, bp } of drawn) {
     d.line.setAttribute('x1', hp.x); d.line.setAttribute('y1', hp.y); d.line.setAttribute('x2', bp.x); d.line.setAttribute('y2', bp.y);
     // Same fix as renderAmenities: a sub-pixel compositor transform instead of left/top, which
     // snapped pin and banner to whole pixels independently and made them shimmer while the
@@ -5057,7 +5287,7 @@ function renderLandmarks() {
     // `--lm-s` carries the category highlight's size (styles.css). It must be folded in HERE: a
     // stylesheet `transform` on .is-cat-matched (was `scale(1.08) !important`) replaced this whole
     // positioning transform and threw every highlighted banner into the top-left corner.
-    d.banner.style.transform = `translate3d(${bp.x}px, ${bp.y}px, 0) translate(-50%, -50%) scale(var(--lm-s, 1))`;
+    d.banner.style.transform = `translate3d(${bp.x}px, ${bp.y}px, 0) translate(-50%, -50%) scale(calc(var(--lm-s, 1) * var(--lm-z, 1)))`;
   }
 }
 // The part of the pano a landmark banner may occupy: clear of the client's menu strip on the left
@@ -5088,7 +5318,10 @@ function landmarkSafeArea(rect) {
 function applyLandmarkVisibility() {
   if (!els.landmarks) return;
   const editing = state.admin && state.adminTab === 'landmarks';
-  els.landmarks.hidden = !!state.tourView;
+  // `showLandmarks` is the 🏛 button's doing (it carries amenity names and landmarks together).
+  // Never applied while the admin is editing landmarks — hiding the layer someone is placing pins
+  // on would make the tab useless.
+  els.landmarks.hidden = !!state.tourView || (!state.showLandmarks && !editing);
   els.landmarks.classList.toggle('is-editing', editing);
   renderLandmarks();
 }
@@ -5405,7 +5638,7 @@ function applyAmenityVisibility() {
     btn.setAttribute('aria-label', btn.title);
   };
   sync(els.amenityPointToggle, state.showAmenityPoints, 'points');
-  sync(els.amenityToggle, state.showAmenities, 'names');
+  sync(els.amenityToggle, state.showAmenities, 'names & landmarks');
   // Nothing of an amenity left on screen, so an open info card has nothing to point at.
   if (!state.showAmenities && !state.showAmenityPoints && !editing) closeAmCard();
   renderAmenities();
@@ -7536,7 +7769,15 @@ function renderClientSidebar() {
       // A single-tour, single-room project has nowhere else to put an exit — see
       // openClientPanoTour's `state.menuNavStack = []` case — so it's appended straight
       // onto the root list itself, the one level that's always shown.
-      + (state.tourView ? `<button class="cat-btn" type="button" data-node-id="__exit_tour__">✕ EXIT TOUR</button>` : '');
+      + (state.tourView ? `<button class="cat-btn" type="button" data-node-id="__exit_tour__">✕ EXIT TOUR</button>` : '')
+      // "⬇ SAVE FOR OFFLINE" (2026-09-23). The download used to be reachable ONLY through the
+      // banner that shows itself once, and a visitor who tapped "Not now" could never get back
+      // to it: the decline is remembered under `b91-offline-declined-<SW_VERSION>-<project>`,
+      // and SW_VERSION has been frozen at v12 since, so no flag ever expired. This row is the
+      // way back in, and it ignores both the declined and the saved flags (offerOfflineSave's
+      // `force`). Not an admin row, and only where the download exists at all — phone-sized and
+      // a service-worker-capable secure context, exactly what registerOfflineSupport requires.
+      + (offlineSaveRowAvailable() ? `<button class="cat-btn cat-btn-util" type="button" data-node-id="__offline_save__">⬇ SAVE FOR OFFLINE</button>` : '');
 
     els.catNavL1.innerHTML = html;
     // Nothing to show at all (every item disabled, or nothing authored) ⇒ no drawer,
@@ -7699,6 +7940,7 @@ function wireClientSidebarButtons() {
       // The one synthetic row that can appear at ROOT level (see renderClientSidebar) —
       // a single-tour, single-room project has no picker level to carry it otherwise.
       if (nodeId === '__exit_tour__') { closePanoTour(); return; }
+      if (nodeId === '__offline_save__') { collapseClientDrawer(); maybeOfferOfflineSave({ force: true }); return; }
       const nodeInfo = findNodeInfo(nodeId);
       if (!nodeInfo) return;
       // AERIAL VIEW / LANDMARKS are ordinary nodes now — activateMenuNode's own dispatch
@@ -10352,8 +10594,23 @@ async function countMissingOfflineAssets(items) {
   } catch { return 0; }   // can't tell — don't nag on the strength of a failed probe
 }
 
-async function maybeOfferOfflineSave() {
-  if (state.admin || !els.offlineSaveBanner || navigator.onLine === false) return;
+// Is the "⬇ SAVE FOR OFFLINE" menu row worth showing? Exactly where the download can actually
+// happen: the client (never admin), a phone (registerOfflineSupport unregisters the worker on
+// anything larger), and a secure context with service workers — i.e. https:// or localhost, never
+// a plain-http LAN address, where the worker refuses to register at all.
+function offlineSaveRowAvailable() {
+  return !state.admin && !!els.offlineSaveBanner && 'serviceWorker' in navigator && window.isSecureContext
+    && (isMobilePortrait() || isMobileLandscape());
+}
+// `force` = the visitor asked for this from the menu, so the remembered "Not now"/"already saved"
+// answers are ignored. With nothing left to fetch it says so rather than opening a banner whose
+// buttons would have nothing to do.
+async function maybeOfferOfflineSave({ force = false } = {}) {
+  if (state.admin || !els.offlineSaveBanner) return;
+  if (navigator.onLine === false) {
+    if (force) showNotice('No connection right now — reconnect to download this project for offline use.');
+    return;
+  }
   const pid = state.projectId || 'default';
   const standalone = isStandaloneDisplay();
   let saved = false, declined = false;
@@ -10361,26 +10618,47 @@ async function maybeOfferOfflineSave() {
     saved = localStorage.getItem(`b91-offline-saved-${SW_VERSION}-${pid}`) === '1';
     declined = localStorage.getItem(`b91-offline-declined-${SW_VERSION}-${pid}`) === '1';
   } catch {}
-  if (declined) return;   // they said no; respect it until the next SW version
+  if (declined && !force) return;   // they said no; respect it until the next SW version
 
+  // A tap on the menu row must answer AT ONCE. The checks below take seconds on a real project
+  // (probing every asset against the cache, then measuring the download), and the banner used to
+  // appear ~12s after the tap with nothing on screen meanwhile — indistinguishable from a dead
+  // button. The banner opens first, saying it is checking; the branches below either fill it in or
+  // take it away again. Nothing here is shown unasked: `force` only ever comes from that tap.
+  if (force) {
+    if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = 'Save for offline use';
+    if (els.offlineSaveSize) els.offlineSaveSize.textContent = 'Checking what is already saved…';
+    els.offlineSavePrompt.hidden = false;
+    els.offlineSaveProgress.hidden = true;
+    els.offlineSaveBanner.hidden = false;
+  }
   const assets = collectOfflineAssets();
   const iosManual = isIosSafari();
   const missing = await countMissingOfflineAssets(assets);
   // Everything's already downloaded: the banner has no content job left, so only show it if
   // there's still an INSTALL worth offering (i.e. not already installed, and never saved).
-  if (missing === 0 && (saved || standalone)) return;
+  // Asked for from the menu with everything already in place: DOWNLOAD IT AGAIN (2026-09-23, on
+  // request — "allow the users to download as much he wants to"). A visitor who taps the row after
+  // a first save is usually trying to repair a bad copy, and being told "already saved" while the
+  // site misbehaves offline is a dead end. The banner just says so and fetches the lot again.
+  const refreshing = force && missing === 0 && assets.length > 0;
+  if (missing === 0 && !force && (saved || standalone)) return;
   // Nothing this banner could actually do: no content to fetch, and no install path either
   // (not a beforeinstallprompt browser, not iOS Safari's manual Share-sheet route, or already
   // running installed).
-  if (!missing && !deferredInstallPrompt && !iosManual) return;
+  if (!missing && !refreshing && !deferredInstallPrompt && !iosManual) { if (force) els.offlineSaveBanner.hidden = true; return; }
 
   // Already installed → "Add to Home Screen" is meaningless; this is purely a re-download.
   // That case exists because content can go missing under an intact install (see
   // countMissingOfflineAssets), and the home-screen icon is exactly where such a visitor
   // lives — suppressing the banner there used to leave them with no route back at all.
-  if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = standalone ? 'Download for offline use' : 'Add to Home Screen';
+  if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = refreshing ? 'Download again'
+    : standalone ? 'Download for offline use' : 'Add to Home Screen';
   const sizeLabel = (bytes) => {
     const size = formatBytes(bytes);
+    if (refreshing) return size
+      ? `Already saved — fetch all ${assets.length} files again (approx. ${size})`
+      : `Already saved — fetch all ${assets.length} files again`;
     const base = assets.length ? (size ? `Includes offline access — approx. ${size}` : 'Includes offline access') : 'Opens instantly next time';
     if (standalone) return size ? `Approx. ${size} · so it works with no signal` : 'So it works with no signal';
     return iosManual ? `${base} · tap Share → Add to Home Screen after` : base;
@@ -10407,7 +10685,10 @@ async function maybeOfferOfflineSave() {
       els.offlineSaveSkip.removeEventListener('click', onSkip);
       els.offlineSaveGo.removeEventListener('click', onGo);
       els.offlineSaveBanner.hidden = true;
-      try { localStorage.setItem(`b91-offline-declined-${SW_VERSION}-${pid}`, '1'); } catch {}
+      // Closing a banner the visitor OPENED themselves is not a refusal of the offer — recording
+      // it would stop the automatic banner ever appearing again on the strength of a tap on "⬇
+      // SAVE FOR OFFLINE" followed by second thoughts.
+      if (!force) { try { localStorage.setItem(`b91-offline-declined-${SW_VERSION}-${pid}`, '1'); } catch {} }
       resolve();
     };
     const onGo = async () => {

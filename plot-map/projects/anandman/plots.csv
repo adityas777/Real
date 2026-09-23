@@ -1,437 +1,437 @@
 plot_id,status,facing,size,dimensions,price,block,tour_url,video_url,image_url,media_json,notes
-Plot-A102,sold,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A103,sold,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A104,sold,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A105,sold,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A106,sold,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A107,sold,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A108,reserved,West,1499.36,30x40,1800000,A,,,,[],Corner plot
-Plot-A109,reserved,West,1499.36,30x40,,A,,,,[],Corner plot
-Plot-A110,reserved,West,1499.36,,,A,,,,[],Corner plot
-Plot-A111,reserved,West,1499.36,,,A,,,,[],Corner plot
-Plot-A112,reserved,West,1499.36,,,A,,,,[],Corner plot
-Plot-A113,sold,West,1499.36,,,A,,,,[],Corner plot
-Plot-A114,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A115,sold,West,1499.36,,,A,,,,[],Corner plot
-Plot-A116,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A117,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A118,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A119,reserved,East,1499.36,,,A,,,,[],Corner plot
-Plot-A120,reserved,East,1499.36,,,A,,,,[],Corner plot
-Plot-A121,reserved,East,1499.36,,,A,,,,[],Corner plot
-Plot-A122,reserved,East,1499.36,,,A,,,,[],Corner plot
-Plot-A123,reserved,East,1499.36,,,A,,,,[],Corner plot
-Plot-A124,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A125,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A126,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A127,sold,East,1499.36,,,A,,,,[],Corner plot
-Plot-A128,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A129,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A130,available,East,2016.09,,,A,,,,[],Corner plot
-Plot-A131,reserved,West,2016.09,,,A,,,,[],Corner plot
-Plot-A132,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A133,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A134,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A135,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A136,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A137,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A138,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A139,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A140,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A141,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A142,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A143,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A144,available,West,1499.36,,,A,,,,[],Corner plot
-Plot-A145,available,West,1246.73,,,A,,,,[],Corner plot
-Plot-A146,available,West,1246.73,,,A,,,,[],Corner plot
-Plot-A147,available,East,1246.73,,,A,,,,[],Corner plot
-Plot-A148,available,East,1246.73,,,A,,,,[],Corner plot
-Plot-A149,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A150,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A151,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A152,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A153,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A154,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A155,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A156,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A157,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A158,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A159,available,East,1499.36,,,A,,,,[],Corner plot
-Plot-A160,available,East,2016.09,,,A,,,,[],Corner plot
-Plot-A161,available,West,1815.01,,,A,,,,[],Corner plot
-Plot-A162,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A163,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A164,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A165,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A166,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A167,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A168,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A169,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A170,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A171,available,West,1349.81,,,A,,,,[],Corner plot
-Plot-A172,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A173,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A174,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A175,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A176,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A177,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A178,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A179,available,East,1349.81,,,A,,,,[],Corner plot
-Plot-A180,available,East,1815.01,,,A,,,,[],Corner plot
-Plot-A181,available,West,1146.01,,,A,,,,[],Corner plot
-Plot-A182,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A183,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A184,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A185,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A186,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A187,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A188,available,West,1122.38,,,A,,,,[],Corner plot
-Plot-A189,available,East,1122.38,,,A,,,,[],Corner plot
-Plot-A190,available,East,1122.38,,,A,,,,[],Corner plot
-Plot-A191,available,East,1122.38,,,A,,,,[],Corner plot
-Plot-A192,available,East,1122.38,,,A,,,,[],Corner plot
-Plot-A193,available,East,1122.38,,,A,,,,[],Corner plot
-Plot-A194,reserved,East,1146.01,,,A,,,,[],Corner plot
-Plot-A195,available,West,1362.35,,,A,,,,[],Corner plot
-Plot-A196,available,West,1334.26,,,B,,,,[],Corner plot
-Plot-A197,reserved,East,1295.94,,,B,,,,[],Corner plot
-Plot-A198,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A199,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A200,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A201,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A202,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A203,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A204,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A205,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A206,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A207,reserved,East,1111.81,,,B,,,,[],Corner plot
-Plot-A208,sold,West,1295.94,,,B,,,,[],Corner plot
-Plot-A209,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A210,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A211,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A212,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A213,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A214,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A215,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A216,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A217,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A218,available,West,1103.74,,,B,,,,[],Corner plot
-Plot-A219,sold,East,1246.73,,,B,,,,[],Corner plot
-Plot-A220,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A221,sold,East,1246.73,,,B,,,,[],Corner plot
-Plot-A222,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A223,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A224,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A225,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A226,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A227,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A228,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A229,sold,East,1246.73,,,B,,,,[],Corner plot
-Plot-A230,sold,East,1246.73,,,B,,,,[],Corner plot
-Plot-A231,sold,East,1246.73,,,B,,,,[],Corner plot
-Plot-A232,sold,East,1246.73,,,B,,,,[],Corner plot
-Plot-A233,sold,East,1295.94,,,B,,,,[],Corner plot
-Plot-A234,available,West,1295.94,,,B,,,,[],Corner plot
-Plot-A235,reserved,West,1246.73,,,B,,,,[],Corner plot
-Plot-A236,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A237,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A238,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A239,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A240,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A241,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A242,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A243,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A244,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A245,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A246,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A247,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A248,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A249,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A250,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A251,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A252,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A253,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A254,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A255,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A256,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A257,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A258,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A259,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A260,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A261,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A262,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A263,available,East,1295.94,,,B,,,,[],Corner plot
-Plot-A264,available,West,1295.94,,,B,,,,[],Corner plot
-Plot-A265,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A266,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A267,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A268,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A269,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A270,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A271,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A272,available,West,1246.73,,,B,,,,[],Corner plot
-Plot-A273,reserved,North,1246.73,,,B,,,,[],Corner plot
-Plot-A274,reserved,North,1246.73,,,B,,,,[],Corner plot
-Plot-A275,reserved,North,1246.73,,,B,,,,[],Corner plot
-Plot-A276,reserved,North,1190.71,,,B,,,,[],Corner plot
-Plot-A277,reserved,North,1031.3,,,B,,,,[],Corner plot
-Plot-A278,reserved,North,1246.73,,,B,,,,[],Corner plot
-Plot-A279,reserved,North,1370.04,,,B,,,,[],Corner plot
-Plot-A280,reserved,West,1122.38,,,B,,,,[],Corner plot
-Plot-A281,reserved,West,1122.38,,,B,,,,[],Corner plot
-Plot-A282,reserved,West,1122.38,,,B,,,,[],Corner plot
-Plot-A283,reserved,East,1887.58,,,B,,,,[],Corner plot
-Plot-A284,reserved,East,1246.73,,,B,,,,[],Corner plot
-Plot-A285,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A286,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A287,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A288,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A289,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A290,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A291,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A292,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A293,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A294,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A295,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A296,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A297,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A298,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A299,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A300,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A301,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A302,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A303,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A304,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A305,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A306,available,East,1246.73,,,B,,,,[],Corner plot
-Plot-A307,reserved,East,1583.09,,,C,,,,[],Corner plot
-Plot-A308,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A309,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A310,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A311,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A312,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A313,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A314,reserved,East,1371.89,,,C,,,,[],Corner plot
-Plot-A315,sold,East,1371.89,,,C,,,,[],Corner plot
-Plot-A316,sold,East,1371.89,,,C,,,,[],
-Plot-A317,available,East,1371.89,,,C,,,,[],
-Plot-A318,available,East,1371.89,,,C,,,,[],
-Plot-A319,available,East,1371.89,,,C,,,,[],
-Plot-A320,available,East,1371.89,,,C,,,,[],
-Plot-A321,available,East,1371.89,,,C,,,,[],
-Plot-A322,available,East,1371.89,,,C,,,,[],
-Plot-A323,available,East,1371.89,,,C,,,,[],
-Plot-A324,available,East,1371.89,,,C,,,,[],
-Plot-A325,available,East,1371.89,,,C,,,,[],
-Plot-A326,available,East,1371.89,,,C,,,,[],
-Plot-A327,available,East,1371.89,,,C,,,,[],
-Plot-A328,available,West,1371.89,,,C,,,,[],
-Plot-A329,available,West,1371.89,,,C,,,,[],
-Plot-A330,available,West,1371.89,,,C,,,,[],
-Plot-A331,available,West,1371.89,,,C,,,,[],
-Plot-A332,available,West,1371.89,,,C,,,,[],
-Plot-A333,available,West,1371.89,,,C,,,,[],
-Plot-A334,available,West,1371.89,,,C,,,,[],
-Plot-A335,available,West,1371.89,,,C,,,,[],
-Plot-A336,available,West,1371.89,,,C,,,,[],
-Plot-A337,available,West,1371.89,,,C,,,,[],
-Plot-A338,available,West,1371.89,,,C,,,,[],
-Plot-A339,available,West,1371.89,,,C,,,,[],
-Plot-A340,available,West,1371.89,,,C,,,,[],
-Plot-A341,available,West,1371.89,,,C,,,,[],
-Plot-A342,available,West,1371.89,,,C,,,,[],
-Plot-A343,available,West,1371.89,,,C,,,,[],
-Plot-A344,available,West,1371.89,,,C,,,,[],
-Plot-A345,available,West,1371.89,,,C,,,,[],
-Plot-A346,available,West,1371.89,,,C,,,,[],
-Plot-A347,available,West,1371.89,,,C,,,,[],
-Plot-A348,reserved,West,1583.09,,,C,,,,[],
-Plot-A349,sold,East,988.37,,,C,,,,[],
-Plot-A350,sold,East,856.51,,,C,,,,[],
-Plot-A351,available,East,1122.38,,,C,,,,[],
-Plot-A352,available,East,1122.38,,,C,,,,[],
-Plot-A353,available,East,1122.38,,,C,,,,[],
-Plot-A354,sold,East,1122.38,,,C,,,,[],
-Plot-A355,sold,East,1122.38,,,C,,,,[],
-Plot-A356,sold,East,928.92,,,C,,,,[],
-Plot-A357,sold,East,990.95,,,C,,,,[],
-Plot-A358,available,East,990.95,,,C,,,,[],
-Plot-A359,available,East,990.95,,,C,,,,[],
-Plot-A360,available,East,990.95,,,C,,,,[],
-Plot-A361,available,East,990.95,,,C,,,,[],
-Plot-A362,available,East,990.95,,,C,,,,[],
-Plot-A363,available,East,990.95,,,C,,,,[],
-Plot-A364,available,East,990.95,,,C,,,,[],
-Plot-A365,available,East,990.95,,,C,,,,[],
-Plot-A366,available,East,990.95,,,C,,,,[],
-Plot-A367,available,East,990.95,,,C,,,,[],
-Plot-A368,available,East,990.95,,,C,,,,[],
-Plot-A369,available,East,990.95,,,C,,,,[],
-Plot-A370,available,East,990.95,,,C,,,,[],
-Plot-A371,available,East,911.2,,,C,,,,[],
-Plot-A372,available,West,911.2,,,C,,,,[],
-Plot-A373,available,West,990.95,,,C,,,,[],
-Plot-A374,available,West,990.95,,,C,,,,[],
-Plot-A375,available,West,990.95,,,C,,,,[],
-Plot-A376,available,West,990.95,,,C,,,,[],
-Plot-A377,available,West,990.95,,,C,,,,[],
-Plot-A378,available,West,990.95,,,C,,,,[],
-Plot-A379,available,West,990.95,,,C,,,,[],
-Plot-A380,available,West,990.95,,,C,,,,[],
-Plot-A381,available,West,990.95,,,C,,,,[],
-Plot-A382,available,West,990.95,,,C,,,,[],
-Plot-A383,available,West,990.95,,,C,,,,[],
-Plot-A384,available,West,990.95,,,C,,,,[],
-Plot-A385,available,West,990.95,,,C,,,,[],
-Plot-A386,sold,West,990.95,,,C,,,,[],
-Plot-A387,available,East,1246.73,,,C,,,,[],
-Plot-A388,available,East,1246.73,,,C,,,,[],
-Plot-A389,reserved,East,1246.73,,,C,,,,[],
-Plot-A390,reserved,East,1246.73,,,C,,,,[],
-Plot-A391,reserved,East,1246.73,,,C,,,,[],
-Plot-A392,reserved,East,1246.73,,,C,,,,[],
-Plot-A393,reserved,East,1246.73,,,C,,,,[],
-Plot-A394,reserved,East,1246.73,,,C,,,,[],
-Plot-A395,reserved,East,1246.73,,,C,,,,[],
-Plot-A396,reserved,East,1246.73,,,C,,,,[],
-Plot-A397,reserved,East,1246.73,,,C,,,,[],
-Plot-A398,reserved,East,1246.73,,,C,,,,[],
-Plot-A399,reserved,East,1246.73,,,C,,,,[],
-Plot-A400,reserved,East,1246.73,,,C,,,,[],
-Plot-A401,reserved,East,1246.73,,,C,,,,[],
-Plot-A402,reserved,East,1246.73,,,C,,,,[],
-Plot-A403,reserved,East,1246.73,,,C,,,,[],
-Plot-A404,reserved,East,1246.73,,,C,,,,[],
-Plot-A405,reserved,East,1246.73,,,C,,,,[],
-Plot-A406,reserved,East,1246.73,,,C,,,,[],
-Plot-A407,reserved,East,1246.73,,,C,,,,[],
-Plot-A408,reserved,East,1246.73,,,C,,,,[],
-Plot-A409,reserved,East,1246.73,,,C,,,,[],
-Plot-A410,reserved,East,1246.73,,,C,,,,[],
-Plot-A411,reserved,East,1246.73,,,C,,,,[],
-Plot-A412,reserved,East,1246.73,,,C,,,,[],
-Plot-A413,reserved,East,1246.73,,,C,,,,[],
-Plot-A414,reserved,East,1246.73,,,C,,,,[],
-Plot-A415,reserved,East,1485.43,,,C,,,,[],
-Plot-A416,sold,East,2142.41,,,D,,,,[],
-Plot-A417,reserved,East,1246.73,,,D,,,,[],
-Plot-A418,reserved,East,1246.73,,,D,,,,[],
-Plot-A419,reserved,East,1246.73,,,D,,,,[],
-Plot-A420,sold,East,1246.73,,,D,,,,[],
-Plot-A421,sold,East,1246.73,,,D,,,,[],
-Plot-A422,available,East,1246.73,,,D,,,,[],
-Plot-A423,available,East,1246.73,,,D,,,,[],
-Plot-A424,available,East,1246.73,,,D,,,,[],
-Plot-A425,sold,West,2142.41,,,D,,,,[],
-Plot-A426,available,West,1246.73,,,D,,,,[],
-Plot-A427,available,West,1246.73,,,D,,,,[],
-Plot-A428,available,West,1246.73,,,D,,,,[],
-Plot-A429,available,West,1246.73,,,D,,,,[],
-Plot-A430,available,West,1246.73,,,D,,,,[],
-Plot-A431,available,West,1246.73,,,D,,,,[],
-Plot-A432,available,West,1246.73,,,D,,,,[],
-Plot-A433,available,West,1246.73,,,D,,,,[],
-Plot-A434,sold,East,1246.73,,,D,,,,[],
-Plot-A435,available,East,1246.73,,,D,,,,[],
-Plot-A436,sold,East,1246.73,,,D,,,,[],
-Plot-A437,available,East,1246.73,,,D,,,,[],
-Plot-A438,available,East,1246.73,,,D,,,,[],
-Plot-A439,available,East,1246.73,,,D,,,,[],
-Plot-A440,available,East,1246.73,,,D,,,,[],
-Plot-A441,available,East,1246.73,,,D,,,,[],
-Plot-A442,available,East,1246.73,,,D,,,,[],
-Plot-A443,available,East,1246.73,,,D,,,,[],
-Plot-A444,sold,East,2142.41,,,D,,,,[],
-Plot-A445,sold,West,2142.41,,,D,,,,[],
-Plot-A446,available,West,1246.73,,,D,,,,[],
-Plot-A447,available,West,1246.73,,,D,,,,[],
-Plot-A448,available,West,1246.73,,,D,,,,[],
-Plot-A449,available,West,1246.73,,,D,,,,[],
-Plot-A450,available,West,1246.73,,,D,,,,[],
-Plot-A451,available,West,1246.73,,,D,,,,[],
-Plot-A452,available,West,1246.73,,,D,,,,[],
-Plot-A453,available,West,1246.73,,,D,,,,[],
-Plot-A454,available,West,1246.73,,,D,,,,[],
-Plot-A455,available,West,1246.73,,,D,,,,[],
-Plot-A456,sold,East,1246.73,,,D,,,,[],
-Plot-A457,available,East,1246.73,,,D,,,,[],
-Plot-A458,available,East,1246.73,,,D,,,,[],
-Plot-A459,available,East,1246.73,,,D,,,,[],
-Plot-A460,reserved,East,1246.73,,,D,,,,[],
-Plot-A461,reserved,East,1246.73,,,D,,,,[],
-Plot-A462,reserved,East,1246.73,,,D,,,,[],
-Plot-A463,reserved,East,1246.73,,,D,,,,[],
-Plot-A464,reserved,East,1246.73,,,D,,,,[],
-Plot-A465,reserved,East,1246.73,,,D,,,,[],
-Plot-A466,available,East,1246.73,,,D,,,,[],
-Plot-A467,sold,East,2142.41,,,D,,,,[],
-Plot-A468,sold,West,2142.41,,,D,,,,[],
-Plot-A469,available,West,1246.73,,,D,,,,[],
-Plot-A470,reserved,West,1246.73,,,D,,,,[],
-Plot-A471,reserved,West,1246.73,,,D,,,,[],
-Plot-A472,reserved,West,1246.73,,,D,,,,[],
-Plot-A473,reserved,West,1246.73,,,D,,,,[],
-Plot-A474,reserved,West,1246.73,,,D,,,,[],
-Plot-A475,reserved,West,1246.73,,,D,,,,[],
-Plot-A476,available,West,1246.73,,,D,,,,[],
-Plot-A477,available,West,1246.73,,,D,,,,[],
-Plot-A478,available,West,1246.73,,,D,,,,[],
-Plot-A479,available,West,1246.73,,,D,,,,[],
-Plot-A480,sold,West,1243.03,,,E,,,,[],
-Plot-A481,sold,West,1246.73,,,E,,,,[],
-Plot-A482,sold,West,1246.73,,,E,,,,[],
-Plot-A483,sold,West,1246.73,,,E,,,,[],
-Plot-A484,sold,West,1246.73,,,E,,,,[],
-Plot-A485,reserved,West,1246.73,,,E,,,,[],
-Plot-A486,reserved,West,1246.73,,,E,,,,[],
-Plot-A487,reserved,West,1246.73,,,E,,,,[],
-Plot-A488,sold,West,1246.73,,,E,,,,[],
-Plot-A489,sold,West,1246.73,,,E,,,,[],
-Plot-A490,available,West,1246.73,,,E,,,,[],
-Plot-A491,available,West,1246.73,,,E,,,,[],
-Plot-A492,sold,East,1305.79,,,E,,,,[],
-Plot-A493,available,East,1246.73,,,E,,,,[],
-Plot-A494,available,East,1246.73,,,E,,,,[],
-Plot-A495,available,East,1246.73,,,E,,,,[],
-Plot-A496,available,East,1246.73,,,E,,,,[],
-Plot-A497,available,East,1246.73,,,E,,,,[],
-Plot-A498,available,East,1246.73,,,E,,,,[],
-Plot-A499,available,East,1246.73,,,E,,,,[],
-Plot-A500,available,East,1246.73,,,E,,,,[],
-Plot-A501,sold,East,1246.73,,,E,,,,[],
-Plot-A502,sold,East,1246.73,,,E,,,,[],
-Plot-A503,available,East,1246.73,,,E,,,,[],
-Plot-A504,available,East,1246.73,,,E,,,,[],
-Plot-A505,available,West,1371.89,,,E,,,,[],
-Plot-A506,available,West,1371.89,,,E,,,,[],
-Plot-A507,available,West,1371.89,,,E,,,,[],
-Plot-A508,available,West,1371.89,,,E,,,,[],
-Plot-A509,available,West,1371.89,,,E,,,,[],
-Plot-A510,available,West,1371.89,,,E,,,,[],
-Plot-A511,available,West,1371.89,,,E,,,,[],
-Plot-A512,available,West,1371.89,,,E,,,,[],
-Plot-A513,available,West,1371.89,,,E,,,,[],
-Plot-A514,available,West,1371.89,,,E,,,,[],
-Plot-A515,available,West,1371.89,,,E,,,,[],
-Plot-A516,reserved,West,1436.88,,,E,,,,[],
-Plot-A517,reserved,East,1436.88,,,E,,,,[],
-Plot-A518,available,East,1371.89,,,E,,,,[],
-Plot-A519,available,East,1371.89,,,E,,,,[],
-Plot-A520,available,East,1371.89,,,E,,,,[],
-Plot-A521,available,East,1371.89,,,E,,,,[],
-Plot-A522,available,East,1371.89,,,E,,,,[],
-Plot-A523,available,East,1371.89,,,E,,,,[],
-Plot-A524,available,East,1371.89,,,E,,,,[],
-Plot-A525,available,East,1371.89,,,E,,,,[],
-Plot-A526,available,East,1371.89,,,E,,,,[],
-Plot-A527,available,East,1371.89,,,E,,,,[],
-Plot-A528,available,West,1371.89,,,E,,,,[],
-Plot-A529,available,West,1371.89,,,E,,,,[],
-Plot-A530,available,West,1371.89,,,E,,,,[],
-Plot-A531,available,West,1371.89,,,E,,,,[],
-Plot-A532,available,West,1371.89,,,E,,,,[],
-Plot-A533,available,West,1371.89,,,E,,,,[],
-Plot-A534,available,West,1371.89,,,E,,,,[],
-Plot-A535,available,West,1371.89,,,E,,,,[],
-Plot-A536,sold,West,1436.88,,,E,,,,[],
-Plot-A101,sold,West,2016.09,30x40,1800000,A,,,,[],Corner plot
+Plot-2,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-3,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-4,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-5,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-6,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-7,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-8,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-9,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-10,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-11,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-12,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-13,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-14,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-15,sold,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-16,available,East,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-17,available,East,1499.36,,,A,,,,[],
+Plot-18,available,East,1499.36,,,A,,,,[],
+Plot-19,reserved,East,1499.36,,,A,,,,[],
+Plot-20,reserved,East,1499.36,,,A,,,,[],
+Plot-21,reserved,East,1499.36,,,A,,,,[],
+Plot-22,reserved,East,1499.36,,,A,,,,[],
+Plot-23,reserved,East,1499.36,,,A,,,,[],
+Plot-24,available,East,1499.36,,,A,,,,[],
+Plot-25,available,East,1499.36,,,A,,,,[],
+Plot-26,available,East,1499.36,,,A,,,,[],
+Plot-27,sold,East,1499.36,,,A,,,,[],
+Plot-28,available,East,1499.36,,,A,,,,[],
+Plot-29,available,East,1499.36,,,A,,,,[],
+Plot-30,available,East,2016.09,,,A,,,,[],
+Plot-31,reserved,West,2016.09,,,A,,,,[],
+Plot-32,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-33,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-34,available,West,1499.36,,,A,,,,[],
+Plot-35,available,West,1499.36,,,A,,,,[],
+Plot-36,available,West,1499.36,,,A,,,,[],
+Plot-37,available,West,1499.36,,,A,,,,[],
+Plot-38,available,West,1499.36,,,A,,,,[],
+Plot-39,available,West,1499.36,,,A,,,,[],
+Plot-40,available,West,1499.36,,,A,,,,[],
+Plot-41,available,West,1499.36,,,A,,,,[],
+Plot-A42,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-43,available,West,1499.36,,,A,,,,[],
+Plot-44,available,West,1499.36,,,A,,,,[],
+Plot-45,available,West,1246.73,,,A,,,,[],
+Plot-46,available,West,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-47,available,East,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-48,available,East,1246.73,,,A,,,,[],
+Plot-49,available,East,1499.36,,,A,,,,[],
+Plot-50,available,East,1499.36,,,A,,,,[],
+Plot-51,available,East,1499.36,,,A,,,,[],
+Plot-52,available,East,1499.36,,,A,,,,[],
+Plot-53,available,East,1499.36,,,A,,,,[],
+Plot-54,available,East,1499.36,,,A,,,,[],
+Plot-55,available,East,1499.36,,,A,,,,[],
+Plot-56,available,East,1499.36,,,A,,,,[],
+Plot-57,available,East,1499.36,,,A,,,,[],
+Plot-58,available,East,1499.36,,,A,,,,[],
+Plot-59,available,East,1499.36,,,A,,,,[],
+Plot-60,available,East,2016.09,,,A,,,,[],Corner plot
+Plot-61,available,West,1815.01,,,A,,,,[],Corner plot
+Plot-62,available,West,1349.81,,,A,,,,[],
+Plot-63,available,West,1349.81,,,A,,,,[],
+Plot-64,available,West,1349.81,,,A,,,,[],
+Plot-65,available,West,1349.81,,,A,,,,[],
+Plot-66,available,West,1349.81,,,A,,,,[],
+Plot-67,available,West,1349.81,,,A,,,,[],
+Plot-68,available,West,1349.81,,,A,,,,[],
+Plot-69,available,West,1349.81,,,A,,,,[],
+Plot-70,available,West,1349.81,,,A,,,,[],
+Plot-71,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-72,available,East,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-73,available,East,1349.81,,,A,,,,[],
+Plot-74,available,East,1349.81,,,A,,,,[],
+Plot-75,available,East,1349.81,,,A,,,,[],
+Plot-76,available,East,1349.81,,,A,,,,[],
+Plot-77,available,East,1349.81,,,A,,,,[],
+Plot-78,available,East,1349.81,,,A,,,,[],
+Plot-79,available,East,1349.81,,,A,,,,[],
+Plot-80,available,East,1815.01,,,A,,,,[],Corner plot
+Plot-81,available,West,1146.01,,,A,,,,[],Corner plot
+Plot-82,available,West,1122.38,,,A,,,,[],
+Plot-83,available,West,1122.38,,,A,,,,[],
+Plot-84,available,West,1122.38,,,A,,,,[],
+Plot-85,available,West,1122.38,,,A,,,,[],
+Plot-86,available,West,1122.38,,,A,,,,[],
+Plot-87,available,West,1122.38,,,A,,,,[],
+Plot-88,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-89,available,East,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-90,available,East,1122.38,,,A,,,,[],
+Plot-91,available,East,1122.38,,,A,,,,[],
+Plot-92,available,East,1122.38,,,A,,,,[],
+Plot-93,available,East,1122.38,,,A,,,,[],
+Plot-94,reserved,East,1146.01,,,A,,,,[],Corner plot
+Plot-95,available,West,1362.35,,,A,,,,[],Corner plot
+Plot-96,available,West,1334.26,,,B,,,,[],Garden / Corner Plot
+Plot-1,available,West,2016.09,,,A,,,,[], Corner plot
+Plot-2#2,available,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-3#2,sold,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-4#2,sold,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-5#2,sold,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-6#2,sold,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-7#2,sold,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-8#2,reserved,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-9#2,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-10#2,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-11#2,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-12#2,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-13#5,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-14#5,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-15#5,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-16#5,available,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-17#5,available,East,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-18#5,available,East,1499.36,,,A,,,,[],
+Plot-19#5,reserved,East,1499.36,,,A,,,,[],
+Plot-20#5,reserved,East,1499.36,,,A,,,,[],
+Plot-21#5,reserved,East,1499.36,,,A,,,,[],
+Plot-22#5,reserved,East,1499.36,,,A,,,,[],
+Plot-23#5,reserved,East,1499.36,,,A,,,,[],
+Plot-24#6,available,East,1499.36,,,A,,,,[],
+Plot-25#5,available,East,1499.36,,,A,,,,[],
+Plot-26#5,available,East,1499.36,,,A,,,,[],
+Plot-27#5,sold,East,1499.36,,,A,,,,[],
+Plot-28#5,available,East,1499.36,,,A,,,,[],
+Plot-29#5,available,East,1499.36,,,A,,,,[],
+Plot-30#5,available,East,1499.36,,,A,,,,[],
+Plot-31#5,reserved,East,1499.36,,,A,,,,[],
+Plot-32#6,available,East,2016.09,,,A,,,,[],Corner plot
+Plot-33#5,available,West,2016.09,,,A,,,,[],Corner plot
+Plot-34#5,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-35#5,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-36#5,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-37#5,available,West,1499.36,,,A,,,,[],
+Plot-38#5,available,West,1499.36,,,A,,,,[],
+Plot-39#5,available,West,1499.36,,,A,,,,[],
+Plot-40#5,available,West,1499.36,,,A,,,,[],
+Plot-41#5,available,West,1499.36,,,A,,,,[],
+Plot-42#4,available,West,1499.36,,,A,,,,[],
+Plot-43#5,available,West,1499.36,,,A,,,,[],
+Plot-44#5,available,West,1246.73,,,B,,,,[],
+Plot-45#5,available,West,1499.36,,,A,,,,[],
+Plot-46#5,available,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-47#5,available,West,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-48#5,available,West,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-49#5,available,East,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-50#5,available,East,1246.73,,,A,,,,[],
+Plot-51#5,available,East,1499.36,,,A,,,,[],
+Plot-52#5,available,East,1499.36,,,A,,,,[],
+Plot-53#5,available,East,1499.36,,,A,,,,[],
+Plot-54#5,available,East,1499.36,,,A,,,,[],
+Plot-55#5,available,East,1499.36,,,A,,,,[],
+Plot-56#5,available,East,1499.36,,,A,,,,[],
+Plot-57#5,available,East,1499.36,,,A,,,,[],
+Plot-58#5,available,East,1499.36,,,A,,,,[],
+Plot-59#5,available,East,1499.36,,,A,,,,[],
+Plot-60#5,available,East,1499.36,,,A,,,,[],Corner plot
+Plot-61#5,available,East,1499.36,,,A,,,,[],Corner plot
+Plot-62#5,available,East,2016.09,,,A,,,,[],Corner plot
+Plot-63#5,available,West,1815.01,,,A,,,,[],Corner plot
+Plot-64#5,available,West,1349.81,,,A,,,,[],
+Plot-65#4,available,West,1349.81,,,A,,,,[],
+Plot-66#4,available,West,1349.81,,,A,,,,[],
+Plot-67#4,available,West,1349.81,,,A,,,,[],
+Plot-68#4,available,West,1349.81,,,A,,,,[],
+Plot-69#4,available,West,1349.81,,,A,,,,[],
+Plot-70#4,available,West,1349.81,,,A,,,,[],
+Plot-71#4,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-72#4,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-73#4,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-74#4,available,East,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-75#4,available,East,1349.81,,,A,,,,[],
+Plot-76#4,available,East,1349.81,,,A,,,,[],
+Plot-77#4,available,East,1349.81,,,A,,,,[],
+Plot-78#4,available,East,1349.81,,,A,,,,[],
+Plot-79#4,available,East,1349.81,,,A,,,,[],
+Plot-80#4,available,East,1349.81,,,A,,,,[],Corner plot
+Plot-81#4,available,East,1349.81,,,A,,,,[],Corner plot
+Plot-82#4,available,East,1815.01,,,A,,,,[],Corner plot
+Plot-83#4,available,West,1146.01,,,A,,,,[],Corner plot
+Plot-84#4,available,West,1122.38,,,A,,,,[],
+Plot-85#4,available,West,1122.38,,,A,,,,[],
+Plot-86#4,available,West,1122.38,,,A,,,,[],
+Plot-87#4,available,West,1122.38,,,A,,,,[],
+Plot-88#4,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-89#4,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-90#4,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-91#4,available,East,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-92#4,available,East,1122.38,,,A,,,,[],
+Plot-93#4,available,East,1122.38,,,A,,,,[],
+Plot-94#4,reserved,East,1122.38,,,A,,,,[],Corner plot
+Plot-95#4,available,East,1122.38,,,A,,,,[],Corner plot
+Plot-96#4,available,East,1146.01,,,A,,,,[],Corner plot
+Plot-97#3,available,West,1362.35,,,A,,,,[],Corner plot
+Plot-98#4,available,West,1334.26,,,B,,,,[],Garden / Corner Plot
+Plot-100#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-101#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-102#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-103#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-104#3,available,East,1246.73,,,B,,,,[],
+Plot-105#3,available,East,1246.73,,,B,,,,[],
+Plot-106#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-107#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-108#3,reserved,East,1246.73,,,B,,,,[],Garden plot
+Plot-109#3,reserved,East,1246.73,,,B,,,,[],Garden plot
+Plot-110#2,reserved,East,1246.73,,,B,,,,[],Garden plot
+Plot-1#6,available,East,1583.09,,,C,,,,[],Garden plot
+Plot-2#5,available,East,1371.89,,,C,,,,[],Garden plot
+Plot-3#5,sold,East,1371.89,,,C,,,,[],Garden / Corner Plot
+Plot-4#5,sold,West,2016.09,,,A,,,,[], Corner plot
+Plot-5#5,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-6#5,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-7#5,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-8#5,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-9#5,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-10#5,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-11#5,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-12#3,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-13#2,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-14#2,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-15#2,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-16#2,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-17#2,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-18#2,available,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-19#2,reserved,East,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-20#2,reserved,East,1499.36,,,A,,,,[],
+Plot-21#2,reserved,East,1499.36,,,A,,,,[],
+Plot-22#2,reserved,East,1499.36,,,A,,,,[],
+Plot-23#2,reserved,East,1499.36,,,A,,,,[],
+Plot-24#2,available,East,1499.36,,,A,,,,[],
+Plot-25#2,available,East,1499.36,,,A,,,,[],
+Plot-26#2,available,East,1499.36,,,A,,,,[],
+Plot-27#2,sold,East,1499.36,,,A,,,,[],
+Plot-28#2,available,East,1499.36,,,A,,,,[],
+Plot-29#2,available,East,1499.36,,,A,,,,[],
+Plot-30#2,available,East,1499.36,,,A,,,,[],
+Plot-31#2,reserved,East,1499.36,,,A,,,,[],
+Plot-32#2,available,East,1499.36,,,A,,,,[],Corner plot
+Plot-33#2,available,East,2016.09,,,A,,,,[],Corner plot
+Plot-34#2,available,West,2016.09,,,A,,,,[],
+Plot-35#6,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-36#2,available,West,1499.36,,,A,,,,[],Corner plot
+Plot-37#2,available,West,1499.36,,,A,,,,[],
+Plot-38#2,available,West,1499.36,,,A,,,,[],
+Plot-39#2,available,West,1499.36,,,A,,,,[],
+Plot-40#2,available,West,1499.36,,,A,,,,[],
+Plot-41#2,available,West,1499.36,,,A,,,,[],
+Plot-42,available,West,1499.36,,,A,,,,[],
+Plot-43#2,available,West,1499.36,,,A,,,,[],
+Plot-44#2,available,West,1499.36,,,A,,,,[],
+Plot-45#2,available,West,1246.73,,,B,,,,[],
+Plot-46#2,available,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-47#2,available,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-48#2,available,West,1246.73,,,A,,,,[],
+Plot-49#2,available,West,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-50#2,available,East,1246.73,,,A,,,,[],Garden / Corner Plot
+Plot-51#2,available,East,1246.73,,,A,,,,[],
+Plot-52#2,available,East,1499.36,,,A,,,,[],
+Plot-53#2,available,East,1499.36,,,A,,,,[],
+Plot-54#2,available,East,1499.36,,,A,,,,[],
+Plot-55#2,available,East,1499.36,,,A,,,,[],
+Plot-56#2,available,East,1499.36,,,A,,,,[],
+Plot-57#2,available,East,1499.36,,,A,,,,[],
+Plot-58#2,available,East,1499.36,,,A,,,,[],
+Plot-59#2,available,East,1499.36,,,A,,,,[],
+Plot-60#2,available,East,1499.36,,,A,,,,[],Corner plot
+Plot-61#2,available,East,1499.36,,,A,,,,[],Corner plot
+Plot-62#2,available,East,1499.36,,,A,,,,[],
+Plot-63#2,available,East,2016.09,,,A,,,,[],Corner plot
+Plot-64#2,available,West,1815.01,,,A,,,,[],Corner plot
+Plot-65#2,available,West,1349.81,,,A,,,,[],
+Plot-66#2,available,West,1349.81,,,A,,,,[],
+Plot-67#2,available,West,1349.81,,,A,,,,[],
+Plot-68#2,available,West,1349.81,,,A,,,,[],
+Plot-69#2,available,West,1349.81,,,A,,,,[],
+Plot-70#3,available,West,1349.81,,,A,,,,[],
+Plot-71#2,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-72#2,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-73#2,available,West,1349.81,,,A,,,,[],
+Plot-74#2,available,West,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-75#2,available,East,1349.81,,,A,,,,[],Garden / Corner Plot
+Plot-76#2,available,East,1349.81,,,A,,,,[],
+Plot-77#2,available,East,1349.81,,,A,,,,[],
+Plot-78#2,available,East,1349.81,,,A,,,,[],
+Plot-79#2,available,East,1349.81,,,A,,,,[],
+Plot-80#2,available,East,1349.81,,,A,,,,[],Corner plot
+Plot-81#2,available,East,1349.81,,,A,,,,[],Corner plot
+Plot-82#2,available,East,1349.81,,,A,,,,[],
+Plot-83#2,available,East,1815.01,,,A,,,,[],Corner plot
+Plot-84#2,available,West,1146.01,,,A,,,,[],Corner plot
+Plot-85#2,available,West,1122.38,,,A,,,,[],
+Plot-86#2,available,West,1122.38,,,A,,,,[],
+Plot-87#2,available,West,1122.38,,,A,,,,[],
+Plot-88#2,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-89#2,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-90#2,available,West,1122.38,,,A,,,,[],
+Plot-91#2,available,West,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-92#2,available,East,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-93#2,available,East,1122.38,,,A,,,,[],
+Plot-94#2,reserved,East,1122.38,,,A,,,,[],Corner plot
+Plot-95#2,available,East,1122.38,,,A,,,,[],Corner plot
+Plot-96#2,available,East,1122.38,,,A,,,,[],Garden / Corner Plot
+Plot-97,available,East,1146.01,,,A,,,,[],Corner plot
+Plot-98,available,West,1362.35,,,A,,,,[],Corner plot
+Plot-99,available,West,1334.26,,,B,,,,[],Garden / Corner Plot
+Plot-100,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-101,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-102,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-103,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-104,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-105,available,East,1246.73,,,B,,,,[],
+Plot-106,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-107,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-108,reserved,East,1246.73,,,B,,,,[],Garden plot
+Plot-109,reserved,East,1246.73,,,B,,,,[],Garden plot
+Plot-1#2,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-2#3,available,East,1246.73,,,B,,,,[],Garden plot
+Plot-3#3,sold,East,1583.09,,,C,,,,[],Garden plot
+Plot-4#3,sold,East,1371.89,,,C,,,,[],Garden plot
+Plot-5#3,sold,West,2016.09,,,A,,,,[], Corner plot
+Plot-6#3,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-7#3,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-8#3,reserved,West,1499.36,,,A,,,,[],Garden plot
+Plot-9#3,reserved,West,1499.36,,1800000,A,,,,[],Garden plot
+Plot-10#3,reserved,West,1499.36,30x40,1800000,A,,,,[],Garden plot
+Plot-11#3,reserved,West,1499.36,30x40,1800000,A,,,,[],Garden plot
+Plot-12#4,reserved,West,1499.36,30x40,1800000,A,,,,[],Garden plot
+Plot-13#3,sold,West,1499.36,30x40,,A,,,,[],Garden plot
+Plot-14#3,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-15#3,sold,West,1499.36,,,A,,,,[],Garden plot
+Plot-16#3,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-17#3,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-18#3,available,West,1499.36,,,A,,,,[],Garden plot
+Plot-19#3,reserved,West,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-20#3,reserved,East,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-21#3,reserved,East,1499.36,,,A,,,,[],
+Plot-22#3,reserved,East,1499.36,,,A,,,,[],
+Plot-23#3,reserved,East,1499.36,,,A,,,,[],
+Plot-24#3,available,East,1499.36,,,A,,,,[],
+Plot-25#3,available,East,1499.36,,,A,,,,[],
+Plot-26#3,available,East,1499.36,,,A,,,,[],
+Plot-27#3,sold,East,1499.36,,,A,,,,[],
+Plot-28#3,available,East,1499.36,,,A,,,,[],
+Plot-29#3,available,East,1499.36,,,A,,,,[],
+Plot-30#3,available,East,1499.36,,,A,,,,[],
+Plot-31#3,reserved,East,1499.36,,,A,,,,[],
+Plot-32#3,available,East,1499.36,,,A,,,,[],Corner plot
+Plot-33#3,available,East,1499.36,,,A,,,,[],Garden / Corner Plot
+Plot-34#3,available,East,2016.09,,,A,,,,[],Garden / Corner Plot
+Plot-35#3,available,West,2016.09,,,A,,,,[],
+Plot-36#3,available,West,1246.73,,,D,,,,[],
+Plot-37#3,available,West,1246.73,,,D,,,,[],
+Plot-38#3,available,West,1246.73,,,D,,,,[],
+Plot-39#3,available,West,1246.73,,,D,,,,[],
+Plot-40#3,available,West,1246.73,,,D,,,,[],
+Plot-41#3,available,East,1246.73,,,D,,,,[],
+Plot-42#2,available,East,1246.73,,,D,,,,[],
+Plot-43#3,available,East,1246.73,,,D,,,,[],
+Plot-44#3,available,East,1246.73,,,D,,,,[],Garden / Corner Plot
+Plot-45#3,available,East,1246.73,,,D,,,,[],
+Plot-46#3,available,East,1246.73,,,D,,,,[],Garden / Corner Plot
+Plot-47#3,available,East,1246.73,,,D,,,,[],Garden / Corner Plot
+Plot-48#3,available,East,1246.73,,,D,,,,[],
+Plot-49#3,available,East,1246.73,,,D,,,,[],
+Plot-50#3,available,East,1246.73,,,D,,,,[],Garden / Corner Plot
+Plot-51#3,available,East,1246.73,,,D,,,,[],
+Plot-52#3,available,East,2142.41,,,D,,,,[],
+Plot-53#3,available,West,2142.41,,,D,,,,[],
+Plot-54#3,available,West,1246.73,,,D,,,,[],
+Plot-55#3,available,West,1246.73,,,D,,,,[],
+Plot-56#3,available,West,1246.73,,,D,,,,[],Garden / Corner Plot
+Plot-57#3,available,West,1246.73,,,D,,,,[],Garden / Corner Plot
+Plot-58#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-59#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-60#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-61#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-62#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-63#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-64#3,available,West,1246.73,,,D,,,,[],Garden plot
+Plot-1#4,available,West,1243.03,,,E,,,,[],Corner plot
+Plot-2#4,available,West,1246.73,,,E,,,,[],Corner plot
+Plot-3#4,sold,West,1246.73,,,E,,,,[],Corner plot
+Plot-4#4,sold,West,1246.73,,,E,,,,[],Corner plot
+Plot-5#4,sold,West,1246.73,,,E,,,,[],
+Plot-6#4,sold,West,1246.73,,,E,,,,[],
+Plot-7#4,sold,West,1246.73,,,E,,,,[],
+Plot-8#4,reserved,West,1246.73,,,E,,,,[],
+Plot-9#4,reserved,West,1246.73,,,E,,,,[],
+Plot-10#4,reserved,West,1246.73,,,E,,,,[],
+Plot-11#4,reserved,West,1246.73,,,E,,,,[],
+Plot-12#5,reserved,West,1246.73,,,E,,,,[],
+Plot-13#4,sold,East,1305.79,,,E,,,,[],Corner plot
+Plot-14#4,available,East,1246.73,,,E,,,,[],
+Plot-15#4,sold,East,1246.73,,,E,,,,[],
+Plot-16#4,available,East,1246.73,,,E,,,,[],
+Plot-17#4,available,East,1246.73,,,E,,,,[],
+Plot-18#4,available,East,1246.73,,,E,,,,[],
+Plot-19#4,reserved,East,1246.73,,,E,,,,[],
+Plot-20#4,reserved,East,1246.73,,,E,,,,[],
+Plot-21#4,reserved,East,1246.73,,,E,,,,[],
+Plot-22#4,reserved,East,1246.73,,,E,,,,[],
+Plot-23#4,reserved,East,1246.73,,,E,,,,[],
+Plot-24#4,available,East,1246.73,,,E,,,,[],
+Plot-25#4,available,East,1246.73,,,E,,,,[],
+Plot-26#4,available,West,1371.89,,,E,,,,[],
+Plot-27#4,sold,West,1371.89,,,E,,,,[],
+Plot-28#4,available,West,1371.89,,,E,,,,[],
+Plot-29#4,available,West,1371.89,,,E,,,,[],Garden / Corner Plot
+Plot-30#4,available,West,1371.89,,,E,,,,[],Garden / Corner Plot
+Plot-31#4,reserved,West,1371.89,,,E,,,,[],
+Plot-32#4,available,West,1371.89,,,E,,,,[],Corner plot
+Plot-33#4,available,West,1371.89,,,E,,,,[],
+Plot-34#4,available,West,1371.89,,,E,,,,[],
+Plot-35#4,available,West,1371.89,,,E,,,,[],
+Plot-36#4,available,West,1371.89,,,E,,,,[],
+Plot-37#4,available,West,1436.88,,,E,,,,[],Corner plot
+Plot-38#4,available,East,1436.88,,,E,,,,[],Corner plot
+Plot-39#4,available,East,1371.89,,,E,,,,[],
+Plot-40#4,available,East,1371.89,,,E,,,,[],
+Plot-41#4,available,East,1371.89,,,E,,,,[],
+Plot-42#3,available,East,1371.89,,,E,,,,[],
+Plot-43#4,available,East,1371.89,,,E,,,,[],
+Plot-44#4,available,East,1371.89,,,E,,,,[],
+Plot-45#4,available,East,1371.89,,,E,,,,[],
+Plot-46#4,available,East,1371.89,,,E,,,,[],
+Plot-47#4,available,East,1371.89,,,E,,,,[],
+Plot-48#4,available,East,1371.89,,,E,,,,[],
+Plot-49#4,available,West,1371.89,,,E,,,,[],
+Plot-50#4,available,West,1371.89,,,E,,,,[],
+Plot-51#4,available,West,1371.89,,,E,,,,[],
+Plot-52#4,available,West,1371.89,,,E,,,,[],
+Plot-53#4,available,West,1371.89,,,E,,,,[],Garden / Corner Plot
+Plot-54#4,available,West,1371.89,,,E,,,,[],Garden / Corner Plot
+Plot-55#4,available,West,1371.89,,,E,,,,[],
+Plot-56#4,available,West,1371.89,,,E,,,,[],Garden plot
+Plot-57#4,available,West,1436.88,,,E,,,,[],Corner plot
+Plot-1#3,available,West,2016.09,,,A,,,,[], Corner plot
+Plot-35#2,available,West,1499.36,,,A,,,,[],

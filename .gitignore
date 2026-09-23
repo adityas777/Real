@@ -14,3 +14,7 @@ plot-map/tools/
 # Source video originals - too large for GitHub (100 MB limit); kept locally only
 plot-map/projects/*/.originals/
 plot-map/projects/*/_originals/
+
+# anadmanv2 media lives on S3/CloudFront, not in git (its menu video alone is 220 MB, past
+# GitHub's 100 MB per-file limit). The project is deployed from the working copy.
+plot-map/projects/anadmanv2/

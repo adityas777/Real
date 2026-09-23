@@ -123,7 +123,14 @@ html, body {
 body {
   display: grid;
   grid-template-rows: auto 1fr;   /* header sizes to content (never clips wrapped chips) */
-  height: 100dvh;
+  /* --app-h is written by syncViewportHeight() (app.js) from window.innerHeight; 100dvh is the
+     fallback before the first sync and if the script never runs. Reported 2026-09-23: after
+     entering FULLSCREEN on a phone the bottom strip — drawer footer buttons, the zoom column, the
+     offline banner — sometimes vanished. The viewport grows when the browser chrome goes away, but
+     `dvh` does not always settle during that transition, leaving the grid a screenful taller or
+     shorter than the window and its bottom-anchored row off-screen. A measured pixel height
+     re-applied on fullscreenchange (and after it animates) removes the guesswork. */
+  height: var(--app-h, 100dvh);
 }
 
 /* ─── Buttons ─────────────────────────────────────────────────────────────── */
@@ -1825,6 +1832,18 @@ body.is-admin .cat-drawer { display: none !important; }
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
+/* "⬇ SAVE FOR OFFLINE" (renderClientSidebar, phones only): a utility, not one of the project's
+   own sections, so it sits under a hairline rule and reads quieter than the content rows —
+   the same reasoning as .cat-keep above. It still behaves like a .cat-btn on tap. */
+.cat-btn-util {
+  margin-top: 6px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0 0 6px 6px;
+  color: rgba(229, 231, 235, 0.72);
+  font-size: 12.5px;
+  letter-spacing: 0.6px;
+}
 /* "Keep open" pin, prepended to any menu level holding 2+ rows (see addKeepMenuToggle) —
    built from the same `.ui-switch` markup/CSS the admin's landmark "show by default" row
    and menu-builder built-in-row toggle already use. Icon-only (2026-09-18, on request —
@@ -1919,6 +1938,11 @@ body.is-admin .cat-drawer { display: none !important; }
    top-left corner. Registered so the size change still animates; the position itself is never
    transitioned (that would make banners trail behind the moving view). */
 @property --lm-s { syntax: '<number>'; inherits: false; initial-value: 1; }
+/* --lm-z is the phone zoom size (renderLandmarks sets it on the .landmarks layer, so it has to
+   INHERIT down to each banner) and multiplies with --lm-s inside the banner's own transform. It is
+   NOT transitioned: it changes on every zoom frame, and easing it would leave the banners' collision
+   boxes — measured from the live size — a step behind the size actually on screen. */
+@property --lm-z { syntax: '<number>'; inherits: true; initial-value: 1; }
 .lm-banner { transition: --lm-s 0.3s ease; }
 .lm-banner.is-dimmed {
   opacity: 0.2;
