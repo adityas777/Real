@@ -140,6 +140,15 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
   **different** project id clones it — `fetchReferencedImages` copies on-disk images
   (pano/plan/logo/renders that have no in-memory blob) from the source project so the new
   dir is complete; same-project saves skip that (files already there).
+- **Source-asset mirror (`assets_s3.py`, 2026-09-25):** every successful server save starts
+  an incremental background mirror of the raw `projects/<id>/` working files to
+  `ZEROX-PROJECTS-FINAL/<id>/` in the configured S3 bucket. A per-project
+  `.b91-assets.json` manifest avoids re-uploading unchanged files; original-master folders
+  remain local and remote deletion is deliberately disabled. Admin boot calls
+  `GET /api/assets/pull` and polls `GET /api/assets/status` before loading project data, so
+  a new machine restores missing files with progress on the existing boot curtain. A later
+  request for any still-missing project asset also fetches that one object on demand and
+  keeps it locally. Mirror failures never turn a completed local save into a failed save.
 - **Header project menu** (`initProjectBar`, in the topbar — **admin only**; the client
   view is view-only and shows no project bar): a `<select>` switcher
   (navigates via `projUrl`), a **💾 Save** button
@@ -464,6 +473,8 @@ Top-down, by section header:
   `exportSite()` → `POST /api/publish` → `watchPublishJob` polls progress; `publishWatch` token
   drops stale polls), `unpublishNow` (first click arms via `unpublishArmTimer`, second fires),
   `copyPublishLink`. `publishPassword` is memory-only — never stored.
+  Cloud working-copy support lives in `fetchProjectAssets` (admin boot progress) and
+  `assets_s3.py` (`sync_project`/`pull_project`/`fetch_file`, background job status).
 - **`wireAdmin`** — wires every admin control incl. tabs + the Project ID field.
 - **Trace editor** (PNG/DXF → polygons): `trace` state (incl. `trace.prefix`, page-only),
   `nextPlotId` (prefix + lowest free number from 1), `applyTracePrefix`/`updateTraceNextNumber`
@@ -533,8 +544,8 @@ Top-down, by section header:
   `loadAmenitiesFile`/`setAmenities`/`saveAmenitiesAs`.
 - **Virtual tours** (VIRTUAL-TOUR.md Phase 1 — data model + admin Tour tab 2026-09-08;
   **viewer + hotspot linking + `panotour` menu type added later the same day**):
-  `state.tours` (each `{id,name,startNode,nodes:[{id,name,pano,panoBlob,defaultView{lon,lat,fov}}],
-  links:[{from,to,hotspot{lon,lat},label}]}`), admin `state.tourSel`/`tourNodeSel`, live
+  `state.tours` (each `{id,name,startNode,nodes:[{id,name,pano,panoBlob,isView?,viewOf?,defaultView{lon,lat,fov}}],
+  links:[{from,to,hotspot{lon,lat},label,toggle?}]}`), admin `state.tourSel`/`tourNodeSel`, live
   viewer `state.tourView` (`{tourId,nodeId,title,busy,saved{view,panoMap}}`) +
   `state.tourHsSel`. `parseTours`/`buildToursData`/`loadToursFile`/`setTours`/
   `tourNodeBlobFiles`/`saveToursAs` mirror amenities (basename-resolved node images;
@@ -558,7 +569,7 @@ Top-down, by section header:
   first room. A fresh entry from the plot map still hard-cuts (`instant:true` — no prior
   tour texture to fade from). `showBootCurtain`/its re-show counterpart are gone; only
   `hideBootCurtain` (boot only) remains.
-  `tourGoTo(nodeId,{instant})` crossfades via a second sphere at 0.985× **sharing
+  `tourGoTo(nodeId,{instant,holdView})` crossfades via a second sphere at 0.985× **sharing
   `three.pano.geometry`** (dispose the material only — never the shared geometry);
   `tourTween` is the easing helper. **Every arrival (not just `instant`) now snaps to the
   room's own saved `defaultView`** (2026-09-11 — heading is no longer carried across
@@ -578,6 +589,11 @@ Top-down, by section header:
   `#tourHotspots`, same model as landmarks), `startTourHsDrag`/`onTourHsDragMove`/
   `endTourHsDrag` (drag-to-place), `addTourHotspot`/`deleteTourHotspot`/
   `setTourNodeDefaultView`.
+  **Toggle pairs (2026-09-25):** `openTogglePairDialog` + `addTourTogglePair` power
+  **Add hotspot with view**. One upload creates a hidden `isView` node plus reciprocal
+  links carrying `toggle:true`; clicking either link calls `tourGoTo(...,{holdView:true})`
+  so yaw/pitch/FOV stay fixed while the alternate panorama crossfades in. The dialog asks
+  for both action labels, validates before decoding, and remains open on a decode failure.
   **Each link carries `icon` + `rot`** (2026-09-18) — which marker it draws as
   (`TOUR_HS_ICONS`: chevron/stairs/door/ring, **SVG not emoji**, since these must rotate and
   animate) and which way an aimable one points. Entries declare `rotatable` (gates the admin
@@ -999,13 +1015,15 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   (`render.file`, a `sample/…` path — auto-resized `.web.jpg` on import) shown in a
   lightbox. Client reads it view-only; missing file = pin with no thumbnail.
 - **`tour.json`** (added 2026-09-08, VIRTUAL-TOUR Phase 1) — `{ version, tours:[{ id, name,
-  startNode, nodes:[{ id, name, pano{file}, defaultView{lonDeg,latDeg,fov} }],
-  links:[{ from, to, hotspot{lonDeg,latDeg}, label, icon, rot }],
+  startNode, nodes:[{ id, name, pano{file}, isView?, viewOf?, defaultView{lonDeg,latDeg,fov} }],
+  links:[{ from, to, hotspot{lonDeg,latDeg}, label, icon, rot, toggle? }],
   maps?:[{ id, file, points:[{ nodeId, x, y, rot }] }] }] }`. **Many independent tours per
   project** (OQ-4); each node's `pano` is a texture-safe `.web.jpg` (basename-resolved, named
   `tour-<tourId>-<nodeId>.web.jpg` on import). Absent ⇒ no tours. `links` is the hotspot
-  graph (authored in the viewer — next step); today it's written but empty. A menu item will
-  reference a tour by id (`panotour` content type) to launch it.
+  graph authored in the viewer. A menu item references a tour by id (`panotour` content
+  type) to launch it. `isView` nodes stay out of the room menu/minimap and use `viewOf` for
+  ownership; `toggle:true` marks reciprocal same-spot links whose navigation preserves the
+  live camera angle and zoom. All three keys are optional for backward compatibility.
   A link's **`icon`** (`chevron`|`stairs`|`door`|`ring`) and **`rot`** (degrees clockwise
   from "up", only meaningful for the aimable icons) were added 2026-09-18 — absent ⇒ an
   unaimed chevron, so links written before it need no migration.

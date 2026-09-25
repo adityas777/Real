@@ -356,7 +356,28 @@ body {
 .zoom-status-group { display: none; flex-direction: column; gap: 6px; align-items: flex-end; }
 .zoom-status-group.is-hidden { display: none !important; }
 .zoom-controls.is-hidden { display: none !important; }   /* client, outside the aerial plot map — see updateLegendVisibility */
-/* CLIENT layout at every size (2026-09-21, on request): no header bar. The brand/legend/filter
+
+/* Inside the LANDMARKS section the column stays but carries only the 📌 landmark-size toggle
+   (see updateLegendVisibility) — the one control that still means anything there. */
+.zoom-controls.lm-only > *:not(#steadyLandmarkToggle) { display: none !important; }
+
+/* 📌 mode: flat, crisp signs. The default banner carries `0 12px 30px rgba(0,0,0,.7)` — a big soft
+   shadow thrown down and to the right. Measured on four screenshots the reporter sent, every one
+   of 20 banners was level to 0.00°, yet they read as "tilted and stretched at the corners": against
+   plain sky that shadow is the only depth cue, and the eye takes it for a plaque leaning back.
+   The reference tour's signs have no such shadow. Scoped to the toggle so the default design the
+   owner's boss signed off is untouched. */
+.landmarks.lm-flat .lm-banner { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45); }
+.landmarks.lm-flat .lm-lines line { opacity: 0.8; }
+/* 📌 mode ignores the SCREEN entirely (2026-09-25, on request: "make sure the landmarks stay intact
+   at the place where it was placed by the admin and dont try to adjust according to the screen").
+   The phone stylesheet shrinks banner text by device — 9px labels on a landscape phone, 11.5px in
+   portrait, 13.5px on desktop — so the same sign was a different size on every screen. Pinned mode
+   pins the base size everywhere; only the zoom (--lm-z) scales it after that. Specificity 0,3,0
+   beats the phone rules' `body:not(.is-admin) .lm-*` (0,2,1) without needing !important. */
+.landmarks.lm-flat .lm-ico { padding: 6px 10px; font-size: 16px; }
+.landmarks.lm-flat .lm-label { font-size: 13.5px; }
+.landmarks.lm-flat .lm-sub-bar { font-size: 10.5px; padding: 3px 10px; }/* CLIENT layout at every size (2026-09-21, on request): no header bar. The brand/legend/filter
    strip is collapsed and its Available/Reserved/Sold pills + area filter live in the right-hand
    control column instead, stacked above the icon buttons — the layout landscape phones already
    used (see the landscape block further down, which still docks the pills to the top edge

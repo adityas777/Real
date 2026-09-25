@@ -82,7 +82,12 @@ Every site lives in its own directory under `projects/<id>/`. The client chooses
 to show with the **`?project=<id>`** URL parameter (default **`sample`**); admin adds a
 **project switcher** in the top header bar. Everything you Export/Save in admin is written
 straight into the active project's directory by `server.py` — no manual folder copying or
-downloads. The admin **⋯** menu creates, duplicates, renames and deletes projects.
+downloads. The same save also mirrors new or changed project assets to the configured S3
+working-copy folder in the background. When an admin opens that project on another machine,
+missing files are restored automatically before editing begins; large assets that were not
+needed at boot are fetched and kept the first time they are requested. The local save remains
+the source of truth if cloud access is unavailable. The admin **⋯** menu creates, duplicates,
+renames and deletes projects.
 
 ---
 
@@ -449,6 +454,11 @@ standing in:
 - **＋ Add hotspot here** drops a link at the centre of your current view — then
   **drag it onto the doorway** it leads through. Pick its target room from the dropdown,
   and give it a label if the room name isn't what you want on screen.
+- **＋ Add hotspot with view** is for two panoramas of the **same spot**, such as
+  curtains open/closed or lights on/off. Upload the second panorama and name both actions
+  (for example, *Open curtain* and *Close curtain*). The app creates the hidden view and
+  both directions in one step; visitors can keep clicking the hotspot to toggle back and
+  forth while their camera angle and zoom stay fixed.
 - **🏠 Set as this room's start view** — visitors will face the direction you're looking
   now every time they arrive in this room, whether that's the very first room of the
   tour, a hotspot click, or the room-strip thumbnail. Pick a compass direction (N/E/S/W)
@@ -502,8 +512,10 @@ project has more than one tour, or the plain root menu if it doesn't).
 > into every standalone export, and raw renders will bloat it enormously.
 
 `tour.json` shape: `{ version, tours:[{ id, name, startNode,
-nodes:[{ id, name, pano:{file}, defaultView:{lonDeg,latDeg,fov} }],
-links:[{ from, to, label, hotspot:{lonDeg,latDeg} }] }] }`. Tours ride the working
+nodes:[{ id, name, pano:{file}, isView?, viewOf?, defaultView:{lonDeg,latDeg,fov} }],
+links:[{ from, to, label, hotspot:{lonDeg,latDeg}, icon?, rot?, toggle? }] }] }`.
+`isView`/`viewOf` identify hidden same-room views; `toggle:true` makes a link preserve the
+live camera while it switches panorama. Tours ride the working
 session, ship with **Export site files…**, and are embedded in the standalone bundle
 (panoramas included, so an exported tour works offline).
 

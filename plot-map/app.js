@@ -46,7 +46,7 @@ const TAU = Math.PI * 2;
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 const els = {
-  stage: $('stage'), pano: $('pano'), panoHint: $('panoHint'), bootCurtain: $('bootCurtain'),
+  stage: $('stage'), pano: $('pano'), panoHint: $('panoHint'), bootCurtain: $('bootCurtain'), bootLabel: document.querySelector('#bootCurtain .boot-curtain-label'),
   bootProgressWrap: $('bootProgressWrap'), bootProgressFill: $('bootProgressFill'), bootProgressPct: $('bootProgressPct'),
   brandMark: $('brandMark'), brandName: $('brandName'), brandTagline: $('brandTagline'),
   proj: $('proj'), projSelect: $('projSelect'), projTools: $('projTools'), projSave: $('projSave'), projSettingsBtn: $('projSettingsBtn'), projSettingsPopover: $('projSettingsPopover'), projSettingsClose: $('projSettingsClose'), projMenuBtn: $('projMenuBtn'), projMenu: $('projMenu'),
@@ -56,7 +56,7 @@ const els = {
   axSheetOn: $('axSheetOn'), axSheetBody: $('axSheetBody'), axSheetUrl: $('axSheetUrl'), axSheetTest: $('axSheetTest'), axSheetSample: $('axSheetSample'), axSheetMsg: $('axSheetMsg'),
   legend: $('legend'),
   tooltip: $('tooltip'), notice: $('notice'),
-  zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), amenityPointToggle: $('amenityPointToggle'), amenityToggle: $('amenityToggle'),
+  zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomReset: $('zoomReset'), labelToggle: $('labelToggle'), amenityPointToggle: $('amenityPointToggle'), amenityToggle: $('amenityToggle'), steadyLandmarkToggle: $('steadyLandmarkToggle'),
   zoomStatusGroup: $('zoomStatusGroup'), zoomAvailableBtn: $('zoomAvailableBtn'),
   areaFilterSel: $('areaFilterSel'), areaFilterSelMobile: $('areaFilterSelMobile'),
   axAreaUnit: $('axAreaUnit'), axAreaNote: $('axAreaNote'), axAreaList: $('axAreaList'), axAreaAdd: $('axAreaAdd'),
@@ -276,7 +276,12 @@ const state = {
   areaFilterId: null,
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
-  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
+  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(),
+  // "Don't resize landmarks" (2026-09-25, for the Eleganza team to try): landmark banners keep ONE
+  // size instead of growing and shrinking as the view moves. That is the entire feature. Their
+  // POSITION is deliberately untouched — each one stays on the spot and angle the admin placed it
+  // on. Off by default, remembered per browser.
+  steadyLandmarks: (() => { try { return localStorage.getItem('b91-steady-landmarks') === '1'; } catch { return false; } })(), // landmark banners: default ON so client view shows them on load
   landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   amenities: [], amSel: null, amCardOpen: null,  // in-layout amenities (icon pins + render); selected id; open card id
   tours: [], tourSel: null, tourNodeSel: null,   // authored virtual tours (tour.json); admin: selected tour id + node id
@@ -650,6 +655,55 @@ function setBootProgress(pct) {
   if (els.bootProgressFill) els.bootProgressFill.style.width = bootPct.toFixed(0) + '%';
   if (els.bootProgressPct) els.bootProgressPct.textContent = bootPct.toFixed(0) + '%';
 }
+// ─── Fetching a project's assets from S3 before the admin can edit it ───────────────────────
+// Projects are mirrored to S3 (assets_s3.py). A machine that has never had this project — a new
+// laptop, the co-worker's, or simply a project someone else created — holds none of its panoramas,
+// plans or renders, and the editor would otherwise open onto a string of missing files.
+//
+// So the admin asks the server to pull whatever is missing FIRST, and watches it happen on the
+// boot curtain that is already on screen: same bar, a caption saying what it is doing. When
+// nothing is missing (the normal case on your own machine) the server reports zero files and this
+// returns almost immediately, showing nothing at all — no loader for a step that isn't happening.
+//
+// Client pages never do this: a visitor's copy is the published one, which carries its own files.
+// Failure is never fatal — no S3 configured, no network, an old server without the endpoint — the
+// boot simply carries on with whatever is on disk, exactly as it did before.
+async function fetchProjectAssets(pid) {
+  if (!state.admin || !pid || BUNDLE) return;
+  const started = Date.now();
+  try {
+    const kick = await fetch(`/api/assets/pull?project=${encodeURIComponent(pid)}`, { cache: 'no-store' });
+    if (!kick.ok) return;
+    for (;;) {
+      const res = await fetch(`/api/assets/status?project=${encodeURIComponent(pid)}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const job = (await res.json()).job || {};
+      if (!job.running) {
+        if (job.error) showNotice(`Couldn't fetch this project's files from the cloud (${esc(job.error)}). Working with what's on this machine.`);
+        break;
+      }
+      const total = job.bytesTotal || 0, done = job.bytesDone || 0;
+      if (job.filesTotal > 0) {
+        const mb = (n) => (n / 1048576).toFixed(n > 10485760 ? 0 : 1);
+        setBootLabel(total
+          ? `Fetching this project's files… ${mb(done)} of ${mb(total)} MB`
+          : `Fetching this project's files… ${job.filesDone || 0} of ${job.filesTotal}`);
+        // The curtain's own bar is driven by the pano/plan download later in boot; while this step
+        // owns the screen it shows this instead, capped at 90% so the bar never sits full while
+        // the rest of boot still has work to do.
+        if (total) setBootProgress(Math.min(90, Math.round((done / total) * 90)));
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  } catch {}
+  finally {
+    if (Date.now() - started > 400) setBootLabel('Loading…');
+  }
+}
+function setBootLabel(text) {
+  if (els.bootLabel) els.bootLabel.textContent = text;
+}
+
 // Fetches a URL as a Blob while reporting real bytes-loaded/total via onBytes(loaded,
 // total) — server.py always sends Content-Length for static assets, so `total` is
 // reliable here. Falls back to a plain non-streamed fetch (progress jumps once at the
@@ -1687,6 +1741,13 @@ function wireViewControls() {
     rememberAmenityPrefs();
     applyAmenityVisibility();
   });
+  els.steadyLandmarkToggle?.addEventListener('click', () => {
+    state.steadyLandmarks = !state.steadyLandmarks;
+    try { localStorage.setItem('b91-steady-landmarks', state.steadyLandmarks ? '1' : '0'); } catch {}
+    syncSteadyLandmarkBtn();
+    applyLandmarkVisibility();      // also flips the .lm-flat shadow class
+  });
+  syncSteadyLandmarkBtn();
   els.amenityToggle?.addEventListener('click', () => {
     state.showAmenities = !state.showAmenities;
     state.showLandmarks = state.showAmenities;
@@ -2804,6 +2865,11 @@ function isAerialSectionActive() {
     && (!els.catLevel2 || els.catLevel2.hidden !== false)
     && (state.menuNavStack || []).length === 0;
 }
+// Is the visitor in the LANDMARKS picker right now? (Its level is open and no tour has taken over.)
+function isLandmarksSectionActive() {
+  const l2 = document.getElementById('catLevel2');
+  return !state.tourView && !!l2 && !l2.hidden;
+}
 function updateLegendVisibility() {
   const show = isAerialSectionActive();
   els.legend?.classList.toggle('is-hidden', !show);
@@ -2811,7 +2877,15 @@ function updateLegendVisibility() {
   // The rest of the plot-map control column (# / landmarks / amenities / zoom / recenter) is
   // just as meaningless inside a tour or a sub-section — and in a tour it sat on top of the
   // minimap's own hide/switch buttons. Client only: the admin keeps these tools throughout.
-  document.querySelector('.zoom-controls')?.classList.toggle('is-hidden', !show && !state.admin);
+  // …with one exception (2026-09-25): inside the LANDMARKS section the column stays, carrying ONLY
+  // the 📌 size toggle — that is the view where its effect is visible and where the Eleganza team
+  // flips it back and forth. Done by keeping the column rendered and hiding its other children
+  // (`.lm-only`), NOT by un-hiding one child of a `display:none` parent: such a child is never
+  // rendered and measures 0x0 however its own `display` computes.
+  const col = document.querySelector('.zoom-controls');
+  const lmOnly = !show && !state.admin && isLandmarksSectionActive();
+  col?.classList.toggle('lm-only', lmOnly);
+  col?.classList.toggle('is-hidden', !show && !state.admin && !lmOnly);
   // The area dropdown follows the legend exactly: it only means anything on the plot map,
   // so it goes away inside a tour / the landmark picker like every other plot-map control.
   const hasFilters = (state.area.filters || []).length > 0;
@@ -5589,7 +5663,20 @@ const LANDMARK_MOBILE_CAP = Infinity;
 // it. Desktop is deliberately left at 1 — it has the screen height for the authored sizes, and the
 // desktop banners were signed off as they are.
 const LM_ZOOM_MIN = 0.72, LM_ZOOM_MAX = 1.15, LM_ZOOM_REF_FOV = 70;
+// 📌 mode: natural size at LM_ZOOM_REF_FOV, following the zoom from there, bounded so a label can
+// neither vanish nor swallow the view.
+const LM_FIXED_SIZE = 0.85, LM_FIXED_MIN = 0.45, LM_FIXED_MAX = 1.5;
 function landmarkZoomScale() {
+  // 📌 ON: the label behaves like a sign standing out in the scene — it recedes as the visitor
+  // zooms out and comes closer as they zoom in — while staying a FLAT overlay, so nothing tilts or
+  // skews as the view turns. (Drawing it as a real 3D object gave the tilt of the reference tour
+  // but CSS perspective skews anything off-centre, which is what the owner rejected; the zoom
+  // behaviour below is the part of that work they liked, kept verbatim.)
+  // Bounded at both ends: unbounded it reached 3.4x natural zoomed in, which stops being a label.
+  if (state.steadyLandmarks) {
+    return Math.max(LM_FIXED_MIN, Math.min(LM_FIXED_MAX,
+      LM_FIXED_SIZE * Math.tan(LM_ZOOM_REF_FOV * Math.PI / 360) / Math.tan(Math.max(1, state.view.fov) * Math.PI / 360)));
+  }
   if (!(isMobileLandscape() || isMobilePortrait())) return 1;
   return Math.max(LM_ZOOM_MIN, Math.min(LM_ZOOM_MAX, LM_ZOOM_REF_FOV / Math.max(1, state.view.fov)));
 }
@@ -5648,11 +5735,15 @@ function renderLandmarks() {
     // The usable width now also excludes the client menu strip on the left (2026-09-22): on a
     // phone a banner there was left half under it.
     const halfW = d.banner.offsetWidth * zoom / 2;
-    if (bp.x - halfW < safe.left || bp.x + halfW > W - safe.right) {
+    // 📌 mode keeps the label where the admin put it, so this "hide anything that would be
+    // half-cut at the edge" rule is skipped: with the toggle on, labels are up to 1.5x their
+    // normal size, and on a narrow phone that test was hiding most of them the moment the toggle
+    // went on — the whole layer would empty out, which is not "don't resize", it is "disappear".
+    if (!state.steadyLandmarks && (bp.x - halfW < safe.left || bp.x + halfW > W - safe.right)) {
       d.line.style.display = d.pin.style.display = d.banner.style.display = 'none';
       continue;
     }
-    placed.push({ d, hp, bp, halfW, halfH: d.banner.offsetHeight * zoom / 2 });
+    placed.push({ d, hp, bp, halfW, halfH: d.banner.offsetHeight * zoom / 2, lm });
   }
   // VERTICAL is different (2026-09-22). Banners are authored high in the sky, and on a short
   // screen — a landscape phone above all — that sky is cut off: every banner sat above the top edge
@@ -5670,7 +5761,16 @@ function renderLandmarks() {
   const boxes = [], GAP = 4, PIN_GAP = 6;
   placed.sort((a, b) => a.bp.y - b.bp.y);
   const drawn = [];
-  for (const p of placed) {
+  // PIN MODE: draw every banner exactly where the admin put it — the projection of its authored
+  // lon/lat, untouched — and skip this whole pass, which clamps a banner into the visible band and
+  // shuffles it around its neighbours, both recomputed every frame.
+  // Anchoring the label above its own pin instead was built and measured (0px of movement against
+  // the pin, staggered across fixed heights), and the owner chose THIS version over it: the
+  // admin's placement is what should decide where a label sits.
+  // Accepted cost: two landmarks close together may overlap, and a banner authored above the
+  // visible sky is out of shot.
+  if (state.steadyLandmarks) { drawn.push(...placed); }
+  else for (const p of placed) {
     const h = 2 * p.halfH, l = p.bp.x - p.halfW, r = p.bp.x + p.halfW;
     const floor = Math.min(H - 8, p.hp.y - PIN_GAP) - h;   // lowest top edge this banner may take
     if (floor < safe.top) {                                 // no sky at all above the pin
@@ -5732,7 +5832,19 @@ function landmarkSafeArea(rect) {
 // Landmarks have no on/off button (the 📍 that used to hide them now controls amenity points),
 // so the layer simply shows — except inside a tour, which hides the plot-map layers and whose
 // exit (closePanoTour, after clearing tourView) calls back here.
+// Keeps the 📌 button honest about what it will do next.
+function syncSteadyLandmarkBtn() {
+  const b = els.steadyLandmarkToggle; if (!b) return;
+  const on = !!state.steadyLandmarks;
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Landmark size is locked — tap to let them resize with the view again'
+               : 'Stop landmark markers resizing as the view moves';
+  b.setAttribute('aria-label', b.title);
+}
 function applyLandmarkVisibility() {
+  // 📌 also flattens the banner shadow (see styles.css): it is the only depth cue on a banner
+  // against plain sky, and it is what makes a perfectly level label look like it is leaning.
+  els.landmarks?.classList.toggle('lm-flat', !!state.steadyLandmarks && !state.admin);
   if (!els.landmarks) return;
   const editing = state.admin && state.adminTab === 'landmarks';
   // `showLandmarks` is the 🏛 button's doing (it carries amenity names and landmarks together).
@@ -11739,6 +11851,8 @@ async function onOfflineRemove() {
     // Is this project saved on this device? The menu's offline row reads it, so it's awaited
     // (a few ms) just before the menu first renders.
     const offlineRecordReady = loadOfflineRecord();
+    // Admin on a machine that lacks this project's files: pull them down first, on the curtain.
+    await fetchProjectAssets(BOOT_PROJECT);
     await loadGeometry();
     setBootProgress(3);
     // alignment precedence — client: committed file only. admin: freshest of the full

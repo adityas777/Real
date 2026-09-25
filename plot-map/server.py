@@ -698,6 +698,28 @@ class Handler(SimpleHTTPRequestHandler):
             return self.do_bundle()
         if route == "/api/export-bundle-check":
             return self.do_bundle_check()
+        if route == "/api/assets/pull":
+            # Pre-fetch a project's files from S3 (the small JSON the editor needs immediately, plus
+            # whatever else is missing). Runs in the background; poll /api/assets/status.
+            from urllib.parse import parse_qs, urlparse
+            pid = safe_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
+            if not pid:
+                return self._send_json(400, {"ok": False, "error": "invalid project id"})
+            try:
+                import assets_s3
+                return self._send_json(200, assets_s3.pull_in_background(pid))
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": str(e)})
+        if route == "/api/assets/status":
+            from urllib.parse import parse_qs, urlparse
+            pid = safe_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
+            if not pid:
+                return self._send_json(400, {"ok": False, "error": "invalid project id"})
+            try:
+                import assets_s3
+                return self._send_json(200, assets_s3.status(pid))
+            except Exception as e:
+                return self._send_json(200, {"ok": False, "error": str(e)})
         if route == "/api/publish/status":
             return self.do_publish_status()
         if route == "/api/publish/progress":
@@ -739,8 +761,27 @@ class Handler(SimpleHTTPRequestHandler):
                 return super().do_GET()
 
         if not os.path.isfile(path):
-            self.send_error(404, "File not found")
-            return
+            # A project asset this machine does not have: fetch it from S3 once, keep it, serve it
+            # (assets_s3.fetch_file). Requested 2026-09-25 — "when the admin comes and selects any
+            # of the project all the assets of that particular project is directly fetched from
+            # s3 so that the admin dont have to get all the assets in their local system".
+            # On demand rather than up front, so opening a project does not wait on a 200 MB video
+            # nobody has clicked yet; the second request for the same file is local-disk speed.
+            # Anything that is genuinely missing still 404s exactly as before.
+            got = None
+            try:
+                rel = os.path.relpath(path, PROJECTS_DIR).replace(os.sep, "/")
+                if not rel.startswith("..") and "/" in rel:
+                    pid, sub = rel.split("/", 1)
+                    if safe_project(pid):
+                        import assets_s3
+                        got = assets_s3.fetch_file(pid, sub)
+            except Exception:
+                got = None
+            if not got:
+                self.send_error(404, "File not found")
+                return
+            path = got
 
         mime     = mimetypes.guess_type(path)[0] or "application/octet-stream"
         if path.lower().endswith(".png"):
@@ -1056,10 +1097,23 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception:
                 skipped.append(name)
 
+        # Mirror the project's files to S3 (assets_s3.py), in the background. Requested 2026-09-25:
+        # "whenever the admin clicks save any new assets that is added by the admin is pushed to
+        # s3". Fire-and-forget on purpose — the save has already succeeded on disk by this point, so
+        # an upload that is slow (a fresh 200 MB video) or impossible (no network, no AWS login)
+        # must not make Save look like it failed. Only what changed is sent; the outcome is readable
+        # at /api/assets/status.
+        mirrored = None
+        try:
+            import assets_s3
+            mirrored = assets_s3.sync_in_background(project)
+        except Exception as e:                      # not configured, no boto3, bad id — never fatal
+            mirrored = {"ok": False, "error": str(e)}
+
         return self._send_json(200, {
             "ok": True, "project": project,
             "dir": os.path.relpath(dest, ROOT).replace(os.sep, "/"),
-            "written": written, "skipped": skipped,
+            "written": written, "skipped": skipped, "s3": mirrored,
         })
 
     def do_rename(self):

@@ -333,6 +333,9 @@ lifecycle.**
 - [x] 1.7 — **done 2026-09-08** (bundle gap closed: `tour.json` in `BUNDLE_DATA_FILES`, node panos in `B91_BUNDLE_IMAGES`). Tour state in the IndexedDB working session; `tour.json` + node images in
       Export / Save / standalone bundle.
 - [ ] 1.8 — Info hotspots, reusing the amenity card + lightbox.
+- [x] 1.9 — **done 2026-09-25.** Same-spot toggle pairs: **Add hotspot with view**
+      uploads a hidden `isView` panorama and creates reciprocal `toggle:true` links with
+      labels for both directions; client crossfade preserves the live yaw/pitch/FOV.
 
 **Verification:** author a 3-node tour end-to-end in admin; save; load as client; navigate
 all links; confirm heading continuity; export a standalone bundle and run it from a plain

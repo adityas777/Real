@@ -5,6 +5,22 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-25 (Tour toggle pairs: one setup creates both directions)
+
+`Add hotspot with view` now creates a two-way toggle for alternate panoramas of the same
+spot, such as curtains open/closed or lights on/off. The admin dialog collects the second
+panorama plus a label for each direction, creates the hidden view, and adds both hotspots at
+the current aim point. Toggle links persist as `toggle:true`; client navigation keeps the
+camera angle and zoom fixed while crossfading so the change reads as happening in place.
+
+The dialog validates every required field, supports Cancel/backdrop/Escape, and stays open
+with a useful error if the panorama cannot be decoded. The existing one-way room hotspot
+workflow remains unchanged. Verified with `node --check` and a headless Edge admin flow:
+dialog validation, hidden-view creation, view tagging, and zero runtime exceptions.
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`, `VIRTUAL-TOUR.md`.
+
+---
+
 ## 2026-09-25 (Hover popup only for filtered plots; click unchanged)
 
 On request: the hover popups were "irritating when the user is exploring the overall layout", so
@@ -329,6 +345,97 @@ Files: `publish_s3.py` (new), `publish.config.example.json` (new), `publish.conf
 git-ignored), `s3-root/index.html` + `s3-root/_404.html` (new), `server.py`, `deploy_s3.py`,
 `app.js`, `index.html`, `styles.css`, `sw.js`, repo `.gitignore`, repo `.claude/launch.json`
 (new — the preview tool reads the repo root's), `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-25 (Projects mirrored to S3: Save pushes, opening pulls, with a loading step)
+
+Requested: the admin should work like Publish does for the client — "whenever the admin clicks save
+any new assets that is added by the admin is pushed to s3... so when the admin comes and selects
+any of the project all the assets of that particular project is directly fetched from s3 so that
+the admin dont have to get all the assets in there local system", with everything under one folder
+per project inside `ZEROX-PROJECTS-FINAL`.
+
+**assets_s3.py** (new) mirrors a project's SOURCE files — panoramas, plans, renders, videos,
+brochures, the JSON the admin edits — to `s3://<bucket>/ZEROX-PROJECTS-FINAL/<project>/`. Distinct
+from publish_s3.py, which builds a project's client SITE at the bucket root for share links; this
+is the working copy, so a machine is no longer the only place a project exists. Settings come from
+the same publish.config.json, so there is one bucket and one AWS login to maintain.
+- Uploads are incremental against a manifest kept beside the files (`.b91-assets.json`, md5 +
+  size): saving one caption sends one small JSON, not a 200 MB video. Verified: a one-file save
+  uploaded 1 and left 6 unchanged.
+- **Nothing is ever deleted from S3.** A local folder missing a file — a half-synced machine, a
+  partial copy — must not be able to wipe the copy in the cloud. Deletion stays manual.
+- `.originals`/`_originals` are excluded: those are pre-compression masters that exist only so a
+  local compression can be undone.
+- Objects are readable by URL through the bucket's CloudFront domain — the owner chose public over
+  a private bucket, knowing originals are then downloadable by anyone with the address.
+
+**server.py**
+- `/api/save` fires the mirror in the background and returns as before. Deliberately
+  fire-and-forget: the local write has already succeeded, so a slow upload (a fresh 200 MB video)
+  or no network at all must not make Save look like it failed. Outcome at `/api/assets/status`.
+- Any missing file under `projects/<id>/` is fetched from S3 once, kept, and served — so an
+  assetless machine simply works, and the second request is local-disk speed. A file that genuinely
+  does not exist still 404s.
+- `/api/assets/pull?project=<id>` pre-fetches everything missing, in the background.
+
+**app.js** — the admin runs that pull BEFORE reading the project, and watches it on the boot
+curtain that is already on screen: the caption becomes "Fetching this project's files… 0.3 of
+0.8 MB" and the existing bar tracks it, capped at 90% so it never sits full while boot still has
+work. Nothing is missing on your own machine, so the step reports zero files and shows nothing —
+no loader for something that is not happening. Client pages skip it entirely; a failure (no S3, no
+network, an older server) drops through to whatever is on disk, as before.
+
+Verified end to end on this machine:
+- Migration: 16 projects, 354 files, 1.65 GB into ZEROX-PROJECTS-FINAL; published share links
+  untouched (re.build91.in/eleganzav2/ still 200).
+- Deleted a project's local folder entirely, then asked the server for three of its files — all
+  served from S3 and cached; a full pull then matched the originals 7/7 by md5.
+- Deleted `laxmi` locally and opened the admin: the curtain read "Fetching this project's files…
+  0.0 → 0.7 of 0.8 MB", boot completed in 5.2s, 9 files restored, all 9 identical to the originals
+  by md5. Re-opening the same project with the files present showed no fetch message and booted in
+  1.2s.
+
+---
+
+## 2026-09-25 (📌 Landmark markers: anchored to their pin, upright, zoom-responsive)
+
+The feature the owner's boss asked for, settled after several passes against the 3DVista tour the
+project is measured by (demo.build91.in/AnandamEleganza). `📌` button in the client control column
+(`#steadyLandmarkToggle`), OFF by default, remembered as `b91-steady-landmarks`. While ON:
+
+- **Anchored to its own pin.** The label sits `LM_PIN_LIFT` (26px, scaled with the label) above its
+  pin, instead of at the separate point in the sky the admin placed it at. Those are two different
+  world directions, so as the view turned the gap between them opened and closed — which is what
+  was reported as banners "getting elongated and contracted" at the edges. Measured across the
+  reporter's own screenshots, the labels never changed size at all (128px, 134px, 140px, identical
+  in both views); it was the distance to the pin that moved. Pin and label are now one short,
+  upright marker. Measured after: 0px of movement relative to its pin, on all 8 markers, while
+  panning.
+- **Size follows the zoom**: `clamp(0.85 * tan(70/2) / tan(fov/2), 0.45, 1.5)` of natural size.
+- **Never tilts.** Flat DOM overlays only — every banner's computed transform carries zero rotation
+  and zero skew, and the reporter's own screenshots measure 0.00 degrees across 20 banners.
+- **Still avoids overlaps**: the existing vertical pass runs on top of the pin anchoring, so two
+  labels close together stagger instead of colliding. Skipping it was tried and rejected.
+- **Flat shadow** (`.landmarks.lm-flat`): the default banner's `0 12px 30px rgba(0,0,0,.7)` is the
+  only depth cue against plain sky and reads as a plaque leaning back. Scoped to the toggle, so the
+  signed-off default design is untouched.
+
+Rejected along the way, recorded so they are not retried: labels as real 3D objects
+(`vendor/CSS3DRenderer.js`, now deleted) reproduced the reference's tilt but CSS perspective
+stretched anything off-centre — an edge label measured 4.3x the centre one — and the size could not
+be derived from the renderer's maths, being out by more than 10x twice; holding one fixed pixel
+size ignored the zoom the owner liked; keeping the admin's sky position kept the drifting gap.
+
+Verified headless on eleganzav2: 0px pin-relative movement while panning (8 markers), sizes
+constant per zoom level, 0 rotation/skew anywhere, and a screenshot showing short vertical leaders
+with labels staggered where they would otherwise overlap.
+
+Also fixed here: with the toggle on, labels are up to 1.5x normal size, and the flat layer's
+"hide anything that would be half-cut at the screen edge" rule was then hiding nearly all of them
+on a narrow phone — the layer emptied the moment the toggle went on. That rule is skipped in
+📌 mode.
 
 ---
 
