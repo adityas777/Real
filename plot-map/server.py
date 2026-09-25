@@ -14,23 +14,38 @@ them. Each project is a directory under ./projects/<project-id>/.
                                    (app shell + the project's files under data/) for any host
   POST /api/save                 → body { project, files:[{name,encoding,data}] }
                                    writes each file into projects/<project>/, returns JSON
+  GET  /api/publish/status?project=<id>
+                                 → is it on the web (re.build91.in/<id>/), its link, any job
+  POST /api/publish              → body { project, password } — uploads the project's client
+                                   view to S3 in the background (publish_s3.py); 202 + poll
+  GET  /api/publish/progress?project=<id>
+                                 → that background job's live progress
+  POST /api/unpublish            → body { project, password } — takes it off the web
 
 Safety: project ids and file names are sanitised and every write is confined to the
 projects/ root (no path traversal). It binds to 0.0.0.0 so other devices on the LAN can
 reach it (e.g. admin plotting from a remote browser). NOTE: the write API
 (/api/save,/rename,/delete) is UNAUTHENTICATED — only run this on a trusted / firewalled
-network. Set HOST=127.0.0.1 (env) to restrict it back to this machine only.
+network. Set HOST=127.0.0.1 (env) to restrict it back to this machine only. Publish and
+unpublish are the exception: they put things on the PUBLIC internet, so they need the
+publish password from publish.config.json, and the AWS login they use never leaves this
+machine.
 
 Run:  python server.py [port]      (default 8731)
 """
 import gzip
+import hashlib
 import json
 import mimetypes
 import os
 import re
 import socket
 import sys
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+import deploy_s3
+import publish_s3
 
 # Python's mimetypes module doesn't know this extension by default, which would otherwise
 # serve manifest.webmanifest as application/octet-stream — harmless in Chrome but some
@@ -314,6 +329,125 @@ def scan_amenities_for_online_content(amenities_dict):
             flagged.append({"id": a.get("id") or "", "title": a.get("name") or "Untitled amenity", "contentType": "amenity tour", "url": url, "source": "amenity"})
     return flagged
 
+# ─── Offline file list (phones' "Save for offline", see MOBILE-OFFLINE.md) ─────────────────
+# (size, md5) per file, remembered by its modification time and size so a list request doesn't
+# re-read every video each time — only files that changed since the last request are hashed.
+_sig_cache = {}
+_sig_lock = threading.Lock()
+
+def _file_sig(path):
+    st = os.stat(path)
+    key = os.path.normcase(os.path.abspath(path))
+    with _sig_lock:
+        hit = _sig_cache.get(key)
+    if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return hit[1], hit[2]
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    with _sig_lock:
+        _sig_cache[key] = (st.st_mtime_ns, st.st_size, h.hexdigest())
+    return st.st_size, h.hexdigest()
+
+def _bytes_sig(data):
+    return len(data), hashlib.md5(data).hexdigest()
+
+def offline_files(pid):
+    """The same list a published demo carries (publish_s3.offline_list_bytes), for the local
+    server's root layout: the app files, the project's data plus every file it references (the
+    publish rule, _project_files — nothing a project folder merely happens to hold), and the
+    per-project manifest and icons exactly as the page asks for them (?project= included, the
+    one query the offline layer keeps in its cache keys)."""
+    project_dir = os.path.join(PROJECTS_DIR, pid)
+    files = {}
+    published, _ = publish_s3._project_files(project_dir)
+    for fn, full in published:
+        files["projects/%s/%s" % (pid, fn)] = _file_sig(full)
+    for d in deploy_s3.SHELL_DIRS:
+        base = os.path.join(ROOT, d)
+        if os.path.isdir(base):
+            for rel, full in publish_s3._walk(base, d + "/"):
+                if rel not in deploy_s3.SKIP_FILES:
+                    files[rel] = _file_sig(full)
+    for name in deploy_s3.SHELL_FILES:
+        if name in publish_s3.OFFLINE_EXCLUDE or name == "manifest.webmanifest":
+            continue
+        p = os.path.join(ROOT, name)
+        if os.path.isfile(p):
+            files[name] = _file_sig(p)
+    brand = (read_alignment(project_dir) or {}).get("brand") or {}
+    q = "?project=" + pid
+    files["manifest.webmanifest" + q] = _bytes_sig(manifest_body(pid, brand))
+    variants = ("192", "512", "512m") if _manifest_uses_logo(brand) else ("192",)   # 192 is also the iOS touch icon
+    for v in variants:
+        data = pwa_icon_bytes(pid, brand, v)
+        if data:
+            files["api/pwa-icon-%s.png%s" % (v, q)] = _bytes_sig(data)
+    return publish_s3.offline_list_bytes(pid, files)
+
+def _manifest_uses_logo(brand):
+    return bool(((brand.get("logo") or {}) or {}).get("file")) and _pillow_ok()
+
+def manifest_body(pid, brand):
+    """The web app manifest, generated per project so the installed home-screen icon and name
+    are the ADMIN'S branding rather than a generic Build91 one (see Handler.do_manifest)."""
+    name = (brand.get("name") or "").strip() or "Build91"
+    tagline = (brand.get("tagline") or "").strip()
+    q = "?project=%s" % pid
+    # Fall back to the bundled B91 icons when the project has no logo (or Pillow is
+    # unavailable to resize one) — a manifest without usable icons isn't installable.
+    icons = ([
+        {"src": "api/pwa-icon-192.png" + q, "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": "api/pwa-icon-512.png" + q, "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": "api/pwa-icon-512m.png" + q, "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    ] if _manifest_uses_logo(brand) else [
+        {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    ])
+    return json.dumps({
+        "name": ("%s - %s" % (name, tagline)) if tagline else name,
+        "short_name": name[:12],
+        "description": "Browse the plot layout, landmarks, and amenities - works offline once saved.",
+        "start_url": "./?project=" + pid,
+        "scope": "./",
+        "display": "standalone",
+        "orientation": "landscape",   # the client gates portrait behind a rotate screen (see showRotateHint), so an installed app should just open the right way up
+        "background_color": "#0c0d11",
+        "theme_color": "#0c0d11",
+        "icons": icons,
+    }).encode("utf-8")
+
+def _static_icon_bytes(size, maskable):
+    name = "icon-512-maskable.png" if maskable else ("icon-192.png" if size == 192 else "icon-512.png")
+    try:
+        with open(os.path.join(ROOT, "icons", name), "rb") as fh:
+            return fh.read()
+    except Exception:
+        return None
+
+def pwa_icon_bytes(pid, brand, variant):
+    """Square PNG icon built from the project's own logo (letterboxed — home-screen icons must be
+    square and at least 192px, and an admin's logo is neither reliably), cached next to the
+    project as a dot-file; the bundled B91 icon when there's no logo or no Pillow. None if even
+    that is missing."""
+    size = 192 if variant == "192" else 512
+    maskable = variant == "512m"
+    logo_rel = ((brand.get("logo") or {}) or {}).get("file") or ""
+    project_dir = os.path.join(PROJECTS_DIR, pid)
+    src = os.path.join(project_dir, os.path.basename(logo_rel)) if logo_rel else ""
+    if src and os.path.isfile(src) and _pillow_ok():
+        out = os.path.join(project_dir, ".pwa-icon-%s.png" % variant)
+        try:
+            if not os.path.isfile(out) or os.path.getmtime(out) < os.path.getmtime(src):
+                _build_icon(src, out, size, maskable)
+            with open(out, "rb") as fh:
+                return fh.read()
+        except Exception:
+            pass
+    return _static_icon_bytes(size, maskable)
+
 def _pillow_ok():
     """Pillow is an OPTIONAL extra here — this server is otherwise stdlib-only by design.
     Without it, per-project home-screen icons just fall back to the bundled B91 ones."""
@@ -558,10 +692,16 @@ class Handler(SimpleHTTPRequestHandler):
             return self.do_manifest()
         if route.startswith("/api/pwa-icon-"):
             return self.do_pwa_icon(route)
+        if route == "/api/offline-files":
+            return self.do_offline_files()
         if route == "/api/export-bundle":
             return self.do_bundle()
         if route == "/api/export-bundle-check":
             return self.do_bundle_check()
+        if route == "/api/publish/status":
+            return self.do_publish_status()
+        if route == "/api/publish/progress":
+            return self.do_publish_progress()
         return self._serve_static()
 
     def _serve_static(self):
@@ -575,6 +715,14 @@ class Handler(SimpleHTTPRequestHandler):
         Accept-Ranges: bytes."""
         import email.utils
         path = self.translate_path(self.path)
+
+        # publish.config.json sits in the served folder but holds the publish password — never
+        # serve it. Compared as the resolved file AND by name, since Windows also opens it
+        # under spellings like "publish.config.json." or a different letter case.
+        if (os.path.basename(path).rstrip(". ").lower() == os.path.basename(publish_s3.CONFIG_PATH)
+                or os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(publish_s3.CONFIG_PATH))):
+            self.send_error(404, "File not found")
+            return
 
         # A directory URL ending in "/" (the app's own entry point, "/?project=...") is served
         # as its index.html through THIS path, so it gets the same Cache-Control: no-cache as
@@ -723,33 +871,7 @@ class Handler(SimpleHTTPRequestHandler):
         <link rel="manifest"> gets the ?project= appended in app.js (setupPwaIdentity) so
         this sees the same project the page is showing."""
         pid, brand = self._project_brand()
-        name = (brand.get("name") or "").strip() or "Build91"
-        tagline = (brand.get("tagline") or "").strip()
-        has_logo = bool(((brand.get("logo") or {}) or {}).get("file"))
-        q = "?project=%s" % pid
-        # Fall back to the bundled B91 icons when the project has no logo (or Pillow is
-        # unavailable to resize one) — a manifest without usable icons isn't installable.
-        icons = ([
-            {"src": "api/pwa-icon-192.png" + q, "sizes": "192x192", "type": "image/png", "purpose": "any"},
-            {"src": "api/pwa-icon-512.png" + q, "sizes": "512x512", "type": "image/png", "purpose": "any"},
-            {"src": "api/pwa-icon-512m.png" + q, "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
-        ] if (has_logo and _pillow_ok()) else [
-            {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-            {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-            {"src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
-        ])
-        body = json.dumps({
-            "name": ("%s - %s" % (name, tagline)) if tagline else name,
-            "short_name": name[:12],
-            "description": "Browse the plot layout, landmarks, and amenities - works offline once opened.",
-            "start_url": "./?project=" + pid,
-            "scope": "./",
-            "display": "standalone",
-            "orientation": "landscape",   # the client gates portrait behind a rotate screen (see showRotateHint), so an installed app should just open the right way up
-            "background_color": "#0c0d11",
-            "theme_color": "#0c0d11",
-            "icons": icons,
-        }).encode("utf-8")
+        body = manifest_body(pid, brand)
         self.send_response(200)
         self.send_header("Content-Type", "application/manifest+json")
         self.send_header("Content-Length", str(len(body)))
@@ -765,26 +887,10 @@ class Handler(SimpleHTTPRequestHandler):
         m = re.match(r"^/api/pwa-icon-(192|512|512m)\.png$", route)
         if not m:
             return self._send_json(404, {"ok": False, "error": "unknown icon"})
-        variant = m.group(1)
-        size = 192 if variant == "192" else 512
-        maskable = variant == "512m"
         pid, brand = self._project_brand()
-        logo_rel = ((brand.get("logo") or {}) or {}).get("file") or ""
-        project_dir = os.path.join(PROJECTS_DIR, pid)
-        src = os.path.join(project_dir, os.path.basename(logo_rel)) if logo_rel else ""
-        if not src or not os.path.isfile(src) or not _pillow_ok():
-            return self._serve_static_icon(size, maskable)
-        out = os.path.join(project_dir, ".pwa-icon-%s.png" % variant)
-        try:
-            if not os.path.isfile(out) or os.path.getmtime(out) < os.path.getmtime(src):
-                _build_icon(src, out, size, maskable)
-        except Exception:
-            return self._serve_static_icon(size, maskable)
-        try:
-            with open(out, "rb") as fh:
-                data = fh.read()
-        except Exception:
-            return self._serve_static_icon(size, maskable)
+        data = pwa_icon_bytes(pid, brand, m.group(1))
+        if not data:
+            return self._send_json(404, {"ok": False, "error": "icon missing"})
         self.send_response(200)
         self.send_header("Content-Type", "image/png")
         self.send_header("Content-Length", str(len(data)))
@@ -792,19 +898,24 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _serve_static_icon(self, size, maskable):
-        name = "icon-512-maskable.png" if maskable else ("icon-192.png" if size == 192 else "icon-512.png")
-        p = os.path.join(ROOT, "icons", name)
+    def do_offline_files(self):
+        """GET /api/offline-files?project=<id> → the offline file list (see offline_files)."""
+        from urllib.parse import urlparse, parse_qs
+        pid = safe_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
+        if not pid:
+            return self._send_json(400, {"ok": False, "error": "invalid project id"})
+        if not os.path.isdir(os.path.join(PROJECTS_DIR, pid)):
+            return self._send_json(404, {"ok": False, "error": "no such project"})
         try:
-            with open(p, "rb") as fh:
-                data = fh.read()
-        except Exception:
-            return self._send_json(404, {"ok": False, "error": "icon missing"})
+            body = offline_files(pid)
+        except Exception as e:  # noqa: BLE001 — a phone asking must never take the server down
+            return self._send_json(500, {"ok": False, "error": str(e)})
         self.send_response(200)
-        self.send_header("Content-Type", "image/png")
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(body)
 
     def do_bundle_check(self):
         """Pre-flight for the standalone export: report which menu items and amenities (if
@@ -894,6 +1005,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self.do_delete()
         if route == "/api/upload":
             return self.do_upload()
+        if route == "/api/publish":
+            return self.do_publish()
+        if route == "/api/unpublish":
+            return self.do_unpublish()
         if route != "/api/save":
             return self._send_json(404, {"ok": False, "error": "not found"})
         try:
@@ -987,6 +1102,71 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             return self._send_json(500, {"ok": False, "error": str(e)})
         return self._send_json(200, {"ok": True, "project": pid, "trash": os.path.relpath(dest, ROOT).replace(os.sep, "/")})
+
+    # ── ☁ Publish to web (publish_s3.py does the AWS work) ─────────────────────────
+    def _query_project(self):
+        from urllib.parse import urlparse, parse_qs
+        return safe_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
+
+    def _publish_request(self):
+        """Shared gate for publish/unpublish → (pid, body) or (None, response-already-sent).
+        A wrong password costs a second, so the password can't be guessed at LAN speed."""
+        import time
+        try:
+            p = self._read_json()
+        except Exception as e:
+            return None, self._send_json(400, {"ok": False, "error": f"bad request: {e}"})
+        pid = safe_project(p.get("project"))
+        if not pid:
+            return None, self._send_json(400, {"ok": False, "error": "invalid project id"})
+        try:
+            cfg = publish_s3.load_config()
+        except publish_s3.PublishError as e:
+            return None, self._send_json(503, {"ok": False, "error": str(e)})
+        if not publish_s3.check_password(cfg, p.get("password")):
+            time.sleep(1)
+            return None, self._send_json(401, {"ok": False, "error": "Wrong publish password."})
+        return pid, p
+
+    def do_publish_status(self):
+        pid = self._query_project()
+        if not pid:
+            return self._send_json(400, {"ok": False, "error": "invalid project id"})
+        return self._send_json(200, {"ok": True, **publish_s3.status(pid)})
+
+    def do_publish_progress(self):
+        pid = self._query_project()
+        if not pid:
+            return self._send_json(400, {"ok": False, "error": "invalid project id"})
+        return self._send_json(200, {"ok": True, "job": publish_s3.job_state(pid)})
+
+    def do_publish(self):
+        pid, body = self._publish_request()
+        if not pid:
+            return body
+        # {check:true} only verifies the password: the admin page saves the project between
+        # this and the real publish, and shouldn't save at all for a mistyped password.
+        if body.get("check"):
+            return self._send_json(200, {"ok": True})
+        project_dir = os.path.join(PROJECTS_DIR, pid)
+        if not (os.path.isfile(os.path.join(project_dir, "plots.svg"))
+                or os.path.isfile(os.path.join(project_dir, "tour.json"))):
+            return self._send_json(404, {"ok": False, "error": "This project has nothing to publish yet - save it first."})
+        # The project's logo becomes the installed demo's home-screen icon, built by the same
+        # letterboxing as the live /api/pwa-icon-* (only when Pillow is available).
+        if not publish_s3.start_publish(pid, _build_icon if _pillow_ok() else None):
+            return self._send_json(409, {"ok": False, "error": "This project is already being published."})
+        return self._send_json(202, {"ok": True, "job": publish_s3.job_state(pid)})
+
+    def do_unpublish(self):
+        pid, body = self._publish_request()
+        if not pid:
+            return body
+        try:
+            result = publish_s3.run_unpublish(pid)
+        except Exception as e:
+            return self._send_json(502, {"ok": False, "error": publish_s3.aws_message(e)})
+        return self._send_json(200, {"ok": True, **result})
 
 
     def do_upload(self):

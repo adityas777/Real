@@ -104,6 +104,7 @@ const els = {
   traceModeAuto: $('traceModeAuto'), traceModeManual: $('traceModeManual'), traceModeEdit: $('traceModeEdit'),
   traceThresh: $('traceThresh'), traceThreshVal: $('traceThreshVal'), traceSimplify: $('traceSimplify'), traceSimplifyVal: $('traceSimplifyVal'),
   traceSnap: $('traceSnap'), traceUndo: $('traceUndo'), traceClear: $('traceClear'),
+  tracePrefix: $('tracePrefix'), tracePrefixReset: $('tracePrefixReset'), traceNextNum: $('traceNextNum'),
   traceDxfLayer: $('traceDxfLayer'), traceLayerSel: $('traceLayerSel'), traceCount: $('traceCount'), traceList: $('traceList'),
   traceStage: $('traceStage'), traceCanvas: $('traceCanvas'), traceEmpty: $('traceEmpty'),
   // custom menu admin + client elements
@@ -114,9 +115,15 @@ const els = {
   clientBrochureModal: $('clientBrochureModal'), clientContactModal: $('clientContactModal'),
   exportFlaggedModal: $('exportFlaggedModal'), exportFlaggedList: $('exportFlaggedList'),
   exportFlaggedCancel: $('exportFlaggedCancel'), exportFlaggedProceed: $('exportFlaggedProceed'),
-  offlineSaveBanner: $('offlineSaveBanner'), offlineSavePrompt: $('offlineSavePrompt'), offlineSaveTitle: $('offlineSaveTitle'), offlineSaveSize: $('offlineSaveSize'),
-  offlineSaveSkip: $('offlineSaveSkip'), offlineSaveGo: $('offlineSaveGo'), offlineSaveProgress: $('offlineSaveProgress'),
-  offlineSaveEta: $('offlineSaveEta'), offlineSaveBarFill: $('offlineSaveBarFill'), offlineSavePct: $('offlineSavePct'),
+  publishModal: $('publishModal'), publishSub: $('publishSub'), publishStatus: $('publishStatus'),
+  publishLinkRow: $('publishLinkRow'), publishLink: $('publishLink'), publishCopyBtn: $('publishCopyBtn'), publishOpenBtn: $('publishOpenBtn'),
+  publishNote: $('publishNote'), publishPassRow: $('publishPassRow'), publishPass: $('publishPass'),
+  publishProgress: $('publishProgress'), publishProgressFill: $('publishProgressFill'), publishProgressText: $('publishProgressText'),
+  publishError: $('publishError'), publishUnpublishBtn: $('publishUnpublishBtn'), publishGoBtn: $('publishGoBtn'),
+  offlinePanel: $('offlinePanel'), offlinePanelTitle: $('offlinePanelTitle'), offlinePanelClose: $('offlinePanelClose'),
+  offlinePanelBody: $('offlinePanelBody'), offlinePanelProgress: $('offlinePanelProgress'), offlinePanelBarFill: $('offlinePanelBarFill'),
+  offlinePanelPct: $('offlinePanelPct'), offlinePanelEta: $('offlinePanelEta'), offlinePanelKeep: $('offlinePanelKeep'),
+  offlinePanelResult: $('offlinePanelResult'), offlinePanelRemove: $('offlinePanelRemove'), offlinePanelGo: $('offlinePanelGo'),
 };
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -124,7 +131,45 @@ const R = 500, R_PLOT = 492, R_DRAPE = 489, GROUND_H = 1; // R_DRAPE = PNG site-
 const FOV_MIN = 20, FOV_MAX = 120; // field-of-view range; wide max lets the view zoom out to the whole site (past ~120° a perspective camera fisheyes hard)
 const PANO_TEX_CAP = 8192; // target equirectangular width; actual cap = min(this, GPU max texture size) so it
                            // stays sharp on desktop (≤16384) yet auto-downscales to 4096 on mobile GPUs
-function gpuMaxTexSize() { try { const g = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl'); return g ? g.getParameter(g.MAX_TEXTURE_SIZE) : 4096; } catch { return 4096; } }
+// The GPU's largest texture side — asked ONCE per page (2026-09-25). The probe is a whole WebGL
+// context, and this used to open a fresh one on every texture load (every tour room, every
+// prefetch). WebKit keeps at most 16 contexts alive per page and silently kills the OLDEST when
+// another appears — sooner or later that was the main renderer, so the pano went black and the
+// next shader compile threw. WebKit may hold a probe's memory even after loseContext(), so the
+// fix is asking once (or reading the live renderer), not tidying up afterwards.
+let gpuMaxTexCache = 0;
+function gpuMaxTexSize() {
+  if (gpuMaxTexCache) return gpuMaxTexCache;
+  if (three?.renderer) return (gpuMaxTexCache = three.renderer.capabilities.maxTextureSize || 4096);
+  try {
+    const c = document.createElement('canvas');
+    const g = c.getContext('webgl2') || c.getContext('webgl');
+    gpuMaxTexCache = g ? g.getParameter(g.MAX_TEXTURE_SIZE) : 4096;
+    g?.getExtension('WEBGL_lose_context')?.loseContext();
+  } catch { gpuMaxTexCache = 4096; }
+  return gpuMaxTexCache;
+}
+// The largest texture side the client uploads. Phones and tablets get 4096 whatever their GPU
+// claims (2026-09-25): iPhones report 16384, so nothing was ever downscaled there, and
+// eleganzav2's 6144×3072 pano plus its 7680×5223 site plan (~310 MB of GPU memory with mipmaps,
+// before any tour room) made iOS drop the WebGL context during boot — reported from iOS Chrome
+// as "Argument 1 ('shader') to WebGL2RenderingContext.shaderSource must be an instance of
+// WebGLShader". 4096 is what most Android GPUs were already capped at. Desktop keeps PANO_TEX_CAP.
+const MOBILE_TEX_CAP = 4096;
+function textureCap() { return Math.min(isTouchDevice() ? MOBILE_TEX_CAP : PANO_TEX_CAP, gpuMaxTexSize()); }
+// Shrink a loaded texture's image to textureCap() in place (longest side), via a 2D canvas —
+// which keeps alpha, so a transparent site plan stays transparent.
+function capTextureImage(tex) {
+  const img = tex && tex.image;
+  const w = (img && (img.naturalWidth || img.width)) || 0, h = (img && (img.naturalHeight || img.height)) || 0;
+  const s = w && h ? textureCap() / Math.max(w, h) : 1;
+  if (s >= 1) return tex;
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  tex.image = c; tex.needsUpdate = true;
+  return tex;
+}
 const IDENTITY = () => ({ tx: 0, ty: 0, scale: 1, rotation: 0 }); // tx/ty = ground-plane offset (world units); rotation in radians
 // ── Projects: each site lives in projects/<id>/. Client loads ?project=<id>
 //    (default "sample"); admin saves to the server-side project dir (see server.py).
@@ -148,10 +193,25 @@ const BUNDLE_FILES = (BUNDLE && window.B91_BUNDLE_FILES && typeof window.B91_BUN
 // and a texture sourced from a file:// path — even one sitting right next to index.html —
 // is rejected by the browser as tainted/cross-origin (verified directly); a data: URI isn't.
 const BUNDLE_IMAGES = (BUNDLE && window.B91_BUNDLE_IMAGES && typeof window.B91_BUNDLE_IMAGES === 'object') ? window.B91_BUNDLE_IMAGES : null;
-// The project comes from ?project=<id> (or the baked bundle id). In ADMIN only, a remembered
-// last-project is a convenience fallback; the client never loads a project from localStorage.
+// A PUBLISHED demo (admin ⋯ → ☁ Publish to web; server.py + publish_s3.py) bakes
+// `window.B91_PUBLISHED = { project }` into its own copy of index.html. It is a normal
+// hosted site — fetch, the service worker, everything works as live — but its project is
+// FIXED (a shared link must always open that one project, whatever ?project= says) and it is
+// always the view-only client: ?admin is ignored, since there is no server behind it to save to.
+const PUBLISHED = (!BUNDLE && typeof window !== 'undefined' && window.B91_PUBLISHED && typeof window.B91_PUBLISHED === 'object'
+  && sanitizeProjectId(window.B91_PUBLISHED.project)) ? window.B91_PUBLISHED : null;
+// This page was opened from a SAVED OFFLINE COPY on this phone/tablet: sw.js injects
+// `window.B91_OFFLINE_COPY` into the saved index.html it serves (strict offline mode, 2026-09-24,
+// MOBILE-OFFLINE.md). Such a page runs entirely from that copy — whatever the connection, it
+// never reads the live Google Sheet (the copy's plots.csv already has the sheet merged in, as of
+// the last save/update) — and it changes only when the visitor taps "Update offline copy".
+const OFFLINE_COPY = (!BUNDLE && typeof window !== 'undefined' && window.B91_OFFLINE_COPY
+  && typeof window.B91_OFFLINE_COPY === 'object') ? window.B91_OFFLINE_COPY : null;
+// The project comes from ?project=<id> (or the baked bundle/published id). In ADMIN only, a
+// remembered last-project is a convenience fallback; the client never loads a project from localStorage.
 const BOOT_PROJECT = BUNDLE
   ? (sanitizeProjectId(BUNDLE.project) || 'site')
+  : PUBLISHED ? sanitizeProjectId(PUBLISHED.project)
   : (sanitizeProjectId(_params.get('project'))
     || (_params.has('admin') ? (() => { try { return sanitizeProjectId(localStorage.getItem('b91-project-id')); } catch { return ''; } })() : '')
     || 'sample');
@@ -169,15 +229,27 @@ const isMobilePortrait = () => window.innerWidth <= 720 && window.matchMedia('(o
 // landscape — the largest phones top out around 926-932px — while real desktop windows are
 // essentially never both landscape-oriented AND under 900px).
 const isMobileLandscape = () => window.innerWidth <= 900 && window.matchMedia('(orientation: landscape)').matches;
+// "Is this a phone or tablet?" — for what the DEVICE can do (save for offline, the in-app PDF
+// viewer), as opposed to the layout checks above, which are about the window's current shape.
+// Answered by the primary pointer, not the width (2026-09-24): the old width test flipped with
+// rotation, on the largest phones in landscape and in "Desktop site" mode — and a failed test
+// used to delete the saved offline copy. iPadOS presents itself as a Mac, so it's recognised by
+// touch points (that also keeps an iPad with a trackpad attached counted as a tablet).
+const isIpadOS = () => /Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
+function isTouchDevice() {
+  try { if (window.matchMedia('(pointer: coarse)').matches) return true; } catch {}
+  return isIpadOS();
+}
+const isIosDevice = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || isIpadOS();
 
 const state = {
-  admin: BUNDLE ? false : _params.has('admin'),   // a bundle is always the view-only client (admin code stays inert)
+  admin: (BUNDLE || PUBLISHED) ? false : _params.has('admin'),   // a bundle / published demo is always the view-only client (admin code stays inert)
   bundle: !!BUNDLE,                                // running inside an exported standalone folder?
   projectId: BOOT_PROJECT,               // save target (admin can retarget); assetBase is fixed at boot
   assetBase: BUNDLE ? String(BUNDLE.dataBase || './data').replace(/\/+$/, '') : `projects/${BOOT_PROJECT}`, // where THIS load reads files/images from
   rows: new Map(), geom: [], imgW: 12000, imgH: 6000,
   sheet: { url: '', gid: '', enabled: false }, // per-project Google-Sheet plot-data source (alignment.json "data")
-  dataSource: 'file',                          // what loadData() last used: 'file' | 'live' | 'cached'
+  dataSource: 'file',                          // what loadData() last used: 'file' | 'live' | 'cached' | 'saved' (offline copy)
   anchor: { x: 6000, y: 3000 },         // cluster centroid in image px (pivot for scale/rotate)
   kGround: 0.0003,                      // px → ground-plane units (auto-calibrated in loadGeometry)
   transform: IDENTITY(),
@@ -191,21 +263,17 @@ const state = {
   bootImage: { file: null, blob: null, name: null, _url: null, _ver: '' },  // admin-uploaded #bootCurtain background (in alignment.json), shown while the site boots
   panoBlob: null, panoName: null,       // resized texture-safe pano JPEG kept for export / session restore
   plots: new Map(), selectedId: null, hoverId: null,
-  activeFilters: new Set(STATUS_ORDER),
+  // The statuses whose plot overlay is SHOWN — one independent toggle per Available/Reserved/Sold
+  // pill (toggleFilter). The client starts with NONE on (2026-09-25, on request: "the filters
+  // should be unselected by default"): the site plan shows plain until the visitor turns a status
+  // on. The admin starts with every status on (incl. 'unknown', which has no pill) — it needs to
+  // see the plots to align and edit them.
+  activeFilters: new Set((!BUNDLE && !PUBLISHED && _params.has('admin')) ? STATUS_ORDER : []),
   // Admin-defined area bands (alignment.json `area`). `unit` is a LABEL, not a conversion
   // factor — see plotAreaValue for why. `areaFilterId` is the one currently picked in the
   // client dropdown (null = show everything normally).
   area: { unit: 'sq.ft', filters: [] },
   areaFilterId: null,
-  // Per-plot fields the admin has edited away from what the live sheet says. These WIN over
-  // the sheet on both sides — see computePlotOverrides/applyPlotOverrides.
-  plotOverrides: {},
-  // `${plotId}|${field}` for every field the admin has deliberately EMPTIED (typed it blank in
-  // the plot editor, or loaded a saved "" override). computePlotOverrides needs this to tell a
-  // real clear from a field that merely happens to be empty in a stale tab: without it, an admin
-  // page opened before the sheet gained a value would record that value as "cleared" on its next
-  // save, blanking it on the client across every plot at once.
-  clearedPlotFields: new Set(),
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
   showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
@@ -274,7 +342,26 @@ function assetUrl(storedPath, ver) {
 }
 
 // ─── CSV ──────────────────────────────────────────────────────────────────────
+// Column names are matched regardless of case and spacing (2026-09-24): a sheet column headed
+// "Dimensions", "Notes" or "Plot ID" reads as dimensions / notes / plot_id — otherwise a
+// capitalised header was silently ignored. A leading byte-order mark (Excel's "CSV UTF-8")
+// is dropped too, or the first column would never be recognised as plot_id.
+const csvColumnKey = (h) => String(h).replace(/^﻿/, '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+// Header cells whose names collapse to the same key ("Notes" and "notes") → [[key, [names…]]].
+// Only the right-most of them survives parseCSV, so testSheet reports these.
+function csvDuplicateColumns(text) {
+  const groups = new Map();
+  (csvRows(text)[0] || []).forEach((h) => { const k = csvColumnKey(h); if (k) groups.set(k, [...(groups.get(k) || []), h.trim()]); });
+  return [...groups].filter(([, names]) => names.length > 1);
+}
 function parseCSV(text) {
+  const rows = csvRows(text);
+  if (!rows.length) return [];
+  const header = rows[0].map(csvColumnKey);
+  return rows.slice(1).filter((r) => r.some((c) => c.trim() !== ''))
+    .map((r) => Object.fromEntries(header.map((h, j) => [h, (r[j] ?? '').trim()])));
+}
+function csvRows(text) {
   const rows = []; let row = [], field = '', i = 0, inQ = false;
   const pushF = () => { row.push(field); field = ''; };
   const pushR = () => { pushF(); rows.push(row); row = []; };
@@ -285,76 +372,79 @@ function parseCSV(text) {
     i++;
   }
   if (field.length || row.length) pushR();
-  if (!rows.length) return [];
-  const header = rows[0].map((h) => h.trim());
-  return rows.slice(1).filter((r) => r.some((c) => c.trim() !== ''))
-    .map((r) => Object.fromEntries(header.map((h, j) => [h, (r[j] ?? '').trim()])));
+  return rows;
 }
 // Normalise a parsed CSV/sheet row in place: status is lower-cased & trimmed so a sheet
 // that says "Sold"/"SOLD" still maps to a known status (unknown values fall through to
 // 'unknown' at consume time in colorPlots/applyData). Other fields are used verbatim.
 function normalizeRow(r) { r.status = (r.status || '').trim().toLowerCase(); return r; }
 
-// Two plots may carry the SAME number (2026-09-23, on request): each sector here restarts its
-// numbering at 1, so "1" exists in sector A and again in sector B. Ids must still be unique —
-// state.plots, state.rows, the label cache and the SVG export are all keyed by id, and a second
-// plot with an existing id used to overwrite its entry in state.plots, leaving the first polygon
-// orphaned in the scene: never recoloured, never filtered, so it sat there WHITE, which is
-// exactly what was reported. So the id gets an invisible disambiguator — "Plot-1", "Plot-1#2" —
-// that `plotNumber` strips everywhere a plot is shown. Nothing the admin types contains it: it is
-// added only by uniquePlotId below.
+// ── Plot ids ──────────────────────────────────────────────────────────────────
+// A plot's id IS its plot number, exactly as the admin typed it or the numbering produced it
+// ("A01", "133"), and it is the one key everything joins on 1-to-1 (2026-09-24, on request):
+// plots.svg's polygon id, plots.csv's plot_id and the Google Sheet's plot_id column. There used
+// to be a hidden "Plot-" prefix on every id plus a tolerant matcher (canonPlotId: case-blind,
+// prefix-optional) — removed, because it let a sheet row land on a plot that was never named that
+// way. Files written before then store "Plot-<number>"; legacyPlotId strips that once, on the way
+// in, from our OWN files (plots.svg, plots.csv, the admin session) — never from the sheet, which
+// must name each plot exactly.
+const legacyPlotId = (s) => String(s == null ? '' : s).trim().replace(/^Plot-/, '');
+// Numbers must be unique for 1-to-1 matching, and the editor refuses a repeat. A layout saved
+// earlier can still hold them (2026-09-23: sectors that each restarted at 1), so a repeat keeps
+// an invisible "#n" tag — "2", "2#2" — that keeps it its own polygon (state.plots, state.rows, the
+// label cache and the SVG are all keyed by id; a second plot under an existing id used to render
+// WHITE, orphaned). A tagged id matches no sheet row, and the trace editor flags every repeated
+// number until the admin renames it. The tag never reaches the screen: see plotNumber.
 const DUP_TAG = /#\d+$/;
-// What a plot is CALLED: the id minus the "Plot-" prefix and minus the duplicate tag. Every
-// place that shows a plot to anyone (labels, popover, media titles, the SVG export's text, the
-// admin's number box) goes through this, so duplicates read identically on screen.
-const plotNumber = (id) => String(id == null ? '' : id).replace(/^Plot-/, '').replace(DUP_TAG, '');
-// A free id for `base` ("Plot-1"), skipping the one belonging to `exceptIdx` so re-confirming a
-// plot's own number is not treated as a clash. Second and later duplicates get #2, #3, …
+// What a plot is CALLED: the id minus any duplicate tag. Every place that shows a plot (labels,
+// popover, media titles, the SVG export's text, the admin's number box) goes through this.
+const plotNumber = (id) => String(id == null ? '' : id).replace(DUP_TAG, '');
+// A free id for `base`, skipping the one belonging to `exceptIdx` so re-confirming a plot's own
+// number is not treated as a clash. Second and later holders of a number get #2, #3, …
 function uniquePlotId(base, plots, exceptIdx = -1) {
   const taken = new Set(plots.map((q, i) => (i === exceptIdx ? null : q.id)).filter(Boolean));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) { const cand = `${base}#${n}`; if (!taken.has(cand)) return cand; }
 }
-// Every polygon must own its id (state.plots/labelCache/state.rows are keyed by it), so any
-// repeat coming in from a saved layout gets the same invisible "#n" tag a rename would give it.
-// Order is preserved and the FIRST holder of a number keeps the untagged id, so existing data
-// keyed by it still matches.
+// Every polygon must own its id, so a repeat coming in from a saved layout gets the same "#n"
+// tag. Order is preserved and the FIRST holder of a number keeps the untagged id, so existing
+// data keyed by it still matches.
 function dedupeGeomIds(geom) {
   const out = [];
   for (const g of geom) out.push({ ...g, id: uniquePlotId(g.id, out) });
   return out;
 }
-// Canonical plot key: trims, lowercases, and drops an optional "Plot-" prefix, so a sheet
-// that lists bare numbers ("133") joins to a "Plot-133" polygon (and vice-versa). The duplicate
-// tag comes off too, so "Plot-1#2" still matches a sheet row for plot 1 — a sheet cannot express
-// two rows with the same id anyway, so both duplicates read that one row's data unless the admin
-// types their own values in.
-const canonPlotId = (s) => String(s == null ? '' : s).trim().toLowerCase().replace(DUP_TAG, '').replace(/^plot[\s_-]*/, '');
-// Key parsed rows to the LAYOUT: match each polygon id by canonical form and rewrite the
-// row's plot_id to the polygon id, so a bare-number sheet joins and everything downstream
-// (colouring, popover, CSV snapshot, session) sees the canonical "Plot-XXX" id. Rows with no
-// matching polygon are kept under their raw plot_id (geometry not loaded yet / extra rows).
+// Why `s` can't be a plot number ('' when it can): it must be non-empty and avoid the two things
+// the id scheme reserves — "#" (the duplicate tag) and a leading "Plot-" (stripped from legacy
+// files on load, so it would not survive a reload).
+function plotNumberProblem(s) {
+  if (!s) return 'A plot number can’t be empty.';
+  if (s.includes('#')) return 'A plot number can’t contain “#”.';
+  if (/^Plot-/.test(s)) return 'A plot number can’t start with “Plot-”.';
+  return '';
+}
+// Parsed rows → Map(plot_id → row), keyed by plot_id EXACTLY as written (surrounding spaces
+// aside). A sheet that lists the same plot_id twice uses its first row; the admin's Test button
+// reports the repeat.
 function indexRows(rows) {
-  const byCanon = new Map();
-  for (const r of rows) { const k = canonPlotId(r.plot_id); if (k && !byCanon.has(k)) byCanon.set(k, r); }
-  const map = new Map(), used = new Set();
-  // A plot number may legitimately appear twice (see DUP_TAG). Both polygons start from the one
-  // sheet row that matches the number, but each gets its OWN COPY: they share a Map otherwise, so
-  // applyPlotOverrides writing to one would silently rewrite the other, and r.plot_id could only
-  // ever name one of them. From here on the two are independent — the admin's own edits are keyed
-  // by the unique id, so each duplicate carries its own status, price and media.
-  for (const g of state.geom) { const k = canonPlotId(g.id); const r = byCanon.get(k); if (!r) continue;
-    if (used.has(k)) { map.set(g.id, { ...r, plot_id: g.id }); continue; }
-    r.plot_id = g.id; map.set(g.id, r); used.add(k); }
-  for (const r of rows) { const k = canonPlotId(r.plot_id); if (!used.has(k) && r.plot_id != null && !map.has(r.plot_id)) map.set(r.plot_id, r); }
+  const map = new Map();
+  for (const r of rows) {
+    const id = (r.plot_id == null ? '' : String(r.plot_id)).trim();
+    if (id && !map.has(id)) { r.plot_id = id; map.set(id, r); }
+  }
   return map;
 }
+// Our own saved rows (plots.csv, the admin session) → Map, with legacy "Plot-" ids migrated.
+const indexSavedRows = (rows) => indexRows(rows.map((r) => ({ ...r, plot_id: legacyPlotId(r.plot_id) })));
 
 // ── Google Sheet plot-data source (per project) ───────────────────────────────
 // Accepts any normal share link (/spreadsheets/d/<ID>/edit#gid=…) or a "Publish to web"
-// link (/spreadsheets/d/e/<PUBID>/pubhtml). Returns browser-readable CSV endpoint(s) —
-// gviz for a shared doc, the pub CSV for a published one — tried in order. Both send
-// permissive CORS for public sheets; a private sheet fails and we fall back to plots.csv.
+// link (/spreadsheets/d/e/<PUBID>/pubhtml). Returns browser-readable CSV endpoint(s), tried in
+// order; all send permissive CORS for a public sheet, and a private one fails over to plots.csv.
+// For a shared doc the plain CSV EXPORT comes first (2026-09-24): it returns every cell exactly
+// as the sheet shows it, as text. gviz — kept only as the fallback — guesses one type per column
+// and returns the cells that don't fit it as BLANK: a "30x40" in a mostly-numeric Dimensions
+// column, or a "100" in a Notes column, silently disappeared. The published CSV is already text.
 function parseSheetUrl(url) {
   url = (url || '').trim(); if (!url) return null;
   let m = url.match(/\/spreadsheets\/d\/e\/([^/]+)/); if (m) return { kind: 'pub', id: m[1] };   // Publish-to-web id
@@ -371,15 +461,17 @@ function sheetCsvCandidates(url, gid) {
   const gq = sheetGid(url, gid); const g = gq ? `&gid=${encodeURIComponent(gq)}` : '';
   return p.kind === 'pub'
     ? [`https://docs.google.com/spreadsheets/d/e/${p.id}/pub?output=csv${g}`]
-    : [`https://docs.google.com/spreadsheets/d/${p.id}/gviz/tq?tqx=out:csv${g}`];
+    : [`https://docs.google.com/spreadsheets/d/${p.id}/export?format=csv${g}`,
+       `https://docs.google.com/spreadsheets/d/${p.id}/gviz/tq?tqx=out:csv${g}`];
 }
 // Fetch the configured sheet → Map(plot_id → row), or null on any failure (network, CORS,
-// private sheet, or a response that isn't CSV with a plot_id column).
-async function fetchSheetRows(cfg = state.sheet) {
+// private sheet, or a response that isn't CSV with a plot_id column). `timeoutMs` bounds each
+// attempt (the offline save uses it, so a weak signal can't hold a save up indefinitely).
+async function fetchSheetRows(cfg = state.sheet, { timeoutMs = 0 } = {}) {
   if (!cfg || !cfg.enabled || !cfg.url) return null;
   for (const u of sheetCsvCandidates(cfg.url, cfg.gid)) {
     try {
-      const res = await fetch(`${u}&_cb=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetchWithTimeout(`${u}&_cb=${Date.now()}`, { cache: 'no-store' }, timeoutMs);
       if (!res.ok) continue;
       const rows = parseCSV(await res.text());
       if (rows.length && 'plot_id' in rows[0]) return indexRows(rows.map(normalizeRow));
@@ -387,79 +479,85 @@ async function fetchSheetRows(cfg = state.sheet) {
   }
   return null;
 }
+// fetch() that gives up if the response hasn't started arriving within `ms` (0 = never wait-limit).
+async function fetchWithTimeout(url, opts = {}, ms = 0) {
+  if (!ms || typeof AbortController !== 'function') return fetch(url, opts);
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: ctl.signal }); }
+  finally { clearTimeout(t); }
+}
 async function loadCommittedCSV() {                     // the committed projects/<id>/plots.csv (fallback / default)
   const res = await loadProjectFile('plots.csv');
   if (!res || !res.ok) { state.rows = new Map(); return false; } // new/empty project — no CSV yet
-  state.rows = indexRows(parseCSV(await res.text()).map(normalizeRow));
+  state.rows = indexSavedRows(parseCSV(await res.text()).map(normalizeRow));
   return true;
 }
-// Populate state.rows from the LIVE sheet if one is configured & reachable, else the
-// committed CSV. Returns a short label describing the source (shown by setSync).
-// Fields an admin edit can pin. Mirrors buildPlotsCSV's columns minus plot_id.
-const OVERRIDE_FIELDS = ['status', 'facing', 'size', 'dimensions', 'price', 'block', 'tour_url', 'video_url', 'image_url', 'media_json', 'notes'];
-// Which fields differ between what the admin currently has and what the sheet says — i.e.
-// what the admin has deliberately changed. Derived by DIFFING at save time rather than by
-// tracking every keystroke: the admin's rows were themselves seeded from the sheet, so
-// anything that no longer matches it is by definition an edit. That also makes it
-// self-cleaning — set a value back to what the sheet says and the override disappears.
-//
-// A blank IS recorded, but only where the sheet has something to clear (2026-09-23). Reported:
-// the admin emptied plot A101's "Corner plot" note, the admin panel showed it gone, the save
-// went through — and the client still showed the note, because the sheet still says "Corner
-// plot" and no override had been written to say otherwise. The old rule ("" is never recorded,
-// since it can't be told apart from "never filled in") is still respected where it matters: a
-// blank against a blank sheet cell records nothing, so an untouched empty field cannot invent an
-// override. The remaining cost is stated plainly: once a field has been cleared this way, a value
-// LATER added to that sheet cell stays hidden on the client until the admin edits that field
-// again — an admin edit outranking the sheet is the documented precedence (see loadData), and
-// the alternative is edits that silently do nothing.
-function computePlotOverrides(sheetRows) {
-  if (!sheetRows) return state.plotOverrides || {};
-  const out = {};
-  state.rows.forEach((row, id) => {
-    const s = sheetRows.get(id), diff = {};
-    OVERRIDE_FIELDS.forEach((k) => {
-      const mine = (row?.[k] ?? '').toString().trim();
-      const theirs = (s?.[k] ?? '').toString().trim();
-      if (mine !== theirs && (mine || state.clearedPlotFields.has(`${id}|${k}`))) diff[k] = mine;
-    });
-    if (Object.keys(diff).length) out[id] = diff;
-  });
-  return out;
-}
-function applyPlotOverrides() {
-  const ov = state.plotOverrides || {};
-  for (const [id, fields] of Object.entries(ov)) {
+// THE GOOGLE SHEET WINS (2026-09-24, on request — replacing the 09-18 "admin edits win" rule and
+// its plotOverrides machinery). For every plot the sheet has a row for, each column the sheet
+// carries replaces the admin's value, a BLANK cell included: the sheet is the record, and an
+// empty cell there means empty. Columns the sheet doesn't have (typically the media ones) and
+// plots it has no row for keep the admin's data. Returns how many values this changed on plots
+// in the layout, and on how many plots, so a save can tell the admin their edits were replaced.
+function applySheetRows(sheetRows) {
+  const inLayout = new Set(state.geom.map((g) => g.id));
+  let changed = 0; const plots = new Set();
+  sheetRows.forEach((srow, id) => {
     const row = state.rows.get(id) || { plot_id: id };
-    // A saved "" is a remembered clear: re-arm it here so the NEXT save writes it out again
-    // instead of computePlotOverrides treating it as an ordinary empty field and dropping it,
-    // which would hand the plot straight back to the sheet's value.
-    for (const [k, v] of Object.entries(fields)) if (String(v) === '') state.clearedPlotFields.add(`${id}|${k}`);
-    Object.assign(row, fields);
+    for (const [k, v] of Object.entries(srow)) {
+      if (k === 'plot_id') continue;
+      const next = v == null ? '' : String(v);   // both sides went through normalizeRow, so status compares lower-cased
+      if (String(row[k] ?? '') !== next && inLayout.has(id)) { changed++; plots.add(id); }
+      row[k] = next;
+    }
     row.plot_id = id;
-    state.rows.set(id, normalizeRow(row));   // status may have been overridden — re-lower-case it
-  }
+    state.rows.set(id, normalizeRow(row));
+  });
+  return { changed, plots: plots.size };
 }
-async function loadData() {
-  // A standalone bundle has no network to reach a live sheet with, and no server to fall
-  // back through either — go straight to the embedded plots.csv instead of a doomed fetch.
-  //
-  // Precedence, when a sheet is configured: committed plots.csv (the base — covers every
-  // plot, including any the sheet has no row for) < the live sheet (bulk, always current)
-  // < the admin's own edits. The last of those is the rule this exists to enforce: the
-  // sheet used to REPLACE state.rows wholesale, so anything edited in the admin was
-  // invisible to the client, and plots missing from the sheet lost their data entirely.
+// The same "sheet wins" rule, applied to plots.csv TEXT rather than to state.rows: what a phone
+// stores as its offline copy's plots.csv when it saves or updates (runOfflineSave), so the copy
+// shows the sheet as of that moment with no sheet access at all. Every plot the sheet lists takes
+// every column the sheet has, blanks included; columns only in plots.csv (media links) and plots
+// the sheet doesn't list are kept; plots only in the sheet are added. Only the phone's copy is
+// written — the server's plots.csv is never touched from here.
+function mergeSheetIntoCsv(csvText, sheetRows) {
+  const cols = ['plot_id'];
+  const addCol = (k) => { if (k && !cols.includes(k)) cols.push(k); };
+  const byId = new Map();
+  for (const r of csvText ? parseCSV(csvText) : []) {
+    Object.keys(r).forEach(addCol);
+    const id = legacyPlotId(r.plot_id);
+    if (id && !byId.has(id)) byId.set(id, { ...r, plot_id: id });   // first wins, as indexRows
+  }
+  sheetRows.forEach((srow, id) => {
+    const row = byId.get(id) || { plot_id: id };
+    for (const [k, v] of Object.entries(srow)) {
+      if (k === 'plot_id') continue;
+      addCol(k);
+      row[k] = v == null ? '' : String(v);
+    }
+    byId.set(id, row);
+  });
+  const q = (v) => { v = (v ?? '').toString(); return /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+  return cols.join(',') + '\n' + [...byId.values()].map((r) => cols.map((c) => q(r[c])).join(',')).join('\n') + '\n';
+}
+// Populate state.rows: the admin's data (`baseRows` — a restored working session — else the
+// committed plots.csv), then the live sheet on top when one is configured and reachable (see
+// applySheetRows). Returns a short label describing the source.
+async function loadData(baseRows = null) {
+  if (baseRows) state.rows = baseRows; else await loadCommittedCSV();
+  // A saved offline copy never reaches out: its plots.csv already carries the sheet as of the
+  // last save/update (mergeSheetIntoCsv), exactly like an exported standalone folder.
+  if (OFFLINE_COPY) { state.dataSource = 'saved'; return 'saved offline copy'; }
+  // A standalone bundle has no network to reach a live sheet with — it shows the plots.csv it
+  // was exported with, which every save writes with the sheet already applied (exportSite).
   if (!BUNDLE && state.sheet.enabled && state.sheet.url) {
     const snap = await fetchSheetRows();
-    if (snap) {
-      await loadCommittedCSV();
-      snap.forEach((row, id) => state.rows.set(id, row));
-      applyPlotOverrides();
-      state.dataSource = 'live'; return 'live sheet';
-    }
-    await loadCommittedCSV(); applyPlotOverrides(); state.dataSource = 'cached'; return 'cached · sheet unreachable';
+    if (snap) { applySheetRows(snap); state.dataSource = 'live'; return 'live sheet'; }
+    state.dataSource = 'cached'; return 'cached · sheet unreachable';
   }
-  await loadCommittedCSV(); applyPlotOverrides(); state.dataSource = 'file'; return `project “${state.projectId}”`;
+  state.dataSource = 'file'; return `project “${state.projectId}”`;
 }
 
 // ─── Geometry (polygons in image-pixel space) + anchor ────────────────────────
@@ -477,7 +575,7 @@ async function loadGeometry() {
   // nothing stopped it. Loading that as-is puts them back in collision, where the second wins the
   // state.plots entry and the first renders white, so the tags are (re)applied here on the way in.
   state.geom = dedupeGeomIds([...doc.querySelectorAll('polygon.plot')].map((poly) => ({
-    id: poly.id,
+    id: legacyPlotId(poly.id),
     pts: poly.getAttribute('points').trim().split(/\s+/).map((p) => { const [x, y] = p.split(',').map(Number); return { x, y }; }),
   })));
   recomputeAnchorAndK();
@@ -585,7 +683,7 @@ async function fetchBlobWithProgress(url, onBytes, { fresh = true } = {}) {
 }
 
 async function loadPanoTexture(src) {                    // src = URL string OR a Blob/File
-  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
+  const cap = textureCap();                               // 4096 on phones/tablets — see textureCap
   try {
     const blob = (src instanceof Blob) ? src : await (await (state.admin
       ? fetch(`${src}${src.includes('?') ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' })   // admin: always the file just saved
@@ -600,7 +698,7 @@ async function loadPanoTexture(src) {                    // src = URL string OR 
     return panoTextureFromSource(source);
   } catch {
     if (typeof src === 'string') {                        // fallback: let Three decode the URL (no downscale)
-      const t = await new THREE.TextureLoader().loadAsync(src);
+      const t = capTextureImage(await new THREE.TextureLoader().loadAsync(src));
       t.colorSpace = THREE.SRGBColorSpace; t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 16; t.needsUpdate = true; return t;
     }
     throw new Error('Could not decode panorama image');
@@ -704,6 +802,12 @@ function applyBrand() {
   const name = raw || BRAND_DEFAULT_NAME, tagline = (state.brand.tagline || '').trim() || BRAND_DEFAULT_TAGLINE;
   if (els.brandName) els.brandName.textContent = name;
   if (els.brandTagline) els.brandTagline.textContent = tagline;
+  // The name iOS gives the home-screen icon (it reads this over the manifest). With the stock
+  // "Build91" every project's icon had the same name, so a visitor following the "add to Home
+  // Screen first" guide couldn't tell which icon they had just added. Published demos also get
+  // it baked into index.html at publish time (publish_s3._index_bytes).
+  const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if (appleTitle && raw) appleTitle.setAttribute('content', raw);
   const src = brandLogoSrc();
   const fallbackMark = () => { els.brandMark.classList.remove('has-logo'); els.brandMark.textContent = raw ? brandInitials(raw) : BRAND_DEFAULT_MARK; };
   if (els.brandMark) {
@@ -875,23 +979,41 @@ async function testSheet() {
   if (!cands.length) { setSheetMsg('That doesn’t look like a Google Sheet link — paste the sheet’s share or “Publish to web” URL.', 'err'); return; }
   setSheetMsg('Testing…', ''); if (els.axSheetTest) els.axSheetTest.disabled = true;
   try {
-    let rows = null, err = 'the sheet is not public';
+    let rows = null, dupCols = [], err = 'the sheet is not public';
     for (const u of cands) {
       try {
         const res = await fetch(`${u}&_cb=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) { err = `HTTP ${res.status}`; continue; }
-        const parsed = parseCSV(await res.text());
+        const text = await res.text();
+        const parsed = parseCSV(text);
         if (!parsed.length) { err = 'the sheet looks empty'; continue; }
         if (!('plot_id' in parsed[0])) { err = 'no “plot_id” column — the header row must match plots.csv'; continue; }
-        rows = parsed; break;
+        rows = parsed; dupCols = csvDuplicateColumns(text); break;
       } catch (e) { err = 'the request was blocked (is the sheet public?)'; }
     }
     if (!rows) { setSheetMsg(`Couldn’t read the sheet — ${err}.`, 'err'); return; }
-    const ids = new Set(state.geom.map((g) => canonPlotId(g.id)));       // match with/without a "Plot-" prefix
-    const withId = rows.filter((r) => (r.plot_id || '').trim());
-    const matched = ids.size ? withId.filter((r) => ids.has(canonPlotId(r.plot_id))).length : 0;
-    const ok = !ids.size || matched > 0;
-    setSheetMsg(`✓ ${withId.length} row(s), plot_id column found${ids.size ? ` · ${matched}/${ids.size} match the layout` : ''}.`, ok ? 'ok' : 'err');
+    // Matching is exact (see indexRows), so say exactly what didn't match, both ways — a
+    // near-miss like "a01" vs "A01" or "Plot-5" vs "5" is otherwise invisible.
+    const layout = new Set(state.geom.map((g) => g.id));
+    const sheetIds = rows.map((r) => (r.plot_id || '').trim()).filter(Boolean);
+    const inSheet = new Set(sheetIds);
+    const matched = [...layout].filter((id) => inSheet.has(id)).length;
+    const noRow = [...layout].filter((id) => !inSheet.has(id)).map(plotNumber);
+    const notInLayout = [...inSheet].filter((id) => !layout.has(id));
+    const some = (arr) => arr.slice(0, 6).join(', ') + (arr.length > 6 ? ` … +${arr.length - 6} more` : '');
+    const repeated = sheetIds.length - inSheet.size;
+    const allMatch = (!layout.size || matched === layout.size) && !dupCols.length;
+    const parts = [`${allMatch ? '✓' : '⚠'} ${sheetIds.length} row(s)`];
+    // Two headers that read as the same column (e.g. a new "Notes" beside an old "notes"): only
+    // the right-most is used, which silently hid the new one — reported 2026-09-24.
+    dupCols.forEach(([key, names]) => parts.push(`${names.length} columns read as “${key}” (${names.join(', ')}) — only the right-most is used; delete or rename the others`));
+    if (layout.size) parts.push(`${matched}/${layout.size} layout plots match exactly`);
+    if (layout.size && noRow.length) parts.push(`no sheet row for: ${some(noRow)}`);
+    if (notInLayout.length) parts.push(`not in the layout: ${some(notInLayout)}`);
+    if (repeated) parts.push(`${repeated} repeated plot_id (the first row is used)`);
+    // The columns the sheet will set on each matched plot — every one wins over the admin's value.
+    parts.push(`columns read: ${Object.keys(rows[0]).filter((k) => k !== 'plot_id').join(', ')}`);
+    setSheetMsg(parts.join(' · ') + '.', allMatch ? 'ok' : 'err');
     onAlignmentChanged();
   } finally { if (els.axSheetTest) els.axSheetTest.disabled = false; }
 }
@@ -915,7 +1037,7 @@ function downloadSampleSheetCsv() {
   const prices = ['1800000', '2250000', '2800000', '3200000'];
   const blocks = ['A', 'A', 'B', 'B'];
   const notesEx = ['Corner plot', '', 'Near clubhouse', 'Park facing'];
-  const ids = state.geom.length ? state.geom.slice(0, 5).map((g) => g.id) : ['Plot-101', 'Plot-102', 'Plot-103'];
+  const ids = state.geom.length ? [...new Set(state.geom.map((g) => plotNumber(g.id)))].slice(0, 5) : ['A01', 'A02', 'A03'];
   const esc = (v) => { v = (v ?? '').toString(); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
   const rows = ids.map((id, i) => [
     id, statuses[i % statuses.length], facings[i % facings.length], sizes[i % sizes.length],
@@ -947,6 +1069,7 @@ async function initProjectBar() {
     els.projSettingsClose?.addEventListener('click', closeProjSettings);
     els.projMenuBtn.addEventListener('click', toggleProjMenu);
     els.projMenu.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => onProjAction(b.dataset.act)));
+    wirePublishModal();
     els.projNameOk.addEventListener('click', commitProjName);
     els.projNameInput.addEventListener('input', validateProjName);
     els.projNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') commitProjName(); if (e.key === 'Escape') closeProjName(); });
@@ -991,6 +1114,7 @@ let projAction = null;   // 'new' | 'saveas' | 'rename' | 'delete'
 function onProjAction(act) {
   els.projMenu.hidden = true; els.projMenuBtn.setAttribute('aria-expanded', 'false');
   if (act === 'bundle') { exportBundle(); return; }           // one-shot download — no name/confirm row
+  if (act === 'publish') { openPublishModal(); return; }      // its own dialog (password, progress, link)
   projAction = act;
   const titles = {
     new: ['Create a new empty project', 'new-project-id', ''],
@@ -1105,7 +1229,9 @@ async function loadGroundImage(src, opacity = 1, file = null) { // src = what to
   state.groundImage = src ? { file: persist, opacity } : null;
   if (!src) { requestRender(); return; }
   try {
-    const tex = await new THREE.TextureLoader().loadAsync(src);
+    // Capped like the pano (textureCap): a full-size site plan was the single biggest texture on
+    // a phone — eleganzav2's 7680×5223 alone is ~210 MB of GPU memory with mipmaps.
+    const tex = capTextureImage(await new THREE.TextureLoader().loadAsync(src));
     tex.colorSpace = THREE.SRGBColorSpace; tex.flipY = false;
     tex.anisotropy = 16;   // see the pano's identical line — default 1 blurs this drape badly
     buildGroundMesh(tex);
@@ -1199,6 +1325,11 @@ function initThree(texture) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(els.pano.clientWidth, els.pano.clientHeight);
   els.pano.appendChild(renderer.domElement);
+  // A phone can take the GPU context away (memory pressure, too many contexts, a long spell in
+  // the background). Three.js pauses rendering and rebuilds everything when the browser gives it
+  // back; the visitor just needs to know why the view went blank meanwhile.
+  renderer.domElement.addEventListener('webglcontextlost', () => showGpuLostNotice());
+  renderer.domElement.addEventListener('webglcontextrestored', () => { els.notice.hidden = true; requestRender(true); });
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(state.view.fov, els.pano.clientWidth / els.pano.clientHeight, 0.1, 1100);
   const pano = buildPanoSphere(texture); scene.add(pano);
@@ -1210,6 +1341,12 @@ function initThree(texture) {
   wireViewControls();
   wireViewportHeight();   // --app-h now tracks the real window, fullscreen included
   renderLoop();
+}
+function gpuContextLost() {
+  try { return !!three?.renderer?.getContext().isContextLost(); } catch { return false; }
+}
+function showGpuLostNotice() {
+  showNotice('This device ran short of graphics memory and paused the 3D view. It usually comes back by itself in a moment — if not, close other tabs or apps and reload the page.', { persist: true });
 }
 function disposeMeshGeoMat(o) { o.geometry?.dispose(); if (o.material) o.material.dispose(); }
 function rebuildPlots() {
@@ -1293,7 +1430,9 @@ function renderLoop() {
   // bump, because a pointer resting motionless on a plot stops firing events — the idle
   // timer would expire and the map would drift out from under whatever the visitor is
   // reading. Leaving the plot resumes the drift on the usual idle delay.
-  if (!steering && state.autoPan && !state.admin && !cameraAnimTimer && !state.hoverId && Date.now() - (state.lastUserTouch || 0) > 2200) {
+  // `!els.panel…open`: no idle drift while a plot's popup is open (2026-09-25) — see stopCameraMotion.
+  if (!steering && state.autoPan && !state.admin && !cameraAnimTimer && !state.hoverId && !els.panel.classList.contains('open')
+      && Date.now() - (state.lastUserTouch || 0) > 2200) {
     const range = state.landmarkPanRange;
     if (range) {
       // Re-express the current lon as the equivalent value nearest the range so the
@@ -1318,7 +1457,13 @@ function renderLoop() {
   updateCamera();
   updateCompass();
   updateTourMapCone();     // minimap view cone tracks the camera, same as the compass does
-  three.renderer.render(three.scene, three.camera);
+  // A lost GPU context makes the frame it happens in throw (WebKit: "shaderSource must be an
+  // instance of WebGLShader") before three.js has heard about the loss. The first frame runs
+  // inside initThree, so that throw used to abort the whole boot — no plot data, no landmarks,
+  // no tours, and a misleading "file://" notice. Now the frame is skipped and three.js recovers
+  // when the context comes back; any other error still surfaces.
+  try { three.renderer.render(three.scene, three.camera); }
+  catch (err) { if (!gpuContextLost()) throw err; }
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
   if (els.landmarks && !els.landmarks.hidden) renderLandmarks();  // keep banners/pins/lines glued to the scene
   if (els.amenities && !els.amenities.hidden) renderAmenities();  // keep amenity icon-pins glued to the scene
@@ -1599,6 +1744,7 @@ function wireViewControls() {
     els.catDrawer?.classList.toggle('is-collapsed');
     const collapsed = els.catDrawer?.classList.contains('is-collapsed');
     if (els.catToggleIco) els.catToggleIco.textContent = collapsed ? '›' : '‹';
+    if (!collapsed) checkForOfflineUpdate();   // the menu's "update available" dot is only looked for when the menu is open
   });
 
   // NOTE: `#catNavL1`'s and `#catNav`'s own `.cat-btn` rows are NOT wired here — both
@@ -2409,6 +2555,10 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 function ndcOf(e) { const r = els.pano.getBoundingClientRect(); return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
 function rayHit(e) {
   three.raycaster.setFromCamera(ndcOf(e), three.camera);
+  // EVERY plot is hittable while the plot map is up (m.parent.visible is false only during a tour
+  // takeover) — whether or not the filters show its colour overlay (2026-09-25, on request: "plots
+  // should show the tool tip and be clickable also without the filters"). three.js raycasting
+  // ignores `visible`, so a fill hidden by the filters is still hit.
   const hits = three.raycaster.intersectObjects(three.fillMeshes.filter((m) => m.parent.visible), false);
   return hits.length ? hits[0].object.userData.id : null;
 }
@@ -2420,11 +2570,16 @@ function rayToGround(e) {                               // pointer ray → point
   return t > 0 ? ray.direction.clone().multiplyScalar(t).add(ray.origin) : null;
 }
 function hover(e) {
-  // Plots outside the active area band are faded back (isAreaDimmed) — hovering one must not
-  // pop its number/info card or light it up, or the dimmed plots read as still selectable.
-  // Client only: the admin keeps hover so they can still inspect any plot while editing.
+  // Hover and click are separate (2026-09-25, on request). CLICK opens any plot, filters or not
+  // (pick → rayHit). The HOVER popup, on the client, shows only for plots the filters are
+  // colouring — none while every filter is off — because popping up under the cursor on every
+  // plot got in the way of simply looking around the layout. A plot that isn't hovered also
+  // doesn't brighten or hold the idle drift. The admin still hovers every plot while editing.
   let id = rayHit(e);
-  if (id && !state.admin && isAreaDimmed(id)) id = null;
+  if (id && !state.admin) {
+    const p = state.plots.get(id);
+    if (!p || !filtersShowPlot(id, p.status || 'unknown')) id = null;
+  }
   if (id !== state.hoverId) { clearHover(); state.hoverId = id; if (id) setEmphasis(id, true); requestRender(); }
   if (id) showTooltip(id, e); else hideTooltip();
 }
@@ -2467,8 +2622,15 @@ function pick(e) {
   const lmb = hitEl?.closest?.('.lm-banner.has-render');
   if (lmb && !(state.admin && state.adminTab === 'landmarks')) { for (const [lid, d] of lmDom) if (d.banner === lmb) { openLmCard(lid, { hover: false }); return; } }
   const id = rayHit(e);
-  if (id) openPanel(id);
+  if (id) { stopCameraMotion(); openPanel(id); }
   else { if (els.panel.classList.contains('open')) closePanel(); if (els.amCard?.classList.contains('open')) closeAmCard(); }
+}
+// Clicking a plot stops the camera where it is (2026-09-25, on request): a flick still coasting or
+// a fly-in still running kept moving the view under the popup, which then slid off its plot. The
+// idle auto-pan stays off for as long as the popup is open (renderLoop); dragging still works.
+function stopCameraMotion() {
+  state.viewVel.lon = 0; state.viewVel.lat = 0;
+  if (cameraAnimTimer) { clearInterval(cameraAnimTimer); cameraAnimTimer = null; }
 }
 function setEmphasis(id, on) {
   const p = state.plots.get(id); if (!p || id === state.selectedId) return;
@@ -2560,21 +2722,33 @@ function colorPlots() {
   // band; anything else carries no overlay at all, leaving the site plan's own artwork showing
   // through. The earlier attempts at this — fading the others back, then giving them their plain
   // status colour — both still answered "available" on plots of the wrong size, which is the
-  // opposite of what the band was picked to ask. Hiding the group also takes them out of
-  // hit-testing (pick() filters on `m.parent.visible`), so they can't be hovered or opened either,
-  // which is consistent with the tooltip rule already in place for out-of-band plots.
+  // opposite of what the band was picked to ask. The filters only decide what is COLOURED: every
+  // plot can still be hovered and clicked (rayHit, 2026-09-25), and the clicked one is shown with
+  // its selection outline (applySelectStyle).
+  // Only the FILL and OUTLINE follow the filters — not the whole group — so the plot number
+  // (the group's label sprite) shows or hides by the # toggle alone (2026-09-25, on request:
+  // "plot numbers are independent"). Before, a filtered-out plot lost its number too.
   const band = activeAreaFilter();
   state.plots.forEach((p, id) => {
     const row = state.rows.get(id), status = STATUS_META[row?.status] ? row.status : 'unknown';
     p.status = status;
-    p.group.visible = state.activeFilters.has(status) && (!band || plotMatchesAreaFilter(row, band));
+    const shown = filtersShowPlot(id, status, band);
+    p.fill.visible = shown; p.line.visible = shown;          // the selected plot is re-shown by applySelectStyle
     if (id === state.selectedId) applySelectStyle(p, status);
     else paintPlot(p, id, status);
   });
 }
+// Do the status + size filters show this plot's colour overlay?
+function filtersShowPlot(id, status, band = activeAreaFilter()) {
+  return statusShown(status) && (!band || plotMatchesAreaFilter(state.rows.get(id), band));
+}
 // Selection keeps the plot's STATUS colour (so availability stays readable) and
 // just marks itself with a brighter fill + gold outline — never recolours the fill.
+// The selected plot is shown even when the filters hide its overlay (2026-09-25): every plot can
+// be clicked now, and the popup should point at a visibly marked plot. restorePlotStyle puts the
+// filters' visibility back when it's deselected.
 function applySelectStyle(p, status) {
+  p.fill.visible = true; p.line.visible = true;
   const c = STATUS_META[STATUS_META[status] ? status : 'unknown'].color;
   p.fill.material.color.setHex(c);
   p.fill.material.opacity = Math.min(1, Math.max(0.7, state.overlayOpacity + 0.3));
@@ -2743,6 +2917,14 @@ function openAreaMenu(sel) {
     e.stopPropagation();
   });
   m.addEventListener('pointerdown', (e) => e.stopPropagation());   // never let the pano behind steal it
+  // Filtering by status/size on a saved offline copy works on availability as of its last update.
+  const asOf = OFFLINE_COPY ? offlineAsOf() : '';
+  if (asOf) {
+    const foot = document.createElement('div');
+    foot.className = 'area-menu-asof';
+    foot.textContent = `Availability as of ${asOf}`;
+    m.appendChild(foot);
+  }
   document.body.appendChild(m);
   // Under the pill, left-aligned, at least as wide as it; kept on screen, flipped above if needed.
   const r = trigger.getBoundingClientRect();
@@ -2903,9 +3085,15 @@ function syncZoomStatusButtons(counts) {
     btn.setAttribute('aria-pressed', String(state.activeFilters.has(s)));
   }
 }
+// Each status pill is an independent on/off toggle for that status's plot overlay: tapping
+// Available turns ONLY Available on or off, never touching the others, and with all of them off
+// no overlay is shown at all (2026-09-25, on request — the first attempt that morning made the
+// pills a "show only these" group, which read as the pills swapping state). Nothing resets them
+// any more: the old toggle turned every status back on once the last one was switched off.
+// Plot numbers are NOT part of this — they follow the # toggle alone (see colorPlots).
+const statusShown = (status) => state.activeFilters.has(status);
 function toggleFilter(status) {
   state.activeFilters.has(status) ? state.activeFilters.delete(status) : state.activeFilters.add(status);
-  if (state.activeFilters.size === 0) STATUS_ORDER.forEach((s) => state.activeFilters.add(s));
   els.legend.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(state.activeFilters.has(c.dataset.status))));
   syncZoomStatusButtons();
   colorPlots(); requestRender();
@@ -2964,6 +3152,11 @@ function openPanel(id, keepScroll = false) {
     rest.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(val(v))}</dd></div>`).join('');
   els.panelGrid.hidden = !price && rest.length === 0;
   const notes = val(row.notes); els.panelNotes.textContent = notes; els.panelNotes.hidden = !notes;
+  // A saved offline copy shows availability as of its last save/update, never live — say when.
+  const asOf = OFFLINE_COPY ? offlineAsOf() : '';
+  let asOfEl = els.panel.querySelector('.panel-asof');
+  if (asOf && !asOfEl) { asOfEl = document.createElement('p'); asOfEl.className = 'panel-asof'; els.panelNotes.after(asOfEl); }
+  if (asOfEl) { asOfEl.textContent = asOf ? `Availability as of ${asOf}` : ''; asOfEl.hidden = !asOf; }
   const mediaList = getPlotMediaList(row);
   let ctaWrap = els.panel.querySelector('.panel-cta-wrap');
   if (!ctaWrap) {
@@ -2997,7 +3190,7 @@ function openPanel(id, keepScroll = false) {
       adminBtn.innerHTML = '<span>✏️ Edit Media & Plot Data</span><span style="font-size:10px; opacity:0.8;">(Admin) →</span>';
       adminBtn.onclick = async () => {
         await openTrace();
-        const foundIdx = trace.plots.findIndex(p => canonPlotId(p.id) === canonPlotId(id));
+        const foundIdx = trace.plots.findIndex(p => p.id === id);
         if (foundIdx >= 0) {
           trace.sel = foundIdx;
           refreshTraceList();
@@ -3045,6 +3238,8 @@ function placePanel() {
 function restorePlotStyle(id) {
   const p = state.plots.get(id); if (!p) return;
   paintPlot(p, id, p.status || 'unknown');
+  const shown = filtersShowPlot(id, p.status || 'unknown');   // back to what the filters say (it may have been shown only because it was selected)
+  p.fill.visible = shown; p.line.visible = shown;
 }
 function closePanel() {
   els.panel.classList.remove('open'); els.panel.setAttribute('aria-hidden', 'true');
@@ -3534,22 +3729,10 @@ function parseAlignment(d) {
   const data = { enabled: !!(dc && dc.source === 'sheet'), url: (sh && sh.url || '').toString(), gid: (sh && sh.gid != null ? String(sh.gid) : '') };
   const menuConfig = d && d.menuConfig ? d.menuConfig : null;
   const area = parseAreaConfig(d && d.area);
-  // Admin edits that outrank the live sheet. Whitelisted per field so a hand-edited or
-  // round-tripped file can't inject arbitrary keys into a plot row.
-  const plotOverrides = {};
-  const po = d && d.plotOverrides;
-  if (po && typeof po === 'object') {
-    for (const [id, fields] of Object.entries(po)) {
-      if (!id || !fields || typeof fields !== 'object') continue;
-      const clean = {};
-      // An empty string is KEPT (2026-09-23): computePlotOverrides now writes one to mean "the
-      // admin deliberately cleared this field", and dropping it here on the way back in would
-      // quietly restore the sheet's value on the next load — the very bug this fixes.
-      OVERRIDE_FIELDS.forEach((k) => { if (fields[k] != null) clean[k] = String(fields[k]); });
-      if (Object.keys(clean).length) plotOverrides[id] = clean;
-    }
-  }
-  return { transform, view, opacity, groundImage, panoImage, brand, audio, bootImage, northDeg, data, menuConfig, area, plotOverrides, savedAt };
+  // A `plotOverrides` block (2026-09-18 → 09-24, "admin edits outrank the sheet") is no longer
+  // read: the sheet wins now, and every save wrote the same values into plots.csv anyway, so
+  // nothing is lost. The key simply drops out of alignment.json on the next save.
+  return { transform, view, opacity, groundImage, panoImage, brand, audio, bootImage, northDeg, data, menuConfig, area, savedAt };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
   try { const res = await loadProjectFile('alignment.json'); if (!res || !res.ok) return null; return parseAlignment(await res.json()); }
@@ -3580,7 +3763,6 @@ function alignmentData() {
     ...(state.northDeg ? { northDeg: +(+state.northDeg).toFixed(2) } : {}),
     ...(sheetData() ? { data: sheetData() } : {}),
     ...(areaData() ? { area: areaData() } : {}),
-    ...(Object.keys(state.plotOverrides || {}).length ? { plotOverrides: state.plotOverrides } : {}),
     ...(menuConfigData() ? { menuConfig: menuConfigData() } : {}) };
 }
 // Serialise the plot-data source (only when a sheet URL has been configured).
@@ -3700,10 +3882,10 @@ function applySessionGeometry(sess) {
   if (sess.imgW) state.imgW = sess.imgW;
   if (sess.imgH) state.imgH = sess.imgH;
   if (Array.isArray(sess.geom) && sess.geom.length) {
-    state.geom = dedupeGeomIds(sess.geom.map((g) => ({ id: g.id, pts: g.pts.map((p) => ({ x: +p.x, y: +p.y })) })));
+    state.geom = dedupeGeomIds(sess.geom.map((g) => ({ id: legacyPlotId(g.id), pts: g.pts.map((p) => ({ x: +p.x, y: +p.y })) })));
     recomputeAnchorAndK();
   }
-  if (Array.isArray(sess.rows)) state.rows = new Map(sess.rows.map((r) => [r.plot_id, r]));
+  if (Array.isArray(sess.rows)) state.rows = indexSavedRows(sess.rows);
 }
 
 const clampScale = (v) => Math.max(0.05, Math.min(3, Math.round((+v || 0) * 1000) / 1000));
@@ -3745,7 +3927,8 @@ function buildPlotsSVG() {
   const body = state.geom.map((g) => {
     const pts = g.pts.map((p) => `${r1(p.x)},${r1(p.y)}`).join(' ');
     const c = g.pts.reduce((m, p) => ({ x: m.x + p.x / g.pts.length, y: m.y + p.y / g.pts.length }), { x: 0, y: 0 });
-    return `    <g class="plot-group">\n      <polygon id="${g.id}" class="plot" points="${pts}" />\n      <text class="plot-label" x="${r1(c.x)}" y="${r1(c.y)}">${plotNumber(g.id)}</text>\n    </g>`;
+    // Escaped: a plot number is free text now (a prefix like "A&B" must not break the SVG).
+    return `    <g class="plot-group">\n      <polygon id="${esc(g.id)}" class="plot" points="${pts}" />\n      <text class="plot-label" x="${r1(c.x)}" y="${r1(c.y)}">${esc(plotNumber(g.id))}</text>\n    </g>`;
   }).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.round(state.imgW)} ${Math.round(state.imgH)}" class="plot-overlay" preserveAspectRatio="xMidYMid meet">\n  <!-- Exported by the Build91 admin trace tool. -->\n  <g class="plots">\n${body}\n  </g>\n</svg>\n`;
 }
@@ -3954,19 +4137,17 @@ async function exportSite() {
   const planBlob = trace.planBlob || state.planBlob || (trace.objURL ? await (await fetch(trace.objURL)).blob() : null);
   const planName = trace.srcName || state.planName || 'plan.web.png';
   const panoBlob = state.panoBlob, panoName = state.panoName || baseName(state.panoImage?.file || '');
-  // plots.csv is always written from state.rows — the admin's working data, which already
-  // merges sheet + their own edits (see loadData). It used to be REBUILT FROM A FRESH SHEET
-  // SNAPSHOT here whenever a sheet was configured, which silently discarded every admin edit
-  // at the moment of saving: change a plot's size, hit Save, and the sheet's value was
-  // written instead. Fixed 2026-09-18 on report ("admin changes should be considered truth").
-  //
-  // The sheet is still re-fetched, but only to work out WHICH fields the admin has changed
-  // away from it; those are recorded as overrides in alignment.json and re-applied over the
-  // sheet on every load, so an edit survives later sheet updates instead of being a
-  // one-time snapshot.
+  // The Google Sheet wins (applySheetRows): re-read it now and apply it before plots.csv is
+  // written, so the saved file is what the client will show — and it's also the snapshot a
+  // standalone bundle (which never reaches the sheet) is built from. An admin edit to a column
+  // the sheet carries for that plot is replaced here, and the admin is told so after the save.
+  let sheetReplaced = null;
   if (hasGeom && state.sheet.enabled && state.sheet.url) {
     const snap = await fetchSheetRows().catch(() => null);
-    if (snap && snap.size) state.plotOverrides = computePlotOverrides(snap);
+    if (snap) {
+      sheetReplaced = applySheetRows(snap);
+      if (sheetReplaced.changed) { applyData(); renderAreaFilterUI(); }
+    }
   }
   const plotsCsv = hasGeom ? buildPlotsCSV() : '';
   const files = [
@@ -3993,6 +4174,10 @@ async function exportSite() {
   }
   const ok = await saveToProject(files, tagFiles(files));
   if (ok) saveSession(true);
+  if (sheetReplaced && sheetReplaced.changed) {
+    const n = sheetReplaced.changed, m = sheetReplaced.plots;
+    showNotice(`The Google Sheet replaced ${n} value${n === 1 ? '' : 's'} on ${m} plot${m === 1 ? '' : 's'} before saving — for plots the sheet lists, its values win. Make those changes in the sheet instead.`);
+  }
   return ok;
 }
 // header "💾 Save" — write ALL project files to the current project dir, with inline feedback
@@ -4103,6 +4288,231 @@ function showExportFlaggedModal(flagged) {
     openCustomModal(modal);
   });
 }
+
+// ─── ☁ Publish to web (admin ⋯ menu) ─────────────────────────────────────────
+// Puts this project's CLIENT view online at its own fixed link (re.build91.in/<id>/) for a
+// client demo. It SAVES FIRST — what gets published is what is on disk, so without this an
+// unsaved edit would silently be missing from the demo — then server.py uploads it in the
+// background (publish_s3.py) and this polls the job's progress. The AWS login never reaches
+// the browser; the admin proves they may publish with the password kept in the server's
+// publish.config.json. The password is held in memory for this page only, never stored.
+let publishPassword = '';
+let publishInfo = null;      // last /api/publish/status answer
+let publishBusy = false;     // a save/publish/unpublish is in flight — one at a time
+let publishWatch = 0;        // bumped per watchPublishJob, so a stale poll can't act
+let unpublishArmTimer = null;
+
+function openPublishModal() {
+  if (!els.publishModal) return;
+  els.publishSub.textContent = `“${BOOT_PROJECT}” as a view-only demo link to share with your client`;
+  els.publishPass.value = publishPassword;
+  setPublishError('');
+  els.publishProgress.hidden = true;
+  disarmUnpublish();
+  openCustomModal(els.publishModal);
+  refreshPublishStatus();
+}
+
+async function refreshPublishStatus() {
+  if (!publishBusy) els.publishStatus.textContent = 'Checking…';
+  let s;
+  try {
+    const r = await fetch(`/api/publish/status?project=${encodeURIComponent(BOOT_PROJECT)}`);
+    s = await r.json();
+    if (!r.ok) throw new Error(s.error || `HTTP ${r.status}`);
+  } catch (e) {
+    s = { configured: false, message: 'Publishing needs the save server — run python server.py 8731 and reload.' };
+  }
+  publishInfo = s;
+  renderPublishStatus();
+  if (s.job && s.job.running && s.job.kind === 'publish') watchPublishJob();   // reopened mid-publish: follow it again
+}
+
+function renderPublishStatus() {
+  const s = publishInfo || {};
+  const link = s.live ? s.url : (s.fallbackUrl || s.url);
+  if (!s.configured) {
+    els.publishStatus.textContent = s.message || 'Publishing isn’t set up on this server.';
+  } else if (s.error) {
+    els.publishStatus.textContent = `Couldn’t check what’s online: ${s.error}`;
+  } else if (s.published) {
+    const when = s.publishedAt ? new Date(s.publishedAt).toLocaleString() : '';
+    els.publishStatus.innerHTML = `<span class="publish-dot is-live"></span> Online${when ? ` — last published ${esc(when)}` : ''}`;
+  } else {
+    els.publishStatus.innerHTML = '<span class="publish-dot"></span> Not published yet';
+  }
+  els.publishStatus.classList.toggle('is-bad', !s.configured || !!s.error);
+  const showLink = !!(s.configured && s.published && link);
+  els.publishLinkRow.hidden = !showLink;
+  if (showLink) { els.publishLink.value = link; els.publishOpenBtn.href = link; }
+  // Until the custom domain's DNS record exists, the permanent link doesn't open yet — hand
+  // out the CloudFront address (serves the exact same files) and say when the real one works.
+  const note = showLink && !s.live && s.fallbackUrl
+    ? `The permanent link <strong>${esc(s.url)}</strong> starts working once its DNS record is added — until then share the link above; it shows the same demo.`
+    : '';
+  els.publishNote.innerHTML = note;
+  els.publishNote.hidden = !note;
+  els.publishPassRow.hidden = !s.configured;
+  setPublishButtons();
+}
+
+function setPublishButtons() {
+  const s = publishInfo || {};
+  els.publishGoBtn.disabled = publishBusy || !s.configured;
+  els.publishGoBtn.textContent = publishBusy ? 'Working…' : (s.published ? 'Publish update' : 'Publish');
+  els.publishUnpublishBtn.hidden = !(s.configured && s.published);
+  els.publishUnpublishBtn.disabled = publishBusy;
+}
+
+function setPublishError(msg) {
+  els.publishError.textContent = msg || '';
+  els.publishError.hidden = !msg;
+}
+
+function showPublishProgress(text, frac) {
+  els.publishProgress.hidden = false;
+  els.publishProgressText.textContent = text;
+  els.publishProgressFill.style.width = `${Math.round(Math.max(0, Math.min(1, frac || 0)) * 100)}%`;
+}
+
+function publishPhaseText(job) {
+  switch (job.phase) {
+    case 'preparing': return 'Preparing files…';
+    case 'checking': return 'Comparing with what’s already online…';
+    case 'uploading': return `Uploading ${job.filesDone} of ${job.filesTotal} files`
+      + (job.bytesTotal ? ` · ${formatBytes(job.bytesDone) || '0 KB'} of ${formatBytes(job.bytesTotal)}` : '')
+      + (job.unchanged ? ` · ${job.unchanged} unchanged` : '');
+    case 'cleaning': return 'Removing files the demo no longer uses…';
+    case 'invalidating': return 'Refreshing the link…';
+    default: return 'Starting…';
+  }
+}
+
+function readPublishPassword() {
+  publishPassword = els.publishPass.value;
+  if (publishPassword) return true;
+  setPublishError('Enter the publish password.');
+  els.publishPass.focus();
+  return false;
+}
+
+async function postPublish(route, extra = {}) {
+  const r = await fetch(route, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project: BOOT_PROJECT, password: publishPassword, ...extra }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) publishPassword = '';
+  return { r, j };
+}
+
+async function publishNow() {
+  if (publishBusy || !readPublishPassword()) return;
+  disarmUnpublish();
+  publishBusy = true; setPublishButtons(); setPublishError('');
+  showPublishProgress('Checking the password…', 0);
+  try {
+    // Password first, so a typo doesn't save the project on the way to being refused.
+    const chk = await postPublish('/api/publish', { check: true });
+    if (!chk.r.ok) throw new Error(chk.j.error || `Publish failed (HTTP ${chk.r.status}).`);
+    showPublishProgress('Saving the project first…', 0);
+    if (!await exportSite()) {
+      throw new Error('The project couldn’t be saved to the server, so there’s nothing up to date to publish. Check the save message in the sidebar and try again.');
+    }
+    showPublishProgress('Starting the upload…', 0);
+    const { r, j } = await postPublish('/api/publish');
+    if (!r.ok && r.status !== 409) throw new Error(j.error || `Publish failed (HTTP ${r.status}).`);   // 409 = already running: just follow it
+    watchPublishJob();
+  } catch (e) {
+    publishBusy = false; setPublishButtons();
+    els.publishProgress.hidden = true;
+    setPublishError(e.message || String(e));
+  }
+}
+
+function watchPublishJob() {
+  const token = ++publishWatch;
+  publishBusy = true; setPublishButtons();
+  const tick = async () => {
+    if (token !== publishWatch) return;
+    let job = null;
+    try {
+      const r = await fetch(`/api/publish/progress?project=${encodeURIComponent(BOOT_PROJECT)}`);
+      job = (await r.json()).job;
+    } catch { setTimeout(tick, 1500); return; }   // a blip talking to our own server — keep following
+    if (token !== publishWatch) return;
+    if (job && job.running) {
+      showPublishProgress(publishPhaseText(job), job.phase === 'uploading' && job.bytesTotal ? job.bytesDone / job.bytesTotal : 0);
+      setTimeout(tick, 700);
+      return;
+    }
+    publishBusy = false;
+    if (job && job.error) {
+      els.publishProgress.hidden = true;
+      setPublishError(job.error);
+    } else if (job && job.result) {
+      const res = job.result;
+      const parts = [`${res.uploaded} file${res.uploaded === 1 ? '' : 's'} uploaded${res.bytes ? ` (${formatBytes(res.bytes)})` : ''}`];
+      if (res.unchanged) parts.push(`${res.unchanged} unchanged`);
+      if (res.removed) parts.push(`${res.removed} removed`);
+      // Only files the project actually uses are published (publish_s3._project_files) — say
+      // so, so a file dropped in the folder but never linked isn't a silent surprise.
+      const notUsed = res.notUsed ? ` ${res.notUsed} file${res.notUsed === 1 ? '' : 's'} in the project folder ${res.notUsed === 1 ? 'isn’t' : 'aren’t'} used by the project and ${res.notUsed === 1 ? 'was' : 'were'} left out.` : '';
+      showPublishProgress(`Published ✓ — ${parts.join(', ')}.${notUsed}${(res.warnings || []).map((w) => ` ⚠ ${w}`).join('')}`, 1);
+    }
+    refreshPublishStatus();
+  };
+  tick();
+}
+
+// Unpublish takes a live client link down, so it asks twice: the first click arms it.
+function disarmUnpublish() {
+  clearTimeout(unpublishArmTimer); unpublishArmTimer = null;
+  if (els.publishUnpublishBtn) els.publishUnpublishBtn.textContent = 'Unpublish';
+}
+async function unpublishNow() {
+  if (publishBusy) return;
+  if (!unpublishArmTimer) {
+    els.publishUnpublishBtn.textContent = 'Click again to take it offline';
+    unpublishArmTimer = setTimeout(disarmUnpublish, 4000);
+    return;
+  }
+  disarmUnpublish();
+  if (!readPublishPassword()) return;
+  publishBusy = true; setPublishButtons(); setPublishError('');
+  showPublishProgress('Taking the demo offline…', 0);
+  try {
+    const { r, j } = await postPublish('/api/unpublish');
+    if (!r.ok) throw new Error(j.error || `Unpublish failed (HTTP ${r.status}).`);
+    showPublishProgress('Unpublished — the link now shows “This demo isn’t available”.', 1);
+  } catch (e) {
+    els.publishProgress.hidden = true;
+    setPublishError(e.message || String(e));
+  }
+  publishBusy = false;
+  refreshPublishStatus();
+}
+
+async function copyPublishLink() {
+  const link = els.publishLink.value;
+  if (!link) return;
+  let ok = false;
+  try { await navigator.clipboard.writeText(link); ok = true; } catch {
+    try { els.publishLink.select(); ok = document.execCommand('copy'); } catch {}
+  }
+  els.publishCopyBtn.textContent = ok ? 'Copied ✓' : 'Select & copy';
+  setTimeout(() => { els.publishCopyBtn.textContent = 'Copy'; }, 1600);
+}
+
+function wirePublishModal() {
+  if (!els.publishModal) return;
+  els.publishGoBtn.addEventListener('click', publishNow);
+  els.publishUnpublishBtn.addEventListener('click', unpublishNow);
+  els.publishCopyBtn.addEventListener('click', copyPublishLink);
+  els.publishLink.addEventListener('focus', () => els.publishLink.select());
+  els.publishPass.addEventListener('keydown', (e) => { if (e.key === 'Enter') publishNow(); });
+}
+
 function wireAdmin() {
   if (!state.admin) return;
   document.body.classList.add('is-admin'); els.adminBar.hidden = false;
@@ -4271,6 +4681,7 @@ const trace = {
   objURL: null, planBlob: null, srcName: '', view: { zoom: 1, ox: 0, oy: 0 }, fit: 1,
   mode: 'auto', plots: [], draft: null, sel: -1, drag: null, down: null,
   thresh: 36, simplify: 3, snap: true, dxf: null,
+  prefix: '',   // auto-numbering prefix (see nextPlotId) — this page only, never saved
 };
 const hexColor = (n) => '#' + (n >>> 0).toString(16).padStart(6, '0').slice(-6);
 const traceCtx = () => els.traceCanvas.getContext('2d');
@@ -4367,95 +4778,72 @@ function drawDraft(g, pts) {
 }
 
 // — capture / edit —
-// Lowest unused "Plot-Ann" number, computed fresh from what's actually in trace.plots
-// right now rather than a monotonic counter — reported 2026-09-17: deleting A102 and
-// capturing a new plot continued from A103 instead of reusing the now-free A102, because
-// a counter only ever goes up. Scanning the live list instead means a deleted number is
-// immediately available again, and duplicates are impossible by construction (a number
-// is only "next" if nothing currently holds it).
+// Auto-numbering (2026-09-24): the admin's optional PREFIX joined to the lowest number from 1
+// that no plot holds yet — no prefix gives 1, 2, 3 …; "A0" gives A01, A02 … A09, A010 (joined
+// exactly as typed, so use "A" to get A10). Changing the prefix therefore restarts at 1 for the
+// new prefix ("B0" → B01, B02 …); the Reset button does the same on demand. Lowest-free rather
+// than a running counter, so a deleted number is reused (2026-09-17 request) and a number can
+// never be issued twice. The prefix is a drawing aid only — never saved; what is saved is each
+// plot's full number, which is also what must match the sheet's plot_id.
 function nextPlotId() {
-  const used = new Set();
-  trace.plots.forEach((p) => { const m = /A(\d+)\b/i.exec(p.id); if (m) used.add(+m[1]); });
-  let n = 101;
-  while (used.has(n)) n++;
-  return `Plot-A${n}`;
+  const used = new Set(trace.plots.map((p) => plotNumber(p.id)));
+  let n = 1;
+  while (used.has(trace.prefix + n)) n++;
+  return trace.prefix + n;
+}
+// Take the prefix field's value as the numbering prefix (on change/Enter, and on Reset). An
+// invalid one (see plotNumberProblem) is refused and the field reverts.
+function applyTracePrefix() {
+  const v = els.tracePrefix.value.trim();
+  const problem = v ? plotNumberProblem(v).replace('A plot number', 'The prefix') : '';
+  if (problem) { els.tracePrefix.value = trace.prefix; setTraceHint(problem, true); return; }
+  trace.prefix = v;
+  els.tracePrefix.value = v;
+  updateTraceNextNumber();
+  setTraceHint(`Numbering restarts at ${nextPlotId()} — new plots continue from there.`);
+}
+function updateTraceNextNumber() { if (els.traceNextNum) els.traceNextNum.textContent = nextPlotId(); }
+// After a rename or delete, give each number's FIRST holder the untagged id again (and later
+// holders #2, #3 …), so a repeat that became unique matches its sheet row. The plot's own data
+// travels with the plot object, so re-tagging can't move data between plots.
+function retagTracePlots() {
+  const out = [];
+  trace.plots.forEach((p) => {
+    const id = uniquePlotId(plotNumber(p.id), out);
+    if (id !== p.id) { p.id = id; applySheetToTracePlot(p); }
+    out.push(p);
+  });
 }
 function snapTarget(p, exclude) {
   if (!trace.snap) return null; const rad = 10 / trace.view.zoom, r2 = rad * rad; let best = null, bd = r2;
   trace.plots.forEach((pl, pi) => pl.pts.forEach((v, vi) => { if (exclude && exclude.plot === pi && exclude.vert === vi) return; const dx = v.x - p.x, dy = v.y - p.y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = { x: v.x, y: v.y }; } }));
   return best;
 }
-// Auto-fill a traced plot's business fields from an already-loaded Google Sheet row —
-// on request 2026-09-17 ("when i draw plots... is it possible [to pull from the sheet]").
-// Deliberately excludes video_url/image_url/media_json — those are multi-media fields
-// meant to be authored via the trace editor's own upload/link picker, not typed into a
-// spreadsheet (same call made for the sample-sheet download button).
-const SHEET_AUTOFILL_FIELDS = ['size', 'price', 'facing', 'dimensions', 'block', 'tour_url', 'notes'];
-// Freshest sheet fetch, taken right when Import & Trace opens (see openTrace) — kept
-// SEPARATE from `state.rows` on purpose. `state.rows` is the authoritative plot data
-// (committed CSV or whatever loadData() last resolved) and merging a plain sheet fetch
-// into it would risk silently wiping a field a row happens not to carry. Read-only,
-// lookup-only cache; null whenever no sheet is configured.
+// Freshest sheet fetch, taken when Import & Trace opens (see openTrace): Map(plot_id → row),
+// or null when no sheet is configured or it can't be reached.
 let traceSheetRows = null;
-// `state.rows`'/`traceSheetRows`' own keys are whatever indexRows() settled on when
-// fetched — the polygon's id for anything that already existed in the layout at that
-// moment, otherwise the sheet's raw (uncanonicalized) plot_id. A plot drawn/renamed AFTER
-// that fetch was never part of that join, so an exact `.get(id)` can miss a row that's
-// really there under a slightly different-looking key ("A102" vs "Plot-A102" vs
-// "plot_102"). Try the fast exact match first (both maps), then fall back to a canonical
-// scan (same tolerant matching indexRows/canonPlotId use everywhere else) so a rename
-// during THIS session still finds it.
-function findSheetRowForId(id) {
-  const k = canonPlotId(id);
-  if (!k) return null;
-  for (const rows of [traceSheetRows, state.rows]) {
-    if (!rows) continue;
-    const direct = rows.get(id);
-    if (direct) return direct;
-    for (const row of rows.values()) { if (canonPlotId(row.plot_id) === k) return row; }
-  }
-  return null;
-}
-// Fills only fields the plot doesn't already have a value for — never overwrites
-// something the admin already typed — and remembers which fields came from the sheet
-// (`p._sheetFilled`) so refreshTraceList can show a small "✓ Sheet" hint next to them.
-// Returns true if anything actually changed, so callers know whether to re-render.
-//
-// `status` needs its OWN rule, separate from the plain text fields above — it's a
-// dropdown that always has SOME value (defaults to 'available'), so "only fill if
-// empty" can never fire for it the way it does for a blank price/facing input. Reported
-// 2026-09-17: "the available/sold/reserved is not getting fetched... make sure the
-// status is fetched exactly in plots as well." Fixed by tracking whether the admin has
-// ever actually touched the status dropdown themselves (`p._statusTouched`, set by its
-// own change handler in refreshTraceList) — as long as they haven't, the sheet's status
-// is free to keep overwriting the untouched default every time a match is (re)found
-// (first capture, then again on rename once the real id matches); the moment they pick a
-// status by hand, this stops touching it for that plot, same "never fight a manual edit"
-// rule as every other field.
-function autofillPlotFromSheet(p) {
-  if (!p || !p.id) return false;
-  const row = findSheetRowForId(p.id);
-  if (!row) return false;
-  if (!p._sheetFilled) p._sheetFilled = new Set();
+// The sheet wins in the editor too (see applySheetRows): the moment a plot carries a number the
+// sheet lists — drawn, renamed or loaded — every column the sheet has for it is copied onto the
+// plot, blanks included. `p._sheetCols` records which fields the sheet controls, so the editor
+// can badge them, and `p._sheetEdited` which of those the admin has since typed over (the badge
+// then warns that the save will put the sheet's value back). Returns whether anything changed.
+function applySheetToTracePlot(p) {
+  const srow = traceSheetRows ? traceSheetRows.get(p.id) : null;
+  p._sheetCols = srow ? new Set(Object.keys(srow).filter((k) => k !== 'plot_id')) : null;
+  p._sheetEdited = new Set();
+  if (!srow) return false;
   let changed = false;
-  SHEET_AUTOFILL_FIELDS.forEach((key) => {
-    // "Only fill if empty" would fight a DELIBERATE clear (state.clearedPlotFields, armed by the
-    // editor and by applyPlotOverrides for every saved ""): the admin empties a note, saves, and
-    // on the next open the sheet's value is quietly put back — so the clear appears not to have
-    // worked, and the following save would record the sheet's value as if it had been typed.
-    if (state.clearedPlotFields.has(`${p.id}|${key}`)) return;
-    if (!p[key] && row[key]) { p[key] = row[key]; p._sheetFilled.add(key); changed = true; }
+  p._sheetCols.forEach((k) => {
+    let v = srow[k] == null ? '' : String(srow[k]);
+    if (k === 'status' && !STATUS_META[v]) v = 'unknown';   // blank / unrecognised → shown as Unknown, exactly as the client colours it
+    if ((p[k] ?? '') !== v) { p[k] = v; changed = true; }
   });
-  if (!p._statusTouched && STATUS_META[row.status] && p.status !== row.status) {
-    p.status = row.status; p._sheetFilled.add('status'); changed = true;
-  }
   return changed;
 }
-function addPlot(pts, id, status) {
-  // uniquePlotId here too: loadCurrentLayoutIntoTrace re-adds a saved layout that may already
-  // contain a legitimate duplicate number, and re-tracing must not merge the two.
-  const p = { id: uniquePlotId(id || nextPlotId(), trace.plots), status: status || 'available', pts };
-  autofillPlotFromSheet(p);
+function addPlot(pts) {
+  // nextPlotId never hands out a number in use; uniquePlotId stays as the guard all ids share.
+  const p = { id: uniquePlotId(nextPlotId(), trace.plots), status: 'available', pts };
+  applySheetToTracePlot(p);
   trace.plots.push(p);
   trace.sel = trace.plots.length - 1; refreshTraceList(); drawTrace();
 }
@@ -4507,7 +4895,15 @@ function traceDbl(e) {
 function setTraceMode(m) { trace.mode = m; trace.draft = null; ['Auto', 'Manual', 'Edit'].forEach((n) => els['traceMode' + n].classList.toggle('is-on', n.toLowerCase() === m)); els.traceCanvas.style.cursor = m === 'manual' ? 'crosshair' : 'default'; drawTrace(); }
 function setTraceHint(msg, warn) { els.traceHint.textContent = msg; els.traceHint.classList.toggle('is-warn', !!warn); }
 function refreshTraceList() {
-  els.traceCount.textContent = `${trace.plots.length} plot${trace.plots.length === 1 ? '' : 's'}`;
+  // A number held by more than one plot can't match the sheet 1-to-1 (only its first holder
+  // does), so every plot sharing a number is flagged until the admin renames it.
+  const holders = new Map();
+  trace.plots.forEach((p) => { const n = plotNumber(p.id); holders.set(n, (holders.get(n) || 0) + 1); });
+  const shared = trace.plots.filter((p) => holders.get(plotNumber(p.id)) > 1).length;
+  els.traceCount.textContent = `${trace.plots.length} plot${trace.plots.length === 1 ? '' : 's'}`
+    + (shared ? ` · ⚠ ${shared} share a number` : '');
+  els.traceCount.classList.toggle('is-warn', !!shared);
+  updateTraceNextNumber();
   els.traceList.innerHTML = '';
   trace.plots.forEach((p, i) => {
     if (!p.mediaList) p.mediaList = getPlotMediaList(p);
@@ -4523,30 +4919,38 @@ function refreshTraceList() {
     };
     syncMedia();
 
-    const li = document.createElement('li'); li.className = 'trace-li' + (i === trace.sel ? ' is-sel' : '');
-    const idIn = document.createElement('input'); idIn.className = 'trace-id'; idIn.value = plotNumber(p.id); idIn.title = 'Plot number (two plots may share one — e.g. 1 in Sector A and 1 in Sector B)';
+    const shares = holders.get(plotNumber(p.id)) > 1;
+    const li = document.createElement('li'); li.className = 'trace-li' + (i === trace.sel ? ' is-sel' : '') + (shares ? ' is-dup' : '');
+    const idIn = document.createElement('input'); idIn.className = 'trace-id'; idIn.value = plotNumber(p.id);
+    idIn.title = shares
+      ? `“${plotNumber(p.id)}” is used by ${holders.get(plotNumber(p.id))} plots — give each its own number so it matches one sheet row`
+      : 'Plot number — must match the sheet’s plot_id exactly';
     idIn.addEventListener('change', () => {
-      // A number already in use is ALLOWED and keeps its own data: the clash is resolved with an
-      // internal "#n" tag that never reaches the screen (see plotNumber/uniquePlotId).
-      p.id = uniquePlotId('Plot-' + idIn.value.trim(), trace.plots, i);
-      // Typing/confirming the real plot number is the moment a freshly-drawn plot can
-      // finally be matched against an already-loaded sheet row (see autofillPlotFromSheet)
-      // — its placeholder id at capture time never matched anything. Only the fields that
-      // are still empty get filled, so re-render the whole row (not just redraw the
-      // canvas) when that actually happens.
-      if (autofillPlotFromSheet(p)) refreshTraceList();
-      drawTrace();
+      // Numbers are unique (1-to-1 with the sheet): a number another plot already holds is
+      // refused, as is an invalid one, and the box goes back to the plot's current number.
+      const num = idIn.value.trim();
+      const clash = trace.plots.some((q, j) => j !== i && plotNumber(q.id) === num);
+      const problem = plotNumberProblem(num)
+        || (clash ? `Plot number “${num}” is already used — each plot needs its own number to match one sheet row.` : '');
+      if (problem) { idIn.value = plotNumber(p.id); setTraceHint(problem, true); return; }
+      p.id = num;
+      retagTracePlots();          // this may have freed the last repeat of the old number
+      applySheetToTracePlot(p);   // the new number may be one the sheet lists
+      refreshTraceList(); drawTrace();
     });
-    
+
     const sel = document.createElement('select'); sel.className = 'trace-status';
     STATUS_ORDER.forEach((s) => { const o = document.createElement('option'); o.value = s; o.textContent = STATUS_META[s].label; if (s === p.status) o.selected = true; sel.appendChild(o); });
-    // Marks this plot's status as manually decided — once set, autofillPlotFromSheet
-    // stops touching it for this plot even if the sheet's value differs (same "don't
-    // fight a manual edit" rule the text fields already follow).
-    sel.addEventListener('change', () => { p.status = sel.value; p._statusTouched = true; p._sheetFilled?.delete('status'); refreshTraceList(); drawTrace(); });
+    sel.addEventListener('change', () => { p.status = sel.value; if (p._sheetCols?.has('status')) p._sheetEdited.add('status'); refreshTraceList(); drawTrace(); });
+    // Marks a status the sheet controls — amber once the admin has picked a different one,
+    // since saving puts the sheet's status back.
     const statusSheetDot = document.createElement('span');
-    statusSheetDot.className = 'trace-status-sheet-dot'; statusSheetDot.title = 'Status pulled from the Google Sheet';
-    statusSheetDot.hidden = !p._sheetFilled?.has('status');
+    const statusOverridden = !!p._sheetEdited?.has('status');
+    statusSheetDot.className = 'trace-status-sheet-dot' + (statusOverridden ? ' is-warn' : '');
+    statusSheetDot.title = statusOverridden
+      ? 'The Google Sheet sets this plot’s status — saving will put the sheet’s value back'
+      : 'Status comes from the Google Sheet';
+    statusSheetDot.hidden = !p._sheetCols?.has('status');
 
     const editBtn = document.createElement('button');
     editBtn.className = 'btn btn-ghost btn-xs trace-edit-btn';
@@ -4564,6 +4968,7 @@ function refreshTraceList() {
     del.addEventListener('click', (ev) => {
       ev.stopPropagation();
       trace.plots.splice(i, 1);
+      retagTracePlots();
       if (trace.sel >= trace.plots.length) trace.sel = trace.plots.length - 1;
       refreshTraceList();
       drawTrace();
@@ -4593,24 +4998,26 @@ function refreshTraceList() {
         const w = document.createElement('label'); w.className = 'trace-field';
         const labelRow = document.createElement('span'); labelRow.className = 'trace-field-label-row';
         labelRow.appendChild(document.createTextNode(label));
-        // Shows which fields got their value from the Google Sheet (autofillPlotFromSheet)
-        // rather than being typed by hand — so the fill is never a silent, unexplained
-        // change. Disappears the instant the admin edits that field themselves.
+        // Marks a field the Google Sheet controls for this plot (applySheetToTracePlot). It stays
+        // editable, but the sheet wins: once typed over, the badge warns that saving puts the
+        // sheet's value back.
         const sheetBadge = document.createElement('span');
-        sheetBadge.className = 'trace-field-sheet-badge'; sheetBadge.textContent = '✓ Sheet';
-        sheetBadge.hidden = !p._sheetFilled?.has(key);
+        const setBadge = () => {
+          const over = !!p._sheetEdited?.has(key);
+          sheetBadge.className = 'trace-field-sheet-badge' + (over ? ' is-warn' : '');
+          sheetBadge.textContent = over ? '⚠ Sheet wins on save' : 'Sheet';
+          sheetBadge.title = over
+            ? 'The Google Sheet sets this field — saving will replace your edit with the sheet’s value. Change it in the sheet instead.'
+            : 'This value comes from the Google Sheet';
+        };
+        setBadge();
+        sheetBadge.hidden = !p._sheetCols?.has(key);
         labelRow.appendChild(sheetBadge);
         w.appendChild(labelRow);
         const inp = document.createElement('input'); inp.type = 'text'; inp.value = p[key] || ''; if (ph) inp.placeholder = ph;
         inp.addEventListener('input', () => {
           p[key] = inp.value;
-          // Typing a field empty is an instruction, not an absence of one (see
-          // computePlotOverrides): remember it so the save records the clear.
-          const mark = `${p.id}|${key}`;
-          if (inp.value.trim()) state.clearedPlotFields.delete(mark);
-          else state.clearedPlotFields.add(mark);
-          if (p._sheetFilled) p._sheetFilled.delete(key);
-          sheetBadge.hidden = true;
+          if (p._sheetCols?.has(key)) { p._sheetEdited.add(key); setBadge(); }
           if (onUpdate) onUpdate(inp.value);
         });
         w.appendChild(inp); return w;
@@ -4822,12 +5229,15 @@ function traceLoadDXFText(text, name) {
 function applyDXFLayer(layer) {
   const conv = dxfToPlots(trace.dxf, layer); if (!conv) { setTraceHint('No closed polylines on that layer.', true); return; }
   trace.W = conv.W; trace.H = conv.H; trace.draft = null; trace.sel = -1;
-  // Same-number labels are expected in a sectored plan, so the imported ids go through
-  // uniquePlotId as well — two polygons both labelled "1" must not collapse onto one id.
+  // A plot keeps the number written inside it in the DXF; an unlabelled one is auto-numbered
+  // (with the prefix). The DXF is the admin's own drawing, so if it labels two plots alike both
+  // are imported — tagged apart by uniquePlotId and flagged in the list for renaming.
   trace.plots = [];
   conv.plots.forEach((p) => { const lbl = conv.labels.find((t) => pointInPoly(t, p.pts));
-    const base = lbl && lbl.text ? 'Plot-' + lbl.text.replace(/\s+/g, '') : nextPlotId();
-    trace.plots.push({ id: uniquePlotId(base, trace.plots), status: 'available', pts: p.pts }); });
+    const text = lbl && lbl.text ? legacyPlotId(lbl.text.replace(/[\s#]+/g, '')) : '';
+    const q = { id: uniquePlotId(text || nextPlotId(), trace.plots), status: 'available', pts: p.pts };
+    applySheetToTracePlot(q);
+    trace.plots.push(q); });
   fitTrace(); refreshTraceList(); drawTrace();
 }
 
@@ -4835,18 +5245,24 @@ function applyDXFLayer(layer) {
 function finishTrace() {
   if (!trace.plots.length) { setTraceHint('Capture at least one plot first.', true); return; }
   state.imgW = trace.W; state.imgH = trace.H;
+  const oldIds = new Set(state.geom.map((g) => g.id));
   state.geom = trace.plots.map((p) => ({ id: p.id, pts: p.pts.map((v) => ({ x: v.x, y: v.y })) }));
   recomputeAnchorAndK();
+  // Each plot's row is rebuilt from the plot itself — `p._row` is the row it was loaded with
+  // (carrying any extra sheet/CSV columns), then its edited fields on top. Looking rows up by
+  // the NEW id instead would hand a renamed plot whatever row used to live under that number,
+  // i.e. another plot's data. Rows for plots that were not in the layout are kept as they were.
+  const rows = new Map([...state.rows].filter(([id]) => !oldIds.has(id)));
   trace.plots.forEach((p) => {
-    const row = state.rows.get(p.id) || { plot_id: p.id };
-    row.plot_id = p.id; row.status = p.status;
+    const row = { ...(p._row || {}), plot_id: p.id, status: p.status };
     ['size', 'price', 'facing', 'dimensions', 'tour_url', 'video_url', 'image_url', 'notes', 'block', 'media_json'].forEach((k) => { if (p[k] !== undefined) row[k] = p[k]; });
     if (p.mediaList && p.mediaList.length) {
       row.mediaList = p.mediaList;
       row.media_json = JSON.stringify(p.mediaList);
     }
-    state.rows.set(p.id, row);
+    rows.set(p.id, row);
   });
+  state.rows = rows;
   labelCache.clear();                                   // ids changed → rebuild label sprites
   closeTrace();
   rebuildPlots(); computeHome(); Object.assign(state.view, state.home);
@@ -4861,17 +5277,14 @@ async function openTrace() {
   updateSheetAdminUI();
   refreshAreaAdminUI();   // its per-band "N plots" counts read state.geom/state.rows, which move as plots are traced
   // Re-fetch the sheet fresh right as tracing starts (rather than relying on whatever
-  // loadData() cached at page boot) — kept in `traceSheetRows`, never merged into
-  // `state.rows` directly, so a sheet row that's missing a field (or a row that isn't
-  // there at all) can never silently clobber data the admin already has. This is what
-  // makes drawing a plot whose id was only just added to the sheet actually work in the
-  // same session, instead of needing a full page reload first.
+  // loadData() read at page boot), so a row added to the sheet a minute ago applies to a plot
+  // drawn or renamed now (applySheetToTracePlot) without a page reload.
   traceSheetRows = (state.sheet.enabled && state.sheet.url) ? await fetchSheetRows().catch(() => null) : null;
   if (state.geom.length) await loadCurrentLayoutIntoTrace();   // default to editing the live layout (price/status/retrace)
   if (trace.plots.length > 0 && (trace.sel === -1 || trace.sel >= trace.plots.length)) {
     let selIdx = 0;
     if (state.selectedId) {
-      const found = trace.plots.findIndex(p => canonPlotId(p.id) === canonPlotId(state.selectedId));
+      const found = trace.plots.findIndex(p => p.id === state.selectedId);
       if (found >= 0) selIdx = found;
     }
     trace.sel = selIdx;
@@ -4901,8 +5314,10 @@ async function loadCurrentLayoutIntoTrace() {
       block: r.block || '',
       media_json: r.media_json || (mediaList.length ? JSON.stringify(mediaList) : ''),
       mediaList: mediaList,
+      _row: r,   // the plot's own row, so finishTrace keeps its extra columns even across a rename
     };
   });
+  trace.plots.forEach(applySheetToTracePlot);   // the sheet just fetched by openTrace wins over what was loaded
   trace.draft = null; trace.sel = -1;
   // rebuild the raster backdrop so Auto-trace works on the live plan. The raw blob is
   // kept in memory on import/session-restore; but when the site booted from committed
@@ -4940,7 +5355,9 @@ function wireTrace() {
   els.traceThresh.addEventListener('input', () => { trace.thresh = +els.traceThresh.value; els.traceThreshVal.textContent = els.traceThresh.value; });
   els.traceSimplify.addEventListener('input', () => { trace.simplify = +els.traceSimplify.value; els.traceSimplifyVal.textContent = els.traceSimplify.value; });
   els.traceSnap.addEventListener('change', () => { trace.snap = els.traceSnap.checked; });
-  els.traceUndo.addEventListener('click', () => { if (trace.draft) trace.draft = null; else trace.plots.pop(); trace.sel = trace.plots.length - 1; refreshTraceList(); drawTrace(); });
+  els.traceUndo.addEventListener('click', () => { if (trace.draft) trace.draft = null; else { trace.plots.pop(); retagTracePlots(); } trace.sel = trace.plots.length - 1; refreshTraceList(); drawTrace(); });
+  els.tracePrefix.addEventListener('change', applyTracePrefix);   // Enter, or leaving the field
+  els.tracePrefixReset.addEventListener('click', applyTracePrefix);
   els.traceClear.addEventListener('click', () => { trace.plots = []; trace.draft = null; trace.sel = -1; refreshTraceList(); drawTrace(); });
   els.traceLayerSel.addEventListener('change', () => applyDXFLayer(els.traceLayerSel.value));
   els.traceFile.addEventListener('change', () => { const f = els.traceFile.files?.[0]; if (f) traceLoadImage(f); els.traceFile.value = ''; });
@@ -7770,14 +8187,9 @@ function renderClientSidebar() {
       // openClientPanoTour's `state.menuNavStack = []` case — so it's appended straight
       // onto the root list itself, the one level that's always shown.
       + (state.tourView ? `<button class="cat-btn" type="button" data-node-id="__exit_tour__">✕ EXIT TOUR</button>` : '')
-      // "⬇ SAVE FOR OFFLINE" (2026-09-23). The download used to be reachable ONLY through the
-      // banner that shows itself once, and a visitor who tapped "Not now" could never get back
-      // to it: the decline is remembered under `b91-offline-declined-<SW_VERSION>-<project>`,
-      // and SW_VERSION has been frozen at v12 since, so no flag ever expired. This row is the
-      // way back in, and it ignores both the declined and the saved flags (offerOfflineSave's
-      // `force`). Not an admin row, and only where the download exists at all — phone-sized and
-      // a service-worker-capable secure context, exactly what registerOfflineSupport requires.
-      + (offlineSaveRowAvailable() ? `<button class="cat-btn cat-btn-util" type="button" data-node-id="__offline_save__">⬇ SAVE FOR OFFLINE</button>` : '');
+      // "⬇ SAVE FOR OFFLINE" / "⟳ UPDATE OFFLINE COPY" — the ONE way into offline use
+      // (2026-09-24: nothing about offline is shown unasked any more). See offlineMenuRowHtml.
+      + offlineMenuRowHtml();
 
     els.catNavL1.innerHTML = html;
     // Nothing to show at all (every item disabled, or nothing authored) ⇒ no drawer,
@@ -7940,7 +8352,7 @@ function wireClientSidebarButtons() {
       // The one synthetic row that can appear at ROOT level (see renderClientSidebar) —
       // a single-tour, single-room project has no picker level to carry it otherwise.
       if (nodeId === '__exit_tour__') { closePanoTour(); return; }
-      if (nodeId === '__offline_save__') { collapseClientDrawer(); maybeOfferOfflineSave({ force: true }); return; }
+      if (nodeId === '__offline_save__') { openOfflinePanel(); return; }
       const nodeInfo = findNodeInfo(nodeId);
       if (!nodeInfo) return;
       // AERIAL VIEW / LANDMARKS are ordinary nodes now — activateMenuNode's own dispatch
@@ -8473,11 +8885,13 @@ function openClientBrochureModal(b = {}) {
   // app by opening the PDF in a separate browser tab, and offline it fails entirely.
   // pdf.js solves both. Desktop keeps the native iframe viewer (real text selection,
   // pinch-zoom, browser built-in controls) — that tradeoff is only right on a big screen.
+  // Decided by the DEVICE (isTouchDevice), not the window width (2026-09-24): every device that
+  // can save a project for offline use — tablets included — must also read its brochure offline.
   // The `.style.display` toggles below are deliberate rather than `.hidden` — both
   // elements carry an inline `display`, which would beat the `[hidden]` attribute (see
   // Conventions & gotchas).
   const canvasBox = $('clientBrochureCanvas');
-  if ((isMobilePortrait() || isMobileLandscape()) && canvasBox) {
+  if (isTouchDevice() && canvasBox) {
     if (frame) { frame.removeAttribute('src'); frame.style.display = 'none'; }
     canvasBox.style.display = 'block';
     canvasBox.textContent = 'Loading brochure…';
@@ -10259,46 +10673,96 @@ function closeCustomModal(modalEl) {
   if (pdfBox) pdfBox.textContent = '';   // drop the rendered page canvases — they can be tens of MB on a long brochure
 }
 
-// ─── Offline support (PWA) — client only ───────────────────────────────────
-// Must match VERSION in sw.js — used to version the offline-banner localStorage keys so
-// bumping the SW version automatically re-shows the banner to users who dismissed it
-// under the old version (they need to re-download into the new cache namespace).
-const SW_VERSION = 'v12';
-// sw.js caches the app shell + project data + on-demand video so the client experience
-// keeps working with no signal once it's been opened at least once online. Never
-// registered on ?admin=1 pages — sw.js's own admin passthrough is a second guard for the
-// case where the same browser already has the worker installed from an earlier client
-// visit. Requires a secure context (https:// or localhost — verified directly: a service
-// worker refuses to register under file:// or a plain LAN http:// origin with a "URL
-// protocol... not supported" error), so this silently no-ops there instead of erroring;
-// the rest of the app is unaffected either way.
-// The app shell (app.js/styles.css/index.html) is cached stale-while-revalidate (sw.js):
-// a returning visit renders the CACHED copy instantly while fetching the latest version
-// in the background for next time — a real fix shipped to the server is otherwise
-// invisible to an already-cached phone until a SECOND visit. Reloading once when a new
-// worker actually takes control (skipWaiting+clients.claim already make that happen
-// automatically) closes that gap — `refreshedOnce` guards against a reload loop.
-// Only reload when a worker REPLACES an existing one (a genuine update). On a first visit
-// there's no controller yet, and clients.claim() fires this same event — reloading there
-// was a self-inflicted bug: every first visit reloaded mid-boot, which discarded the
-// captured beforeinstallprompt event, so tapping Add downloaded the content but silently
-// offered no home-screen shortcut (there was nothing left to prompt with).
-const hadControllerAtLoad = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
-let refreshedOnce = false;
-navigator.serviceWorker?.addEventListener('controllerchange', () => {
-  if (!hadControllerAtLoad || refreshedOnce) return;
-  refreshedOnce = true;
-  window.location.reload();
-});
+// ─── Offline (phones & tablets): save a project, then run it strictly from that copy ────────
+// The whole design is in MOBILE-OFFLINE.md; sw.js is the serving side. In short (2026-09-24):
+//   • ONE way in: the client menu row "⬇ SAVE FOR OFFLINE" / "⟳ UPDATE OFFLINE COPY"
+//     (offlineMenuRowHtml → openOfflinePanel). Nothing about offline is ever shown unasked —
+//     the automatic "Add to Home Screen" banner this replaces is gone.
+//   • Saving downloads every file in the project's OFFLINE FILE LIST — a published demo carries
+//     one (publish_s3.offline_list_bytes), the local server builds it (/api/offline-files): the
+//     app itself, the project's data and every file that data references, each with its size
+//     and fingerprint — into one cache, `b91-saved@<scope>:<project>`. plots.csv is stored with
+//     the Google Sheet merged in (mergeSheetIntoCsv). A record is written LAST; until it exists
+//     the cache is not a saved copy.
+//   • From then on sw.js answers every request for that project from the copy, online or not
+//     (the page sees OFFLINE_COPY): strict offline mode, like an exported standalone folder.
+//   • Only the visitor changes it, from the same row. Update fetches just the files whose
+//     fingerprint changed, re-reads the sheet, switches app + data + plots.csv over together at
+//     the end, then restarts the page once — the one and only reload anywhere. When the menu is
+//     opened, a quiet check against the server's list turns the row into "⟳ UPDATE AVAILABLE".
+//   • Nothing is ever deleted automatically — only by "Remove from this device" in the panel.
+//     (Until this change a failed WIDTH check wiped the download: a tablet, a big phone in
+//     landscape, "Desktop site" mode or opening admin on the phone were all enough.)
+//   • iPhone/iPad: an app added to the Home Screen gets its own storage, separate from the
+//     browser's, so a copy saved in a Safari tab is simply not there when the icon is opened. In
+//     a browser tab the row therefore shows a guide instead: add to Home Screen, open it from
+//     there, save there.
+// Desktops never save (they have ⋯ → Export standalone site). The admin never touches any of it.
 
+const OFFLINE_NET = 'b91_net';                                  // sw.js NET_PARAM: requests carrying it always go to the network
+const OFFLINE_SCOPE = new URL('./', location.href).href;         // sw.js is registered relative, so its scope is this folder
+const OFFLINE_SCOPE_PATH = new URL(OFFLINE_SCOPE).pathname;
+const OFFLINE_RECORD_KEY = new URL('.b91-offline-record', OFFLINE_SCOPE).href;   // sw.js RECORD_KEY
+const offlineCacheName = (pid) => `b91-saved@${OFFLINE_SCOPE_PATH}:${pid}`;         // sw.js SAVED_PREFIX + id
+const offlineStagingName = (pid) => `b91-staging@${OFFLINE_SCOPE_PATH}:${pid}`;
+// Set by the download that existed before strict mode (sw.js up to v49) once it had finished.
+// Such a phone's files are adopted into a saved copy rather than downloaded a second time.
+const legacySavedFlag = (pid) => `b91-offline-saved-v12-${pid}`;
+const OFFLINE_BIG_FILE = 4 * 1024 * 1024;                        // from this size up, files download one at a time
+// The small per-project files the app loads by name (loadProjectFile) — part of every fallback list.
+const OFFLINE_CONFIG_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json', 'tour.json'];
+
+const offline = {
+  record: null,           // this project's saved-copy record, when this device has one (loadOfflineRecord)
+  busy: false,            // a save/update is running
+  silent: false,          // …and it is the quiet adoption of an older download, not a visitor's tap
+  updateAvailable: false, // the server's file list has moved on since the last save/update
+  checkedAt: 0,
+  goAction: 'save',       // what the panel's main button does right now
+  removeArmed: false,
+  wakeLock: null,
+};
+
+// The cache key for a file — the SAME rule as sw.js cacheKeyFor, and the two must never drift:
+// resolved against the app folder, every query dropped except ?project=.
+function offlineKeyFor(path) {
+  const u = new URL(path, OFFLINE_SCOPE);
+  const project = u.searchParams.get('project');
+  u.search = '';
+  u.hash = '';
+  if (project) u.searchParams.set('project', project);
+  return u.toString();
+}
+function offlineNetUrl(path) {
+  const u = new URL(path, OFFLINE_SCOPE);
+  u.searchParams.set(OFFLINE_NET, String(Date.now()));
+  return u.toString();
+}
+const offlineSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Resolves true on the first `type` event for which `ready()` holds (any event when `ready` is
+// null), or false after `timeoutMs` (0 = wait for ever).
+function waitForEvent(target, type, ready = null, timeoutMs = 0) {
+  return new Promise((resolve) => {
+    if (ready && ready()) { resolve(true); return; }
+    let t = null;
+    const on = () => { if (!ready || ready()) done(true); };
+    const done = (v) => { target.removeEventListener(type, on); clearTimeout(t); resolve(v); };
+    target.addEventListener(type, on);
+    if (timeoutMs) t = setTimeout(() => done(false), timeoutMs);
+  });
+}
+
+// ─── Home-screen identity + Android's install dialog ────────────────────────
 // Point the manifest (and the iOS touch icon) at THIS project, so the installed home-screen
 // icon and name are the admin's branding rather than a generic Build91 one. The manifest is
 // static JSON by nature, so the per-project version is generated by server.py's
 // /manifest.webmanifest route — it reads the same ?project= appended here. Runs during
 // module evaluation, well before the browser evaluates installability. Skipped in a
-// standalone bundle, which has no server to generate anything and ships the static file.
+// standalone bundle, which has no server to generate anything and ships the static file,
+// and in a published demo, whose manifest + icons were generated already branded at
+// publish time (publish_s3.py) and sit in its own folder.
 function setupPwaIdentity() {
-  if (BUNDLE) return;
+  if (BUNDLE || PUBLISHED) return;
   const q = `?project=${encodeURIComponent(state.projectId || 'sample')}`;
   const link = document.querySelector('link[rel="manifest"]');
   if (link) link.href = `manifest.webmanifest${q}`;
@@ -10307,9 +10771,8 @@ function setupPwaIdentity() {
 }
 setupPwaIdentity();
 
-// Just captures the event for maybeOfferOfflineSave's single "Add" button to fire later
-// (see its own comment) — this listener itself doesn't show anything, since the one
-// combined banner already covers both the install offer and the content download.
+// Android's own install dialog can only be opened from inside a tap, so the event is kept for
+// the offline panel's Save button (onOfflineGo), which opens it alongside the download.
 let deferredInstallPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
@@ -10317,102 +10780,192 @@ window.addEventListener('beforeinstallprompt', (e) => {
 });
 window.addEventListener('appinstalled', () => {
   deferredInstallPrompt = null;
-  if (els.offlineSaveBanner) els.offlineSaveBanner.hidden = true;   // covers installing via the browser's own menu instead of our button
   try { localStorage.setItem('b91-pwa-installed', '1'); } catch {}
 });
 
+function isStandaloneDisplay() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+// ─── The offline layer (sw.js) ──────────────────────────────────────────────
+// Registered on phones and tablets (the client only — never on ?admin=1 pages, and sw.js leaves
+// admin traffic alone anyway). Needs a secure context (https:// or localhost); elsewhere it
+// quietly isn't there and the site works online as before. Kicked off at the top of init and
+// not awaited there.
 async function registerOfflineSupport() {
-  // Mobile-only, on purpose: desktop already has a real offline mechanism (⋯ → Export
-  // standalone site…, a genuine local file/host-anywhere copy) — this whole PWA layer
-  // exists specifically for phones, which can't use that export the same way (see the
-  // Mobile Offline Rollout doc). Reuses the same width+orientation checks the rest of the
-  // mobile-responsive pass already relies on to distinguish a real phone from a resized
-  // desktop window ("never true on a real desktop window" — see their own definitions).
-  if (!('serviceWorker' in navigator)) return;
-  if (state.admin || !(isMobilePortrait() || isMobileLandscape())) {
-    // Actively revert, not just skip: a browser that visited before this mobile gate
-    // existed may already have sw.js registered and controlling the page, which keeps
-    // satisfying the browser's own beforeinstallprompt eligibility on every later visit
-    // regardless of this gate — unregistering here is what actually stops it going forward.
-    try {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.filter((k) => k.startsWith('b91-')).map((k) => caches.delete(k)));
-      }
-    } catch {}
-    return;
-  }
-  let ready = false;
-  try {
-    await navigator.serviceWorker.register('sw.js');
-    // .ready resolves once a worker is actually active/controlling — the precondition for
-    // both caching downloads and the install offer below. Races it against a timeout so a
-    // stalled activation (a flaky connection, or another open tab pinning an older worker)
-    // can't silently wedge the rest of boot — falls through to the install offer alone.
-    await Promise.race([navigator.serviceWorker.ready, new Promise((_, rej) => setTimeout(rej, 5000))]);
-    ready = true;
-  } catch {
-    // unsupported browser / insecure origin / activation timeout — app still works online, just not offline
-  }
-  return ready;
+  if (!('serviceWorker' in navigator) || state.admin || BUNDLE) return null;
+  if (!isTouchDevice()) { retireDesktopOffline(); return null; }
+  try { return await navigator.serviceWorker.register('sw.js'); } catch { return null; }
 }
-
-// Registration has to happen EARLY (so the worker can cache boot fetches — see init), but the
-// offline banner has to happen LATE, and the two were fused until 2026-09-12 with real
-// consequences. maybeOfferOfflineSave calls collectOfflineAssets(), which reads
-// state.menuConfig/landmarks/amenities/tours to decide what to download. Offering it the
-// moment registration finished meant racing boot: if the worker went active before the
-// project finished loading, the banner collected only the handful of config files that
-// collectOfflineAssets adds unconditionally and offered a ~19KB download instead of the real
-// ~213MB one. Tapping Add then cached the config and NOTHING else — so the menu worked
-// offline while every video, image and PDF behind it was missing, which is exactly the
-// "video and images stopped working offline" report that led here. Whoever wins that race is
-// down to connection speed and whether the worker was already installed, which is why it
-// looked intermittent. Registration is kicked off at the top of init and only awaited here,
-// at the end, so the banner always sees a fully loaded project.
-// The small per-project files the client cannot render a real menu without. Shared with
-// collectOfflineAssets so the eager download and the warm-up below can't drift apart.
-const OFFLINE_CONFIG_FILES = ['alignment.json', 'plots.svg', 'plots.csv', 'landmarks.json', 'amenities.json', 'tour.json'];
-
-// Re-request the project config once the worker is genuinely active, so it lands in the
-// cache even on a FIRST visit. A service worker only intercepts fetches once it controls the
-// page, and on a first visit it is usually still installing while boot fetches this exact
-// config — so nothing caches it, and the visitor's NEXT load (offline) falls back to the
-// built-in rows alone: no LOCATION INTELLIGENCE, no BROCHURE, no authored items at all.
-// Measured 2026-09-12: a visitor who declined the download and visited once had the full
-// 43.7MB video sitting in the cache and no menu row left to reach it with; a second online
-// visit fixed it by itself. This closes that first-visit window for ~30KB, and costs nothing
-// afterwards (these are already-cached URLs by then, and staying network-first keeps them
-// fresh). Deliberately NOT extended to the pano/site-plan images: those are megabytes, and
-// the visitor who wants them offline has the "Add" button, which fetches everything.
-async function warmOfflineConfigCache() {
-  const pid = state.projectId || 'sample';
-  await Promise.all(OFFLINE_CONFIG_FILES.map((f) =>
-    fetch(`projects/${pid}/${f}`, { cache: 'no-store' }).catch(() => {})));
-}
-
-async function offerOfflineSaveAfterBoot(registration) {
+// A desktop has no offline saving. An offline layer an older build registered here (before
+// the phone check existed) is taken away again so it stops making the site installable — but
+// ONLY when nothing is saved in this browser: a saved copy is removed by its owner, never by us.
+async function retireDesktopOffline() {
   try {
-    if (!(await registration)) return;
-    await warmOfflineConfigCache();
-    await maybeOfferOfflineSave();
+    const keys = 'caches' in window ? await caches.keys() : [];
+    if (keys.some((k) => k.startsWith('b91-saved@'))) return;
+    const atRoot = OFFLINE_SCOPE_PATH === '/';
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.filter((r) => atRoot || r.scope === OFFLINE_SCOPE).map((r) => r.unregister()));
+    if (atRoot) {
+      await Promise.all(keys.filter((k) => /^b91-(shell|data|media|staging)/.test(k)).map((k) => caches.delete(k)));
+    } else {
+      await Promise.all(keys.filter((k) => k.startsWith(`b91-shell@${OFFLINE_SCOPE_PATH}:`)).map((k) => caches.delete(k)));
+      await dropLegacyEntries((url) => url.startsWith(OFFLINE_SCOPE));
+    }
   } catch {}
 }
+// Tell the offline layer that a saved copy appeared, changed or went (it remembers which
+// projects are saved). Both the controlling worker and the registration's active one, in case
+// they differ for a moment.
+function tellOfflineLayer(msg) {
+  try { navigator.serviceWorker?.controller?.postMessage(msg); } catch {}
+  navigator.serviceWorker?.getRegistration?.()
+    .then((reg) => { try { reg?.active?.postMessage(msg); } catch {} })
+    .catch(() => {});
+}
+function pingOfflineLayer(worker) {
+  return new Promise((resolve) => {
+    try {
+      const ch = new MessageChannel();
+      const t = setTimeout(() => resolve(false), 2500);
+      ch.port1.onmessage = (e) => { clearTimeout(t); resolve(!!(e.data && e.data.ok)); };
+      worker.postMessage({ type: 'PING' }, [ch.port2]);
+    } catch { resolve(false); }
+  });
+}
+function waitForWorker(worker, timeoutMs) {
+  return waitForEvent(worker, 'statechange', () => ['installed', 'activated', 'redundant'].includes(worker.state), timeoutMs);
+}
+// Before a save touches the network, the page must be controlled by the CURRENT offline layer:
+// an older one (up to v49) cached opportunistically and would answer the downloads below from
+// its own stale copies. A newer version waiting in the background is started now — this is the
+// one moment that is allowed to happen (the visitor asked for an update); a quiet adoption
+// (`activate: false`) never does it and simply waits for a later visit.
+async function ensureCurrentOfflineLayer({ activate }) {
+  if (!('serviceWorker' in navigator)) return { ok: true };
+  let reg = null;
+  try { reg = (await navigator.serviceWorker.getRegistration()) || (await navigator.serviceWorker.register('sw.js')); } catch {}
+  if (!reg) return { ok: true };                         // no offline layer here — the row isn't shown in that case anyway
+  try { await reg.update(); } catch {}
+  if (reg.installing) await waitForWorker(reg.installing, 20000);
+  if (reg.waiting) {
+    if (!activate) return { ok: false, reason: 'layer-waiting' };
+    const changed = waitForEvent(navigator.serviceWorker, 'controllerchange', null, 8000);
+    reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+    await changed;
+  }
+  if (!navigator.serviceWorker.controller) {             // a first visit: the new layer claims this page
+    await waitForEvent(navigator.serviceWorker, 'controllerchange', () => !!navigator.serviceWorker.controller, 8000);
+  }
+  const ctl = navigator.serviceWorker.controller;
+  if (ctl && !(await pingOfflineLayer(ctl))) return { ok: false, reason: 'layer-old' };
+  return { ok: true };
+}
 
-// ─── Add to Home Screen + save-for-offline (one combined prompt) ───────────
-// Originally two separate prompts shown back to back (content download, then a plain
-// install offer) — collapsed into one after the user pointed out both were really asking
-// for the same "get this ready for offline" intent, and having a separate manual download
-// step before the (already separate) native install step just felt redundant. One tap on
-// "Add" now does both jobs at once: fires the native install prompt (where available) AND
-// starts the content download, in parallel — the two are unrelated under the hood (the
-// native prompt just builds an app-icon wrapper, it has no idea what a "gallery photo" is;
-// the content download is the only thing that makes the site actually usable offline —
-// see the discussion this session), so neither needs to wait on the other's outcome.
-// Sizes/consent are still shown up front before the tap, and video is still eagerly
-// included per the user's explicit request — but as one action, not two.
+// ─── The saved copy's record ────────────────────────────────────────────────
+async function loadOfflineRecord() {
+  offline.record = null;
+  if (state.admin || BUNDLE || !('caches' in window)) return null;
+  try {
+    const name = offlineCacheName(state.projectId);
+    if (!(await caches.has(name))) return null;
+    const res = await (await caches.open(name)).match(OFFLINE_RECORD_KEY);
+    offline.record = res ? await res.json() : null;
+  } catch { offline.record = null; }
+  return offline.record;
+}
+function formatOfflineDate(t) {
+  if (!t) return '';
+  const d = new Date(/^\d+$/.test(String(t)) ? Number(t) : t);
+  return isNaN(d) ? '' : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
+// When the plot availability in the saved copy is from: the moment the sheet was read at the
+// last save/update, else the admin's last save (whose plots.csv carries the sheet as of then).
+function offlineAsOf(rec = offline.record) {
+  if (!rec) return '';
+  return formatOfflineDate((rec.sheet && rec.sheet.ok && rec.sheet.readAt) || rec.dataAsOf || rec.savedAt);
+}
+
+// ─── The menu row ───────────────────────────────────────────────────────────
+// Shown exactly where saving can work: the client (never admin, never an exported bundle), on a
+// phone or tablet, in a secure context with service workers and Cache Storage.
+function offlineSaveRowAvailable() {
+  return !state.admin && !BUNDLE && !!els.offlinePanel && 'serviceWorker' in navigator && 'caches' in window
+    && window.isSecureContext && isTouchDevice();
+}
+function offlineMenuRowHtml() {
+  if (!offlineSaveRowAvailable()) return '';
+  const rec = offline.record;
+  const label = !rec ? '⬇ SAVE FOR OFFLINE' : offline.updateAvailable ? '⟳ UPDATE AVAILABLE' : '⟳ UPDATE OFFLINE COPY';
+  const dot = rec && offline.updateAvailable ? '<span class="cat-btn-dot" aria-hidden="true"></span>' : '';
+  return `<button class="cat-btn cat-btn-util" type="button" data-node-id="__offline_save__">${label}${dot}</button>`;
+}
+function refreshOfflineMenuRow() {
+  const btn = els.catNavL1?.querySelector('[data-node-id="__offline_save__"]');
+  if (!btn) return;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = offlineMenuRowHtml();
+  if (tmp.firstElementChild) btn.innerHTML = tmp.firstElementChild.innerHTML;
+}
+// Has the server moved on since the last save/update? Asked only when the menu is opened (the
+// row is the only place that shows it), at most every two minutes, never waited on, and silent
+// when there's no connection. Compares the file list's version alone.
+async function checkForOfflineUpdate() {
+  const rec = offline.record;
+  if (!rec || !rec.listVersion || offline.busy || navigator.onLine === false) return;
+  if (Date.now() - offline.checkedAt < 2 * 60 * 1000) return;
+  offline.checkedAt = Date.now();
+  const list = await fetchOfflineList(state.projectId, { timeoutMs: 8000 });
+  if (!list.ok || !list.version) return;
+  const available = list.version !== rec.listVersion;
+  if (available !== offline.updateAvailable) { offline.updateAvailable = available; refreshOfflineMenuRow(); }
+}
+
+// ─── What gets saved ────────────────────────────────────────────────────────
+const offlineListUrl = (pid) => (PUBLISHED ? 'offline-files.json' : `api/offline-files?project=${encodeURIComponent(pid)}`);
+// The server's offline file list → { ok, version, files: [{path, size, hash}], fromList: true },
+// or { ok: false, offline } — `offline` when the server couldn't be reached at all (as opposed
+// to a server that has no list, which gets the fallback list instead).
+async function fetchOfflineList(pid, { timeoutMs = 20000 } = {}) {
+  let res;
+  try { res = await fetchWithTimeout(offlineNetUrl(offlineListUrl(pid)), { cache: 'no-store' }, timeoutMs); }
+  catch { return { ok: false, offline: true }; }
+  try {
+    if (!res.ok) return { ok: false, offline: false };
+    const j = await res.json();
+    const files = (Array.isArray(j && j.files) ? j.files : [])
+      .filter((f) => f && typeof f.path === 'string' && f.path && !/^([a-z][a-z0-9+.-]*:|\/)/i.test(f.path)
+        && !f.path.split(/[/?]/).includes('..'))
+      .map((f) => ({ path: f.path, size: Math.max(0, Math.floor(+f.size || 0)), hash: String(f.hash || '') }));
+    return files.length ? { ok: true, version: String(j.version || ''), files, fromList: true } : { ok: false, offline: false };
+  } catch { return { ok: false, offline: false }; }
+}
+// For a server with no file list (a demo published before lists existed, the static single-site
+// deploy): the app's own files, the project's data, and what that data references, found by
+// walking it (collectOfflineAssets). Without sizes or fingerprints, every Update downloads it all
+// again, and a file the server doesn't have (404) is simply left out.
+function fallbackOfflineList() {
+  const pid = state.projectId;
+  const paths = new Set(['index.html', 'app.js', 'styles.css', 'vendor/three.module.min.js', 'vendor/pdf.min.js', 'vendor/pdf.worker.min.js']);
+  if (PUBLISHED) ['manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-512-maskable.png'].forEach((p) => paths.add(p));
+  for (const f of OFFLINE_CONFIG_FILES) paths.add(`projects/${pid}/${f}`);
+  for (const it of collectOfflineAssets()) paths.add(String(it.url).split('?')[0]);
+  return { ok: true, version: '', files: [...paths].map((path) => ({ path, size: 0, hash: '' })), fromList: false };
+}
+// The app's code and the project's small data files — switched over TOGETHER at the end of an
+// update (staged until then), so the app never runs against half-updated data. Everything else
+// (images, video, audio, PDFs) is replaced one file at a time as it arrives.
+function isOfflineCoreFile(path) {
+  const p = String(path).split('?')[0];
+  return !p.startsWith('projects/') || /\.(json|csv|svg)$/i.test(p);
+}
+
+// Every local file the project's data references — used only for the fallback list (a server
+// with a file list decides this itself, by the same rule publishing uses). Mirrors
+// server.py's scan_menu_for_online_content walk of the same shape, collecting local files
+// instead of flagging external ones. Plot media (plots.csv links) is deliberately not walked:
+// a plot's tour/video link always points out to an externally hosted page by design.
 function collectOfflineAssets() {
   const items = [];
   const seen = new Set();
@@ -10510,31 +11063,32 @@ function collectOfflineAssets() {
   return items;
 }
 
-async function estimateOfflineSize(items) {
-  const results = new Array(items.length);
-  let idx = 0;
-  const CONC = 6;
-  async function worker() {
-    while (idx < items.length) {
-      const i = idx++;
-      let size = 0;
-      try {
-        const res = await fetch(items[i].url, { method: 'HEAD', cache: 'no-store' });
-        size = parseInt(res.headers.get('content-length') || '0', 10) || 0;
-      } catch {}
-      results[i] = { ...items[i], size };
+// Menu items and amenities whose content lives on another site (YouTube/Vimeo, a hosted tour,
+// a web page) — they open only with a connection, saved copy or not. Same rule as the
+// standalone export's warning (server.py scan_menu_for_online_content +
+// scan_amenities_for_online_content).
+function countOnlineOnlyItems() {
+  const ext = (u) => /^(https?:)?\/\//i.test(String(u || '').trim());
+  let n = 0;
+  const walk = (nodes) => {
+    for (const node of nodes || []) {
+      if (!node || typeof node !== 'object') continue;
+      if (node.kind === 'parent') { walk(node.children); continue; }
+      if (node.kind !== 'child' || node.enabled === false) continue;
+      const c = node.content || {};
+      if ((node.contentType || 'link') === 'gallery') {
+        if ((c.images || []).some((img) => img && typeof img === 'object' && !img.fileName && !img.name && ext(img.url))) n++;
+      } else if (!c.fileName && ext(c.url)) n++;
     }
-  }
-  await Promise.all(Array.from({ length: Math.min(CONC, items.length) }, worker));
-  return { items: results, totalBytes: results.reduce((s, r) => s + (r.size || 0), 0) };
+  };
+  walk(state.menuConfig?.tree);
+  return n + (state.amenities || []).filter((a) => ext(a.tour_url)).length;
 }
 
-// Browsers hand a site a limited, evictable storage budget by default — and will silently
-// throw data away under pressure (iOS Safari also clears it after ~7 days of not opening
-// the site). Asking for "persistent" storage is what lifts both limits: it exempts the
-// data from eviction and, on Chromium, unlocks a much larger quota than the default
-// best-effort allowance. It's a no-op where unsupported, and browsers are more willing to
-// grant it during a user gesture, which is why this is called from the Add tap.
+// ─── Storage helpers ────────────────────────────────────────────────────────
+// Browsers hand a site a limited, evictable storage budget by default, and can throw data away
+// under pressure (iOS Safari also clears a browser tab's data after ~7 days unopened). Asking
+// for "persistent" storage lifts both; browsers grant it more readily inside a tap.
 async function requestPersistentStorage() {
   try {
     if (!navigator.storage || !navigator.storage.persist) return false;
@@ -10542,8 +11096,7 @@ async function requestPersistentStorage() {
     return await navigator.storage.persist();
   } catch { return false; }
 }
-
-// How much room this origin actually has left, or null if the browser won't say.
+// How much room this origin has left, or null if the browser won't say.
 async function storageHeadroom() {
   try {
     if (!navigator.storage || !navigator.storage.estimate) return null;
@@ -10552,291 +11105,615 @@ async function storageHeadroom() {
     return Math.max(0, est.quota - est.usage);
   } catch { return null; }
 }
-
 function formatBytes(n) {
   if (!n || n <= 0) return '';
   if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
   return `${(n / (1024 * 1024)).toFixed(n < 100 * 1024 * 1024 ? 1 : 0)} MB`;
 }
-
-function isIosSafari() {
-  const isIos = /iP(hone|ad|od)/.test(navigator.userAgent);
-  const isSafari = /Safari/.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
-  return isIos && isSafari;   // iOS never fires beforeinstallprompt on ANY browser — Safari is the only one that even has a manual Share-sheet path
+// What an older version of this app downloaded for this folder (sw.js up to v49 — see LEGACY in
+// sw.js): read to adopt files without downloading them again, deleted once adopted.
+async function openLegacyCaches() {
+  if (!('caches' in window)) return [];
+  const shell = OFFLINE_SCOPE_PATH === '/' ? 'b91-shell-' : `b91-shell@${OFFLINE_SCOPE_PATH}:`;
+  const names = (await caches.keys()).filter((n) => n.startsWith(shell) || isLegacyContentCache(n));
+  return Promise.all(names.map((n) => caches.open(n)));
 }
-
-// How many of these assets aren't in any b91- cache yet. Asked of Cache Storage directly
-// rather than inferred from a localStorage "saved" flag, because the flag records only that a
-// download once FINISHED — not that the content is still there. Those diverge for real: a
-// browser can evict a non-persisted cache under storage pressure (iOS Safari also clears it
-// after ~7 days unopened), and until 2026-09-12 a service-worker VERSION bump deleted the
-// content caches outright. Either way the visitor was left with the flag set, the banner
-// therefore suppressed, and nothing actually cached — no way back to a working offline copy
-// short of clearing site data. Checking what's really stored is what makes that self-healing.
-async function countMissingOfflineAssets(items) {
-  if (!('caches' in window) || !items.length) return 0;
-  try {
-    const names = (await caches.keys()).filter((k) => k.startsWith('b91-'));
-    if (!names.length) return items.length;
-    const opened = await Promise.all(names.map((n) => caches.open(n)));
-    let missing = 0;
-    for (const it of items) {
-      // sw.js keys entries with the cache-busting query stripped (see its cacheKeyFor), so
-      // match on the bare URL or nothing would ever be found.
-      const u = new URL(it.url, location.href);
-      u.search = '';
-      const key = u.toString();
-      let found = false;
-      for (const c of opened) { if (await c.match(key)) { found = true; break; } }
-      if (!found) missing++;
+const isLegacyContentCache = (n) => n === 'b91-data' || n === 'b91-media' || n.startsWith('b91-data-') || n.startsWith('b91-media-');
+async function findLegacyCopy(legacy, key, size) {
+  for (const cache of legacy) {
+    const res = await cache.match(key).catch(() => null);
+    if (!res || res.status !== 200) continue;
+    if (size) {
+      const len = (!res.headers.get('Content-Encoding') && +res.headers.get('Content-Length')) || (await res.clone().blob()).size;
+      if (len !== size) continue;
     }
-    return missing;
-  } catch { return 0; }   // can't tell — don't nag on the strength of a failed probe
+    return res;
+  }
+  return null;
+}
+async function dropLegacyEntries(match) {
+  const names = (await caches.keys()).filter(isLegacyContentCache);
+  for (const name of names) {
+    const cache = await caches.open(name);
+    for (const req of await cache.keys()) if (match(req.url)) await cache.delete(req);
+    if (!(await cache.keys()).length) await caches.delete(name);
+  }
+}
+// After a successful save: this project's old-style download is no longer needed.
+async function retireLegacyDownload(pid) {
+  try {
+    localStorage.removeItem(legacySavedFlag(pid));
+    localStorage.removeItem(`b91-offline-declined-v12-${pid}`);
+  } catch {}
+  try {
+    await dropLegacyEntries((url) => url.startsWith(new URL(`projects/${pid}/`, OFFLINE_SCOPE).href));
+    // The old app shell: a published folder's belongs to it alone; at the site root every
+    // project there shared one, so it goes once no project here has an old-style download left.
+    let othersRely = false;
+    if (OFFLINE_SCOPE_PATH === '/') {
+      try { othersRely = Object.keys(localStorage).some((k) => k.startsWith('b91-offline-saved-v12-')); } catch {}
+    }
+    if (!othersRely) {
+      const shell = OFFLINE_SCOPE_PATH === '/' ? 'b91-shell-' : `b91-shell@${OFFLINE_SCOPE_PATH}:`;
+      const names = (await caches.keys()).filter((n) => n.startsWith(shell));
+      await Promise.all(names.map((n) => caches.delete(n)));
+    }
+  } catch {}
 }
 
-// Is the "⬇ SAVE FOR OFFLINE" menu row worth showing? Exactly where the download can actually
-// happen: the client (never admin), a phone (registerOfflineSupport unregisters the worker on
-// anything larger), and a secure context with service workers — i.e. https:// or localhost, never
-// a plain-http LAN address, where the worker refuses to register at all.
-function offlineSaveRowAvailable() {
-  return !state.admin && !!els.offlineSaveBanner && 'serviceWorker' in navigator && window.isSecureContext
-    && (isMobilePortrait() || isMobileLandscape());
+// Can this browser store a response whose body is still streaming in? Then a video goes
+// straight from the network into storage and is never held in memory whole. Asked once.
+let offlineStreamPut = null;
+async function canStreamIntoCache(cache) {
+  if (offlineStreamPut !== null) return offlineStreamPut;
+  try {
+    if (typeof ReadableStream !== 'function' || typeof TransformStream !== 'function') throw new Error('no streams');
+    const probe = new URL('.b91-stream-probe', OFFLINE_SCOPE).href;
+    const body = new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } });
+    await cache.put(probe, new Response(body));
+    await cache.delete(probe);
+    offlineStreamPut = true;
+  } catch { offlineStreamPut = false; }
+  return offlineStreamPut;
 }
-// `force` = the visitor asked for this from the menu, so the remembered "Not now"/"already saved"
-// answers are ignored. With nothing left to fetch it says so rather than opening a banner whose
-// buttons would have nothing to do.
-async function maybeOfferOfflineSave({ force = false } = {}) {
-  if (state.admin || !els.offlineSaveBanner) return;
+function offlineEntryHeaders(it, contentType) {
+  const h = { 'Content-Type': contentType || 'application/octet-stream', 'X-B91-Hash': it.hash || '' };
+  if (it.size) h['Content-Length'] = String(it.size);   // lets the loading screen's progress bar measure a saved pano
+  return h;
+}
+
+// ─── Planning a save / update ───────────────────────────────────────────────
+// Each file on the list gets an action: 'keep' (the copy already has this exact version),
+// 'move' (an older version of this app downloaded it — copied over, no download), or 'fetch'.
+// plots.csv is always fetched: the Google Sheet is re-read and merged into it every time.
+async function planOfflineSave(pid) {
+  let list = await fetchOfflineList(pid);
+  if (!list.ok) {
+    if (list.offline) return { error: 'offline' };
+    list = fallbackOfflineList();
+  }
+  const saved = await caches.open(offlineCacheName(pid));
+  const resuming = !(await saved.match(OFFLINE_RECORD_KEY));   // a first save that stopped part-way
+  const legacy = await openLegacyCaches();
+  const csvPath = `projects/${pid}/plots.csv`;
+  const items = [];
+  for (const f of list.files) {
+    const key = offlineKeyFor(f.path);
+    const it = { ...f, key, core: isOfflineCoreFile(f.path), action: 'fetch', changed: true };
+    const have = await saved.match(key);
+    // With a fingerprint: the copy is current exactly when it matches. Without one (fallback
+    // list): only a first save that stopped part-way keeps what it already got.
+    const current = have && (f.hash ? have.headers.get('X-B91-Hash') === f.hash : resuming);
+    if (current) {
+      it.changed = false;
+      if (f.path !== csvPath) it.action = 'keep';
+    } else if (!it.core && await findLegacyCopy(legacy, key, f.size)) {
+      it.action = 'move';
+    }
+    items.push(it);
+  }
+  const downloads = items.filter((i) => i.action === 'fetch' && (i.changed || i.path !== csvPath));
+  return {
+    pid, items, legacy, version: list.version, fromList: list.fromList,
+    downloadCount: downloads.length,
+    downloadBytes: downloads.reduce((s, i) => s + (i.size || 0), 0),
+    estBytes: 0,
+  };
+}
+// Sizes for the panel when the server has no list (a rough guide only — never used to check a
+// download, since a compressed response's length is not the file's).
+async function estimateFallbackSizes(plan) {
+  const queue = plan.items.filter((i) => i.action === 'fetch' && !i.size);
+  let total = 0;
+  const worker = async () => {
+    while (queue.length) {
+      const it = queue.shift();
+      try {
+        const res = await fetchWithTimeout(offlineNetUrl(it.path), { method: 'HEAD', cache: 'no-store' }, 8000);
+        total += +res.headers.get('content-length') || 0;
+      } catch {}
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker));
+  plan.estBytes = total;
+}
+
+// ─── Saving / updating ──────────────────────────────────────────────────────
+// Download one file straight into `cache`, counting bytes as they go by (onBytes). A file with
+// a known size must arrive at exactly that size, or nothing is stored. A download that stops
+// moving for 45s is abandoned (and retried by the caller). Returns 'missing' when a fallback-list
+// file simply isn't on the server.
+async function fetchOfflineFile(it, cache, onBytes) {
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  let idle = null;
+  const poke = () => { if (!ctl) return; clearTimeout(idle); idle = setTimeout(() => ctl.abort(), 45000); };
+  poke();
+  try {
+    const res = await fetch(offlineNetUrl(it.path), { cache: 'no-store', ...(ctl ? { signal: ctl.signal } : {}) });
+    if (res.status === 404 && !it.hash) return 'missing';
+    if (res.status !== 200) throw new Error(`status ${res.status}`);
+    const type = res.headers.get('Content-Type') || '';
+    if (res.body && await canStreamIntoCache(cache)) {
+      let n = 0;
+      const counted = res.body.pipeThrough(new TransformStream({
+        transform(chunk, c) { n += chunk.byteLength; onBytes(chunk.byteLength); poke(); c.enqueue(chunk); },
+        flush() { if (it.size && n !== it.size) throw new Error('size'); },
+      }));
+      await cache.put(it.key, new Response(counted, { status: 200, headers: offlineEntryHeaders(it, type) }));
+    } else {
+      const blob = await res.blob();
+      if (it.size && blob.size !== it.size) throw new Error('size');
+      onBytes(blob.size);
+      await cache.put(it.key, new Response(blob, { status: 200, headers: offlineEntryHeaders(it, type) }));
+    }
+    return 'ok';
+  } finally { clearTimeout(idle); }
+}
+// A download only makes progress with the screen on and a connection: wait for both (a
+// connection for up to a minute) before starting the next file or retrying one.
+async function offlineWaitUntilUsable(prog) {
+  if (document.visibilityState === 'hidden') await waitForEvent(document, 'visibilitychange', () => document.visibilityState === 'visible');
   if (navigator.onLine === false) {
-    if (force) showNotice('No connection right now — reconnect to download this project for offline use.');
+    prog.note('Waiting for a connection…');
+    await waitForEvent(window, 'online', () => navigator.onLine !== false, 60000);
+    prog.note('');
+  }
+}
+async function downloadOfflineItem(it, cache, prog, failed) {
+  const waits = [1500, 4000, 10000];
+  for (let attempt = 0; ; attempt++) {
+    await offlineWaitUntilUsable(prog);
+    let got = 0;
+    try {
+      const r = await fetchOfflineFile(it, cache, (n) => { got += n; prog.bump(n); });
+      if (r === 'missing') { it.skipped = true; prog.bump(-got); }
+      else it.gotBytes = got;
+      prog.fileDone();
+      return;
+    } catch (e) {
+      prog.bump(-got);
+      it.error = e && e.name === 'QuotaExceededError' ? 'space' : (navigator.onLine === false ? 'offline' : 'network');
+      if (it.error === 'space' || attempt >= waits.length) break;
+      await offlineSleep(waits[attempt]);
+    }
+  }
+  failed.push(it);
+  prog.fileDone();
+}
+// Small files a few at a time, then big ones strictly one at a time — the big ones are where a
+// weak connection hurts, and one steady download gets further than two competing ones.
+async function downloadOfflineItems(items, cache, prog, failed) {
+  const pool = async (list, n) => {
+    const q = list.slice();
+    await Promise.all(Array.from({ length: Math.min(n, q.length) }, async () => {
+      while (q.length) await downloadOfflineItem(q.shift(), cache, prog, failed);
+    }));
+  };
+  await pool(items.filter((i) => !(i.size >= OFFLINE_BIG_FILE)), 3);
+  await pool(items.filter((i) => i.size >= OFFLINE_BIG_FILE), 1);
+}
+// Progress across all downloads, by bytes (by file count when sizes are unknown).
+function offlineProgress(ui, items) {
+  const total = items.reduce((s, i) => s + (i.size || 0), 0);
+  const byCount = total === 0;
+  const started = Date.now();
+  let bytes = 0, files = 0;
+  const paint = () => {
+    if (!ui) return;
+    const frac = byCount ? (items.length ? files / items.length : 1) : bytes / total;
+    let eta = '';
+    const secs = (Date.now() - started) / 1000;
+    if (!byCount && secs > 2 && bytes > 0) {
+      const left = Math.max(0, total - bytes) / (bytes / secs);
+      eta = left > 8 ? `about ${Math.max(1, Math.ceil(left / 60))} min left` : 'almost done';
+    }
+    ui.progress(Math.min(0.99, frac), eta);
+  };
+  return {
+    bump(n) { bytes = Math.max(0, bytes + n); paint(); },
+    fileDone() { files++; paint(); },
+    note(text) { ui?.note(text); },
+  };
+}
+// plots.csv as this copy will show it: the server's file with the Google Sheet merged in
+// (mergeSheetIntoCsv — the admin save's "sheet wins" rule), read from the sheet named in the
+// alignment.json this copy will use. If the sheet can't be reached, the server's file is used
+// as it is (it carries the sheet as of the admin's last save) — unless that file hasn't changed
+// and the copy already holds a newer read of the sheet, which is then kept.
+async function saveMergedPlotsCsv(it, staging, sheetCfg) {
+  const res = await fetchWithTimeout(offlineNetUrl(it.path), { cache: 'no-store' }, 30000);
+  if (res.status === 404 && !it.hash) { it.skipped = true; return { enabled: false, ok: false, readAt: null }; }
+  if (!res.ok) throw new Error(`status ${res.status}`);
+  const serverText = await res.text();
+  const enabled = !!(sheetCfg && sheetCfg.enabled && sheetCfg.url);
+  const rows = enabled ? await fetchSheetRows(sheetCfg, { timeoutMs: 15000 }) : null;
+  const prev = offline.record && offline.record.sheet;
+  if (enabled && !rows && !it.changed && prev && prev.ok) {
+    it.keptPrevious = true;                                // the copy's own plots.csv stays as it is
+    return { enabled, ok: true, readAt: prev.readAt, stale: true };
+  }
+  const text = rows ? mergeSheetIntoCsv(serverText, rows) : serverText;
+  await staging.put(it.key, new Response(text, { status: 200, headers: { 'Content-Type': 'text/csv; charset=utf-8', 'X-B91-Hash': it.hash || '' } }));
+  return { enabled, ok: !!rows, readAt: rows ? new Date().toISOString() : null };
+}
+async function copyIntoCache(cache, it, res) {
+  const type = res.headers.get('Content-Type') || '';
+  const body = (res.body && await canStreamIntoCache(cache)) ? res.body : await res.blob();
+  await cache.put(it.key, new Response(body, { status: 200, headers: offlineEntryHeaders(it, type) }));
+}
+// Save (or update) this project's offline copy. `silent` is the quiet adoption of an older
+// download (maybeAdoptLegacyDownload): no panel, never starts a waiting offline layer, and
+// gives up if anything bigger than the app itself would have to be downloaded.
+// → { ok, total, done, reason, sheet }
+async function runOfflineSave({ silent = false } = {}) {
+  const pid = state.projectId;
+  if (offline.busy) return { ok: false, reason: 'busy' };
+  offline.busy = true;
+  offline.silent = silent;
+  const ui = silent ? null : offlinePanelProgressUi();
+  try {
+    ui?.phase('Preparing…');
+    const layer = await ensureCurrentOfflineLayer({ activate: !silent });
+    if (!layer.ok) return { ok: false, reason: layer.reason };
+    const plan = await planOfflineSave(pid);
+    if (plan.error) return { ok: false, reason: plan.error };
+    if (silent) {
+      const bigDownload = plan.items.some((i) => i.action === 'fetch' && !i.core);
+      const coreBytes = plan.items.filter((i) => i.action === 'fetch' && i.core).reduce((s, i) => s + (i.size || 0), 0);
+      if (bigDownload || coreBytes > 12 * 1024 * 1024) return { ok: false, reason: 'needs-download' };
+    }
+    const saved = await caches.open(offlineCacheName(pid));
+    await caches.delete(offlineStagingName(pid));
+    const staging = await caches.open(offlineStagingName(pid));
+    const failed = [];
+
+    // 1. Files an older version of this app already downloaded: copied over, not fetched again.
+    for (const it of plan.items.filter((i) => i.action === 'move')) {
+      try {
+        const res = await findLegacyCopy(plan.legacy, it.key, it.size);
+        if (!res) throw new Error('gone');
+        await copyIntoCache(saved, it, res);
+      } catch (e) {
+        if (e && e.name === 'QuotaExceededError') { failed.push(Object.assign(it, { error: 'space' })); continue; }
+        it.action = 'fetch';
+      }
+    }
+    // 2. Downloads: media straight into the copy (each replaces its old version only once it
+    //    has fully arrived); the app and the data into staging, switched over at the end.
+    const csvPath = `projects/${pid}/plots.csv`;
+    const fetches = plan.items.filter((i) => i.action === 'fetch' && i.path !== csvPath && !failed.includes(i));
+    const prog = offlineProgress(ui, fetches);
+    ui?.phase('');
+    await downloadOfflineItems(fetches.filter((i) => !i.core), saved, prog, failed);
+    await downloadOfflineItems(fetches.filter((i) => i.core), staging, prog, failed);
+    // 3. plots.csv with the sheet merged in, using the alignment.json this copy will have.
+    const alignKey = offlineKeyFor(`projects/${pid}/alignment.json`);
+    const alignRes = (await staging.match(alignKey)) || (await saved.match(alignKey));
+    let align = null;
+    try { align = alignRes ? parseAlignment(await alignRes.json()) : null; } catch {}
+    let sheet = { enabled: false, ok: false, readAt: null };
+    const csvItem = plan.items.find((i) => i.path === csvPath);
+    if (csvItem) {
+      ui?.phase('Reading plot availability…');
+      try { sheet = await saveMergedPlotsCsv(csvItem, staging, align && align.data); }
+      catch (e) { csvItem.error = navigator.onLine === false ? 'offline' : 'network'; failed.push(csvItem); }
+    }
+    // 4. Check what is actually stored — a download finishing is not the same as it being kept.
+    const missing = [];
+    for (const it of plan.items) {
+      if (it.skipped || failed.includes(it)) continue;
+      const where = (it.action === 'fetch' && it.core && !it.keptPrevious) ? staging : saved;
+      if (!(await where.match(it.key))) missing.push(it);
+    }
+    const bad = [...failed, ...missing];
+    const counted = plan.items.filter((i) => !i.skipped).length;
+    if (bad.length) {
+      await caches.delete(offlineStagingName(pid)).catch(() => {});
+      const headroom = await storageHeadroom();
+      const reason = bad.some((i) => i.error === 'space') || (headroom !== null && headroom < 5 * 1024 * 1024) ? 'space'
+        : (bad.some((i) => i.error === 'offline') || navigator.onLine === false) ? 'offline' : 'failed';
+      return { ok: false, reason, total: counted, done: counted - bad.length };
+    }
+    // 5. Switch over: staged app + data into the copy, the record last, files no longer used out.
+    ui?.phase('Finishing…');
+    const bytes = plan.items.reduce((s, i) => s + (i.skipped ? 0 : (i.size || i.gotBytes || 0)), 0);
+    await commitOfflineCopy(pid, plan, saved, staging, { sheet, dataAsOf: (align && align.savedAt) || null, bytes });
+    return { ok: true, total: counted, done: counted, sheet };
+  } catch (e) {
+    return { ok: false, reason: e && e.name === 'QuotaExceededError' ? 'space' : 'failed' };
+  } finally {
+    offline.busy = false;
+    offline.silent = false;
+    releaseWakeLock();
+  }
+}
+async function commitOfflineCopy(pid, plan, saved, staging, meta) {
+  for (const req of await staging.keys()) {
+    const res = await staging.match(req);
+    if (res) await saved.put(req, res);
+  }
+  const record = {
+    project: pid,
+    savedAt: new Date().toISOString(),
+    listVersion: plan.version || '',
+    fromList: !!plan.fromList,
+    files: plan.items.filter((i) => !i.skipped).length,
+    bytes: meta.bytes,
+    sheet: meta.sheet,                                     // { enabled, ok, readAt } — the Google Sheet read merged into plots.csv
+    dataAsOf: meta.dataAsOf,                               // alignment.json savedAt: the admin's last save
+  };
+  await saved.put(OFFLINE_RECORD_KEY, new Response(JSON.stringify(record), { headers: { 'Content-Type': 'application/json' } }));
+  const keep = new Set(plan.items.filter((i) => !i.skipped).map((i) => i.key));
+  keep.add(OFFLINE_RECORD_KEY);
+  for (const req of await saved.keys()) if (!keep.has(req.url)) await saved.delete(req);
+  await caches.delete(offlineStagingName(pid));
+  offline.record = record;
+  offline.updateAvailable = false;
+  offline.checkedAt = Date.now();
+  tellOfflineLayer({ type: 'SAVED_CHANGED' });
+  await retireLegacyDownload(pid);
+}
+
+// Keep the screen on while a save runs — a phone that locks mid-download stops it. Where the
+// browser supports it; re-taken when the visitor comes back to the page (it's released whenever
+// the page is hidden).
+async function holdWakeLock() {
+  try {
+    if (offline.wakeLock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    offline.wakeLock = await navigator.wakeLock.request('screen');
+    offline.wakeLock.addEventListener?.('release', () => { offline.wakeLock = null; });
+  } catch { offline.wakeLock = null; }
+}
+function releaseWakeLock() {
+  try { offline.wakeLock?.release(); } catch {}
+  offline.wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (offline.busy && !offline.silent && document.visibilityState === 'visible') holdWakeLock();
+});
+
+// A phone that finished a download with the version before strict mode (sw.js up to v49) keeps
+// that content: on its first visit with a connection, once the current offline layer is running
+// here, it's turned into a saved copy quietly — files moved over, only the app itself fetched
+// fresh. Anything bigger to download, and it's left for the visitor's own Update (the older
+// download keeps working offline until then — sw.js falls back to it).
+async function maybeAdoptLegacyDownload() {
+  if (offline.record || offline.busy || !offlineSaveRowAvailable() || navigator.onLine === false) return;
+  if (isIosDevice() && !isStandaloneDisplay()) return;   // an iPhone browser tab stays the live site (see the header)
+  let flagged = false;
+  try { flagged = localStorage.getItem(legacySavedFlag(state.projectId)) === '1'; } catch {}
+  if (!flagged) return;
+  await offlineSleep(4000);                               // after the visitor's first taps have had the connection
+  const res = await runOfflineSave({ silent: true });
+  if (res.ok) refreshOfflineMenuRow();
+}
+
+// Once boot is done: look for an update if the menu is already open (landscape starts with it
+// open), and adopt an older download if there is one.
+async function afterBootOffline(registration) {
+  try {
+    if (!(await registration)) return;
+    if (els.catDrawer && !els.catDrawer.classList.contains('is-collapsed')) checkForOfflineUpdate();
+    maybeAdoptLegacyDownload();
+  } catch {}
+}
+
+// ─── The offline panel ──────────────────────────────────────────────────────
+function wireOfflinePanel() {
+  if (!els.offlinePanel || wireOfflinePanel.done) return;
+  wireOfflinePanel.done = true;
+  // Taps on the panel must not fall through to the pano behind it (plot selection, drag).
+  ['pointerdown', 'pointerup', 'click', 'mousedown', 'mouseup', 'touchstart', 'touchend']
+    .forEach((t) => els.offlinePanel.addEventListener(t, (e) => e.stopPropagation()));
+  els.offlinePanelClose?.addEventListener('click', () => { els.offlinePanel.hidden = true; });
+  els.offlinePanelGo?.addEventListener('click', onOfflineGo);
+  els.offlinePanelRemove?.addEventListener('click', onOfflineRemove);
+}
+function setOfflinePanel({ title, icon = '⬇', body = '', go = null, goDisabled = false, remove = false, progress = false, result = null }) {
+  if (els.offlinePanelTitle) els.offlinePanelTitle.textContent = title;
+  const ic = els.offlinePanel.querySelector('.offline-panel-icon');
+  if (ic) ic.textContent = icon;
+  els.offlinePanelBody.innerHTML = body;
+  els.offlinePanelProgress.hidden = !progress;
+  els.offlinePanelResult.hidden = !result;
+  if (result) {
+    els.offlinePanelResult.innerHTML = result.html;
+    els.offlinePanelResult.classList.toggle('is-warn', !!result.warn);
+  }
+  els.offlinePanelGo.hidden = !go;
+  if (go) { els.offlinePanelGo.textContent = go.label; offline.goAction = go.action; }
+  els.offlinePanelGo.disabled = !!goDisabled;
+  els.offlinePanelRemove.hidden = !remove;
+  els.offlinePanelRemove.classList.remove('is-armed');
+  els.offlinePanelRemove.textContent = 'Remove from this device';
+  offline.removeArmed = false;
+}
+function offlinePanelProgressUi() {
+  if (els.offlinePanelBarFill) els.offlinePanelBarFill.style.width = '0%';
+  if (els.offlinePanelPct) els.offlinePanelPct.textContent = '';
+  if (els.offlinePanelEta) els.offlinePanelEta.textContent = '';
+  const keepText = 'Keep this screen open until it finishes.';
+  if (els.offlinePanelKeep) els.offlinePanelKeep.textContent = keepText;
+  return {
+    phase(text) { if (els.offlinePanelEta) els.offlinePanelEta.textContent = text || ''; },
+    progress(frac, eta) {
+      const pct = Math.round(frac * 100);
+      if (els.offlinePanelBarFill) els.offlinePanelBarFill.style.width = `${pct}%`;
+      if (els.offlinePanelPct) els.offlinePanelPct.textContent = `${pct}%`;
+      if (els.offlinePanelEta) els.offlinePanelEta.textContent = eta || '';
+    },
+    note(text) { if (els.offlinePanelKeep) els.offlinePanelKeep.textContent = text || keepText; },
+  };
+}
+// The menu row's action.
+async function openOfflinePanel() {
+  if (!offlineSaveRowAvailable() || !els.offlinePanel) return;
+  wireOfflinePanel();
+  collapseClientDrawer();
+  els.offlinePanel.hidden = false;
+  if (offline.busy) {                                    // a save is running: the panel already shows it
+    if (offline.silent) setOfflinePanel({ title: 'Offline copy', body: '<p>Finishing an earlier download on this device — one moment.</p>' });
     return;
   }
-  const pid = state.projectId || 'default';
-  const standalone = isStandaloneDisplay();
-  let saved = false, declined = false;
-  try {
-    saved = localStorage.getItem(`b91-offline-saved-${SW_VERSION}-${pid}`) === '1';
-    declined = localStorage.getItem(`b91-offline-declined-${SW_VERSION}-${pid}`) === '1';
-  } catch {}
-  if (declined && !force) return;   // they said no; respect it until the next SW version
-
-  // A tap on the menu row must answer AT ONCE. The checks below take seconds on a real project
-  // (probing every asset against the cache, then measuring the download), and the banner used to
-  // appear ~12s after the tap with nothing on screen meanwhile — indistinguishable from a dead
-  // button. The banner opens first, saying it is checking; the branches below either fill it in or
-  // take it away again. Nothing here is shown unasked: `force` only ever comes from that tap.
-  if (force) {
-    if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = 'Save for offline use';
-    if (els.offlineSaveSize) els.offlineSaveSize.textContent = 'Checking what is already saved…';
-    els.offlineSavePrompt.hidden = false;
-    els.offlineSaveProgress.hidden = true;
-    els.offlineSaveBanner.hidden = false;
+  if (isIosDevice() && !isStandaloneDisplay()) { renderIosGuide(); return; }
+  renderOfflineStatus({ checking: true });
+  if (navigator.onLine === false) { renderOfflineStatus({ noConnection: true }); return; }
+  let plan;
+  try { plan = await planOfflineSave(state.projectId); } catch { plan = { error: 'failed' }; }
+  if (els.offlinePanel.hidden || offline.busy) return;
+  if (!plan.error && !plan.fromList) await estimateFallbackSizes(plan);
+  const headroom = plan.error ? null : await storageHeadroom();
+  if (els.offlinePanel.hidden || offline.busy) return;
+  if (!plan.error && offline.record && plan.fromList) {
+    offline.updateAvailable = plan.version !== offline.record.listVersion;
+    refreshOfflineMenuRow();
   }
-  const assets = collectOfflineAssets();
-  const iosManual = isIosSafari();
-  const missing = await countMissingOfflineAssets(assets);
-  // Everything's already downloaded: the banner has no content job left, so only show it if
-  // there's still an INSTALL worth offering (i.e. not already installed, and never saved).
-  // Asked for from the menu with everything already in place: DOWNLOAD IT AGAIN (2026-09-23, on
-  // request — "allow the users to download as much he wants to"). A visitor who taps the row after
-  // a first save is usually trying to repair a bad copy, and being told "already saved" while the
-  // site misbehaves offline is a dead end. The banner just says so and fetches the lot again.
-  const refreshing = force && missing === 0 && assets.length > 0;
-  if (missing === 0 && !force && (saved || standalone)) return;
-  // Nothing this banner could actually do: no content to fetch, and no install path either
-  // (not a beforeinstallprompt browser, not iOS Safari's manual Share-sheet route, or already
-  // running installed).
-  if (!missing && !refreshing && !deferredInstallPrompt && !iosManual) { if (force) els.offlineSaveBanner.hidden = true; return; }
-
-  // Already installed → "Add to Home Screen" is meaningless; this is purely a re-download.
-  // That case exists because content can go missing under an intact install (see
-  // countMissingOfflineAssets), and the home-screen icon is exactly where such a visitor
-  // lives — suppressing the banner there used to leave them with no route back at all.
-  if (els.offlineSaveTitle) els.offlineSaveTitle.textContent = refreshing ? 'Download again'
-    : standalone ? 'Download for offline use' : 'Add to Home Screen';
-  const sizeLabel = (bytes) => {
-    const size = formatBytes(bytes);
-    if (refreshing) return size
-      ? `Already saved — fetch all ${assets.length} files again (approx. ${size})`
-      : `Already saved — fetch all ${assets.length} files again`;
-    const base = assets.length ? (size ? `Includes offline access — approx. ${size}` : 'Includes offline access') : 'Opens instantly next time';
-    if (standalone) return size ? `Approx. ${size} · so it works with no signal` : 'So it works with no signal';
-    return iosManual ? `${base} · tap Share → Add to Home Screen after` : base;
-  };
-  if (els.offlineSaveSize) els.offlineSaveSize.textContent = assets.length ? 'Checking size…' : sizeLabel(0);
-
-  els.offlineSavePrompt.hidden = false;
-  els.offlineSaveProgress.hidden = true;
-  els.offlineSaveBanner.hidden = false;
-
-  const { items, totalBytes } = assets.length ? await estimateOfflineSize(assets) : { items: [], totalBytes: 0 };
-  if (els.offlineSaveSize) {
-    // Say so BEFORE they commit if the phone plainly can't hold it, rather than letting
-    // them sit through a download that gets silently truncated at the quota.
-    const headroom = await storageHeadroom();
-    const tooBig = headroom !== null && totalBytes > 0 && totalBytes > headroom;
-    els.offlineSaveSize.textContent = tooBig
-      ? `${sizeLabel(totalBytes)} · may exceed this phone's free space (${formatBytes(headroom)} left)`
-      : sizeLabel(totalBytes);
+  renderOfflineStatus({ plan, headroom });
+}
+function renderOfflineStatus({ checking = false, noConnection = false, plan = null, headroom = null } = {}) {
+  const rec = offline.record;
+  const lines = [];
+  const P = (html, cls = '') => lines.push(`<p${cls ? ` class="${cls}"` : ''}>${html}</p>`);
+  if (rec) {
+    P(`Saved on this device ${esc(formatOfflineDate(rec.savedAt))}${rec.bytes ? ` · ${esc(formatBytes(rec.bytes))}` : ''}. It opens from here with or without a connection.`);
+    const asOf = offlineAsOf(rec);
+    if (asOf) P(`Plot availability as of ${esc(asOf)}.`, 'is-muted');
+  } else {
+    P('Saves this project on this device, so it opens with or without a connection. It stays as saved until you update it here.');
   }
-
-  await new Promise((resolve) => {
-    const onSkip = () => {
-      els.offlineSaveSkip.removeEventListener('click', onSkip);
-      els.offlineSaveGo.removeEventListener('click', onGo);
-      els.offlineSaveBanner.hidden = true;
-      // Closing a banner the visitor OPENED themselves is not a refusal of the offer — recording
-      // it would stop the automatic banner ever appearing again on the strength of a tap on "⬇
-      // SAVE FOR OFFLINE" followed by second thoughts.
-      if (!force) { try { localStorage.setItem(`b91-offline-declined-${SW_VERSION}-${pid}`, '1'); } catch {} }
-      resolve();
-    };
-    const onGo = async () => {
-      els.offlineSaveSkip.removeEventListener('click', onSkip);
-      els.offlineSaveGo.removeEventListener('click', onGo);
-      // prompt() only works inside the tap that triggered it, so it can't be deferred or
-      // retried later — if the browser hasn't handed us an install event by now, the only
-      // honest option is telling the visitor where the manual control lives (below).
-      let promptedInstall = false;
-      if (deferredInstallPrompt) {
-        const p = deferredInstallPrompt;
-        deferredInstallPrompt = null;
-        promptedInstall = true;
-        p.prompt();               // native install dialog — fire-and-forget, doesn't block the content download below
-        p.userChoice.catch(() => {});
-      }
-      // Ask for non-evictable storage while we're still inside the tap that requested it —
-      // this is what gives the videos room to land and keeps them from being cleared later.
-      await requestPersistentStorage();
-      if (items.length) await runOfflineDownload(items, totalBytes, pid);
-      if (!promptedInstall && !isStandaloneDisplay()) {
-        showNotice(iosManual
-          ? 'Saved for offline. To add the icon: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.'
-          : 'Saved for offline. To add the icon: open your browser <strong>menu (⋮)</strong>, then <strong>Install app</strong> / <strong>Add to Home screen</strong>.');
-      }
-      else els.offlineSaveBanner.hidden = true;
-      resolve();
-    };
-    els.offlineSaveSkip.addEventListener('click', onSkip);
-    els.offlineSaveGo.addEventListener('click', onGo);
+  let go = { label: rec ? 'Update' : 'Save', action: 'save' }, goDisabled = false;
+  if (checking) { P('Checking the server…', 'is-muted'); goDisabled = true; }
+  else if (noConnection) { P(`No connection right now — connect to the internet to ${rec ? 'update' : 'save'} it.`, 'is-warn'); goDisabled = true; }
+  else if (plan && plan.error) {
+    P(plan.error === 'offline' ? "Couldn't reach the server — check the connection and try again." : "Couldn't check the server — try again in a moment.", 'is-warn');
+    go = { label: 'Try again', action: 'recheck' };
+  } else if (plan) {
+    const n = plan.downloadCount, bytes = plan.downloadBytes || plan.estBytes, size = formatBytes(bytes);
+    const files = `${n} file${n === 1 ? '' : 's'}`;
+    if (!rec) P(`Downloads ${size ? `about ${esc(size)} (${files})` : files}.`);
+    else if (!plan.fromList) P(`Update downloads everything again${size ? ` (about ${esc(size)})` : ''}.`);
+    else if (!n) P('Up to date — nothing has changed on the server since your last update.', 'is-good');
+    else P(`Update available — ${files} changed${size ? ` (about ${esc(size)})` : ''}.`);
+    if (state.sheet.enabled && state.sheet.url) {
+      P(rec ? 'Updating also refreshes plot availability from the live sheet.' : 'Plot availability is saved as it is right now.', 'is-muted');
+    }
+    if (headroom !== null && bytes) {
+      P(bytes > headroom ? `Needs about ${esc(size)}, but only ${esc(formatBytes(headroom) || '0 KB')} is free on this device.`
+        : `${esc(formatBytes(headroom))} free on this device.`, bytes > headroom ? 'is-warn' : 'is-muted');
+    }
+    const online = countOnlineOnlyItems();
+    if (online) P(`${online} menu item${online === 1 ? '' : 's'} still need${online === 1 ? 's' : ''} the internet (videos or pages hosted elsewhere).`, 'is-muted');
+  }
+  setOfflinePanel({ title: rec ? 'Offline copy' : 'Save for offline', icon: rec ? '⟳' : '⬇', body: lines.join(''), go, goDisabled, remove: !!rec });
+}
+// iPhone / iPad in a browser tab: saving here would land in the browser's storage, which the
+// Home Screen app doesn't share — so explain the right order instead of downloading.
+function renderIosGuide() {
+  const name = esc((state.brand.name || '').trim() || 'this project');
+  const share = '<svg class="offline-panel-share" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10H5v11h14V10h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  setOfflinePanel({
+    title: 'Save for offline',
+    body: `<p>On iPhone and iPad, offline use works from the Home Screen app. A copy saved in this browser tab wouldn't be there when you open the icon.</p>
+      <ol class="offline-panel-steps">
+        <li>Tap ${share} <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</li>
+        <li>Open <strong>${name}</strong> from your Home Screen while you're online.</li>
+        <li>Open the menu there and choose <strong>Save for offline</strong>.</li>
+      </ol>`,
+    go: { label: 'Got it', action: 'close' },
   });
 }
-
-async function runOfflineDownload(items, totalBytes, pid) {
-  els.offlineSavePrompt.hidden = true;
-  els.offlineSaveProgress.hidden = false;
-
-  let bytesDone = 0;
-  const startedAt = Date.now();
-  const knownTotal = totalBytes > 0 ? totalBytes : items.length;   // falls back to a per-item unit if HEAD sizes were unavailable
-  const bump = (n) => {
-    bytesDone += n;
-    const pct = Math.min(99, Math.round((bytesDone / knownTotal) * 100));
-    if (els.offlineSaveBarFill) els.offlineSaveBarFill.style.width = pct + '%';
-    if (els.offlineSavePct) els.offlineSavePct.textContent = pct + '%';
-    const elapsed = (Date.now() - startedAt) / 1000;
-    if (els.offlineSaveEta && elapsed > 1 && bytesDone > 0) {
-      const remain = Math.max(0, knownTotal - bytesDone);
-      const etaSec = remain / (bytesDone / elapsed);
-      els.offlineSaveEta.textContent = etaSec > 8 ? `~${Math.max(1, Math.ceil(etaSec / 60))} min left` : 'almost done';
-    }
-  };
-
-  // A failed/incomplete fetch used to be counted the same as a real success just to keep
-  // the bar moving — meaning "100% / Done" could mean "actually cached" or "silently
-  // failed" with no way to tell the difference (a real bug: a Brochure PDF reported done
-  // but wasn't actually available offline). Now each item gets one retry, a non-OK
-  // response (including sw.js's own synthetic 503 "Offline" placeholder, if something
-  // upstream failed) counts as a failure not a success, and the final state — and whether
-  // this project gets marked "saved" at all — honestly reflects what actually cached.
-  const failed = [];
-  async function fetchOnce(item) {
-    const res = await fetch(item.url);
-    if (!res.ok) throw new Error('status ' + res.status);
-    if (res.body) {
-      const reader = res.body.getReader();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) bump(value.length);
-      }
-    } else {
-      await res.blob();
-      bump(item.size || 1);
-    }
+function offlineFailureText(res, wasSaved) {
+  if (res.reason === 'layer-old' || res.reason === 'layer-waiting') {
+    return 'The app is finishing an update in the background. Close it completely, open it again and try once more.';
   }
-
-  // Smaller files first, video last: if the connection can't sustain everything (today's
-  // demo tunnel has already dropped requests under load — see above), the cheap, fast
-  // items are the ones most likely to land, and the videos — the expensive part — are what
-  // contends for bandwidth the least once they're the only thing left in flight. Lower
-  // concurrency than a normal connection would warrant, for the same reason.
-  const kindWeight = { image: 0, pdf: 0, video: 1 };
-  const queue = items.slice().sort((a, b) => (kindWeight[a.kind] ?? 0) - (kindWeight[b.kind] ?? 0));
-  const CONC = 2;
-  async function worker() {
-    while (queue.length) {
-      const item = queue.shift();
-      try {
-        await fetchOnce(item);
-      } catch {
-        try { await fetchOnce(item); }   // one retry — the free tunnel used for today's demo drops occasional requests under concurrent load
-        catch { failed.push(item); bump(item.size || 1); }   // still bump so the bar reaches 100% instead of stalling — failure is tracked separately below, not hidden
-      }
-    }
+  const why = {
+    offline: 'the connection dropped',
+    space: 'this device is out of storage space',
+  }[res.reason] || 'some files could not be downloaded';
+  const count = res.total ? `${res.done} of ${res.total} files saved — ${why}.` : `${why.charAt(0).toUpperCase()}${why.slice(1)}.`;
+  return `${count} ${wasSaved ? 'Your previous saved copy still works. ' : ''}Tap <strong>${wasSaved ? 'Update' : 'Save'}</strong> to carry on from where it stopped.`;
+}
+async function onOfflineGo() {
+  const action = offline.goAction;
+  if (action === 'close') { els.offlinePanel.hidden = true; return; }
+  if (action === 'restart') { location.reload(); return; }
+  if (action === 'recheck') { openOfflinePanel(); return; }
+  if (offline.busy) return;
+  // Android's install dialog can only be opened from inside this tap — before anything awaits.
+  let promptedInstall = false;
+  if (deferredInstallPrompt && !isStandaloneDisplay()) {
+    const p = deferredInstallPrompt;
+    deferredInstallPrompt = null;
+    promptedInstall = true;
+    try { p.prompt(); p.userChoice?.catch?.(() => {}); } catch {}
   }
-  await Promise.all(Array.from({ length: Math.min(CONC, queue.length) }, worker));
-
-  // Downloading a file is NOT the same as it being stored. sw.js writes to the cache with
-  // cache.put(), and that can reject on its own — most plausibly a per-origin storage
-  // quota, which video is by far the most likely thing to blow past (mobile browsers cap
-  // this, iOS Safari tightly). Those writes happen in the worker, detached from the
-  // response the page sees, so a quota failure would otherwise be invisible here and get
-  // reported as a success — exactly the false "Done" this whole flow already got burned
-  // by once. So: ask the cache what it ACTUALLY holds before claiming anything.
-  const stored = await verifyCachedItems(items.filter((i) => !failed.includes(i)));
-  const missing = failed.length + stored.missing.length;
-
-  if (els.offlineSaveBarFill) els.offlineSaveBarFill.style.width = '100%';
-  if (els.offlineSavePct) els.offlineSavePct.textContent = '100%';
-  if (missing) {
-    // Name the cause: "download failed" and "phone wouldn't store it" need different
-    // responses from whoever is looking at this (retry vs. free up space / trim the project).
-    const headroom = await storageHeadroom();
-    const outOfSpace = headroom !== null && headroom < 5 * 1024 * 1024;
-    if (els.offlineSaveEta) {
-      els.offlineSaveEta.textContent = outOfSpace
-        ? `${items.length - missing}/${items.length} saved — phone storage full`
-        : `${items.length - missing}/${items.length} saved`;
+  requestPersistentStorage();                            // also best asked inside the tap
+  holdWakeLock();
+  const wasSaved = !!offline.record;
+  const title = wasSaved ? 'Updating offline copy' : 'Saving for offline';
+  setOfflinePanel({ title, body: '', progress: true });
+  const res = await runOfflineSave();
+  if (res.ok) {
+    const lines = [wasSaved ? 'Updated.' : 'Saved on this device.'];
+    if (res.sheet && res.sheet.enabled && (!res.sheet.ok || res.sheet.stale)) {
+      lines.push(`Couldn't reach the live sheet, so plot availability is as of ${esc(offlineAsOf())}.`);
     }
-    // Deliberately NOT marking this project "saved" — leaving the flag unset means the
-    // prompt offers again on a later visit instead of silently declaring victory on a
-    // partial save the visitor has no way to know about otherwise.
+    if (!wasSaved && !promptedInstall && !isStandaloneDisplay() && !isIosDevice()) {
+      lines.push('To add an icon: open the browser menu (⋮) → <strong>Install app</strong> or <strong>Add to Home screen</strong>.');
+    }
+    const autoRestart = lines.length === 1;
+    setOfflinePanel({
+      title: wasSaved ? 'Offline copy updated' : 'Saved for offline',
+      result: { html: lines.join(' ') + (autoRestart ? ' Opening the saved copy…' : '') },
+      go: { label: 'Open saved copy', action: 'restart' },
+    });
+    // The one reload in the whole offline flow — the visitor asked for it with this tap.
+    if (autoRestart) setTimeout(() => location.reload(), 1500);
   } else {
-    if (els.offlineSaveEta) els.offlineSaveEta.textContent = 'Done';
-    try { localStorage.setItem(`b91-offline-saved-${SW_VERSION}-${pid}`, '1'); } catch {}
+    setOfflinePanel({
+      title,
+      result: { html: offlineFailureText(res, wasSaved), warn: true },
+      go: { label: wasSaved ? 'Update' : 'Save', action: 'save' },
+      remove: !!offline.record,
+    });
   }
-  await new Promise((r) => setTimeout(r, missing ? 2600 : 1200));
-  if (els.offlineSaveBanner) els.offlineSaveBanner.hidden = true;
 }
-
-// Confirms, against Cache Storage itself, which of these are genuinely available offline.
-// The page shares the same Cache Storage as sw.js, so it can check the worker's work
-// directly. Keys are stored query-stripped (see sw.js's cacheKeyFor), so match the same way.
-async function verifyCachedItems(items) {
-  const missing = [];
-  if (!('caches' in window)) return { missing };   // can't verify → don't claim failure either
-  for (const item of items) {
-    try {
-      const hit = await caches.match(item.url.split('?')[0]);
-      if (!hit) missing.push(item);
-    } catch { /* a failed check isn't evidence of a failed save — leave it out of `missing` */ }
+async function onOfflineRemove() {
+  if (offline.busy) return;
+  if (!offline.removeArmed) {
+    offline.removeArmed = true;
+    els.offlinePanelRemove.classList.add('is-armed');
+    els.offlinePanelRemove.textContent = navigator.onLine === false ? 'Tap again — it will then need internet to open' : 'Tap again to remove';
+    return;
   }
-  return { missing };
-}
-
-function isStandaloneDisplay() {
-  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  const pid = state.projectId;
+  try {
+    await caches.delete(offlineCacheName(pid));
+    await caches.delete(offlineStagingName(pid));
+  } catch {}
+  offline.record = null;
+  tellOfflineLayer({ type: 'SAVED_CHANGED' });
+  location.reload();
 }
 
 // ─── Boot ───────────────────────────────────────────────────────────────────
@@ -10857,10 +11734,11 @@ function isStandaloneDisplay() {
     // Still no guarantee on a very first, very slow-network visit (installing the worker
     // competes for the same bandwidth), but every visit after the first is unaffected
     // either way, and this makes the FIRST one far more likely to succeed too.
-    // NOT awaited here, and the offline BANNER deliberately isn't offered from inside it —
-    // that waits for the end of boot, once there's a loaded project to measure. See
-    // offerOfflineSaveAfterBoot.
+    // NOT awaited here; see afterBootOffline at the end of boot for what uses it.
     const offlineRegistration = registerOfflineSupport();
+    // Is this project saved on this device? The menu's offline row reads it, so it's awaited
+    // (a few ms) just before the menu first renders.
+    const offlineRecordReady = loadOfflineRecord();
     await loadGeometry();
     setBootProgress(3);
     // alignment precedence — client: committed file only. admin: freshest of the full
@@ -10882,7 +11760,6 @@ function isStandaloneDisplay() {
     if (chosen) { state.transform = chosen.transform; state.savedView = chosen.view; if (chosen.opacity != null) state.overlayOpacity = chosen.opacity; }
     if (chosen?.data) state.sheet = { url: chosen.data.url || '', gid: chosen.data.gid || '', enabled: !!chosen.data.enabled }; // plot-data source (Google Sheet | committed CSV)
     if (chosen?.area) state.area = chosen.area;                        // area unit + admin-defined size bands
-    if (chosen?.plotOverrides) state.plotOverrides = chosen.plotOverrides;   // admin edits that outrank the live sheet
     // site branding (title bar): alignment's brand (path) + session logo blob if any
     if (chosen?.brand) Object.assign(state.brand, { name: chosen.brand.name, tagline: chosen.brand.tagline, logo: chosen.brand.logo, _ver: chosen.brand._ver });
     if (restored?.brandLogo?.blob) { state.brand.logoBlob = restored.brandLogo.blob; state.brand.logoName = restored.brandLogo.name; if (!state.brand.logo) state.brand.logo = `sample/${restored.brandLogo.name}`; }
@@ -10907,6 +11784,7 @@ function isStandaloneDisplay() {
     if (chosen?.menuConfig) {
       state.menuConfig = Object.assign({}, state.menuConfig, chosen.menuConfig);
     }
+    await offlineRecordReady;
     initCustomMenuAdminAndClient();
     renderClientSidebar();
     // The root menu (just rendered) is clickable from this point — well before landmarks
@@ -10995,8 +11873,9 @@ function isStandaloneDisplay() {
       await loadGroundImage(url, planOpacity, planFile);
       if (state.admin && state.groundImage) { els.axPlanRow.hidden = false; els.axPlanOpacity.value = planOpacity; els.axPlanOpacityVal.textContent = `${Math.round(planOpacity * 100)}%`; }
     }
-    await loadData();
-    if (restored && Array.isArray(restored.rows)) state.rows = indexRows(restored.rows); // session's edited statuses win (canonicalised to the layout ids)
+    // A restored working session's rows are the admin's freshest data, so they replace plots.csv
+    // as the base — but the live sheet still goes on top of them (the sheet wins, on reload too).
+    await loadData(restored && Array.isArray(restored.rows) ? indexSavedRows(restored.rows) : null);
     applyData();
     renderAreaFilterUI();     // needs state.rows + the alignment's `area` block, both settled by here
     // landmarks: session (freshest) > committed landmarks.json > none
@@ -11022,16 +11901,22 @@ function isStandaloneDisplay() {
     if (autoOpenTarget && autoOpenTarget.kind === 'panotour') { fireAutoOpen(autoOpenTarget); hideBootCurtain(); }
     if (restored && state.admin) setSessionStatus(`Restored your last session · saved ${new Date(restored.savedAt).toLocaleString()}`, true);
     initProjectBar();                                    // header project switcher / manage menu
-    offerOfflineSaveAfterBoot(offlineRegistration);       // now that the project is loaded, there's something real to measure
+    afterBootOffline(offlineRegistration);                // update check if the menu is open; adopt an older download
     hideBootCurtain();                                    // safety net — idempotent, in case no branch above matched
     warmFirstTourRoom();
   } catch (err) {
     console.error(err);
     hideBootCurtain();                                    // never leave the visitor stuck behind it on a boot error
     markToursLoaded();                                    // release any tour tap waiting on toursReady
-    const webgl = (() => { try { return !!document.createElement('canvas').getContext('webgl'); } catch { return false; } })();
-    showNotice(webgl
-      ? `${err.message}. If you opened this file directly (file://), run a static server — e.g. <code>python -m http.server</code> — then reload.`
-      : `This browser/GPU could not start WebGL, which the 360° viewer needs. Try a different browser or enable hardware acceleration.`);
+    // Which message fits: a GPU context the device took away (see showGpuLostNotice), no WebGL
+    // at all, a page opened as a file, or anything else. The file:// hint used to be shown for
+    // every error — including on a phone whose GPU context had been dropped, where it made no sense.
+    if (gpuContextLost()) { showGpuLostNotice(); return; }
+    const webgl = !!three || (() => { try { return !!document.createElement('canvas').getContext('webgl'); } catch { return false; } })();
+    showNotice(!webgl
+      ? `This browser/GPU could not start WebGL, which the 360° viewer needs. Try a different browser or enable hardware acceleration.`
+      : location.protocol === 'file:'
+        ? `${esc(err.message)}. If you opened this file directly (file://), run a static server — e.g. <code>python -m http.server</code> — then reload.`
+        : `Something went wrong while loading (${esc(err.message)}). Reload the page to try again.`);
   }
 })();

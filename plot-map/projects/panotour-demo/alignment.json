@@ -1,28 +1,76 @@
 {
   "version": 1,
-  "note": "Build91 plot-map alignment",
-  "savedAt": "2026-09-08T12:55:55.000Z",
+  "note": "Build91 plot-map overlay alignment",
+  "savedAt": "2026-09-19T13:18:08.549Z",
   "transform": {
-    "tx": 0,
-    "ty": 0,
-    "scale": 1,
-    "rotationDeg": 0
+    "tx": 248.327,
+    "ty": -319.6076,
+    "scale": 2.36,
+    "rotationDeg": -178.3
   },
   "view": {
-    "lonDeg": 0,
-    "latDeg": 0,
-    "fov": 75
+    "lonDeg": -15.19,
+    "latDeg": -12.81,
+    "fov": 106
   },
-  "opacity": 1,
+  "opacity": 0.65,
+  "panoImage": {
+    "file": "sample/DJI_20251106132132_0055_D.web.jpg"
+  },
   "brand": {
-    "name": "Panorama Tour Demo",
-    "tagline": "360\u00b0 walkthrough"
+    "name": "Pano Test Amit",
+    "tagline": "VT Demo",
+    "logo": {
+      "file": "sample/logo.web.png"
+    }
+  },
+  "data": {
+    "source": "sheet",
+    "sheet": {
+      "url": "https://docs.google.com/spreadsheets/d/1bR1u1J6-4hkLtLP3jse9dVxFHueAbuEi6QwB6x38YlU/edit?gid=0#gid=0"
+    }
   },
   "menuConfig": {
     "tree": [
       {
-        "id": "node_panotour_demo",
-        "title": "3BHK WALKTHROUGH",
+        "id": "builtin-aerial",
+        "title": "AERIAL VIEW",
+        "kind": "child",
+        "contentType": "aerial",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "aerial",
+        "enabled": true
+      },
+      {
+        "id": "builtin-landmarks",
+        "title": "LANDMARKS",
+        "kind": "child",
+        "contentType": "landmarks",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "landmarks",
+        "enabled": true
+      },
+      {
+        "id": "builtin-tour",
+        "title": "VIRTUAL TOUR",
+        "kind": "child",
+        "contentType": "virtualtour",
+        "content": {
+          "url": "",
+          "fileName": ""
+        },
+        "builtin": "tour",
+        "enabled": true
+      },
+      {
+        "id": "node_1788875619742_28",
+        "title": "3BHK",
         "kind": "child",
         "contentType": "panotour",
         "content": {

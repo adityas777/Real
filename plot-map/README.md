@@ -174,8 +174,23 @@ uses. Open `index.html?admin=1`:
   project's folder, so you never have to open the sidebar's Export/Save… again. The **⋯**
   menu adds: **New project…** (opens a blank id to build from scratch), **Duplicate as…**
   (clone this whole site — images included — into a new id), **⬇ Export standalone site…**
-  (see below), **Rename…**, and **Delete…**
+  (see below), **☁ Publish to web…** (see below), **Rename…**, and **Delete…**
   (type the id to confirm; the folder is moved to a recoverable `projects/.trash/`).
+- **☁ Publish to web (⋯ menu):** puts this project's **view-only client** online at its own
+  link — **`https://re.build91.in/<project-id>/`** — ready to send to a client for a demo. Enter
+  the publish password and press **Publish**: the project is **saved first** (so the demo is
+  exactly what you see), then uploaded with a live progress bar; when it's done the link is shown
+  with **Copy** / **Open**. **Publishing again updates the same link** (only changed files are
+  uploaded, so an update is quick). **Unpublish** (click twice to confirm) takes it offline; the
+  link then shows "This demo isn't available". The published copy is independent of your local
+  folder: renaming or deleting the project here does **not** take the demo down, so
+  **Unpublish first**. Only the files the project actually uses are published — anything else
+  lying in the project folder is left out, and the dialog says how many. Each demo carries its
+  own copy of the app, so publishing one project never changes another client's demo.
+  *(Needs `server.py` running on a machine with the AWS login set up. The password lives in
+  `plot-map/publish.config.json` on that machine, which git ignores — copy
+  `publish.config.example.json` to set one up. Until the `re.build91.in` DNS record exists, the
+  dialog hands out the equivalent `…cloudfront.net` link instead and says so.)*
 - **Export standalone site (⋯ menu):** downloads a **self-contained folder** (`<id>-plotmap.zip`
   → an `<id>/` folder) that runs the **view-only** client with **no server at all** — unzip it
   and just **double-click `index.html`**, or upload the folder to any static host (Netlify, S3,
@@ -190,16 +205,23 @@ uses. Open `index.html?admin=1`:
   elsewhere. An **`<iframe>` embed snippet** is copied to your clipboard — paste it into any
   site to embed the map (replace `YOUR-HOST` with where you uploaded it). *(Needs `server.py`
   running to build the zip; a plain static server can't.)*
-- **Offline on phones, without downloading anything:** when the client (view-only) page is
-  reached over a real `https://` address, it also quietly installs itself for offline use
-  the first time a visitor opens it — no zip, no app store. After that one visit, the same
-  link keeps working with no signal at all, and a small "Add to Home Screen" prompt lets a
-  buyer turn it into a home-screen icon that opens like an app. This needs a genuine secure
-  origin (`https://`, or `localhost` for local testing) — a plain local-network address
-  won't enable it, since phone/desktop browsers require a secure origin for this. Admin
-  pages never get this treatment. *(Current status: the offline layer itself is built and
-  verified locally; where a project actually gets hosted for buyers to use this is still
-  being decided — see the project's internal offline-rollout notes.)*
+- **Offline on phones and tablets — "Save for offline":** on a phone or tablet, the client
+  menu has one extra row, **⬇ SAVE FOR OFFLINE**. It downloads the whole project to the device:
+  the app, the layout, every image, video, audio and PDF, and the plot data with the live
+  Google Sheet merged in as it is at that moment. From then on the project **always opens from
+  that saved copy, with or without a connection**, just like an exported standalone folder, so
+  a demo on site behaves exactly as it did in the office. Nothing in it changes by itself. The
+  same row becomes **⟳ UPDATE OFFLINE COPY**, or **⟳ UPDATE AVAILABLE** with a dot once you've
+  changed something and saved/published it. Tapping it downloads only the files that changed,
+  re-reads the Google Sheet, and restarts once. The plot card and the size filter show
+  "Availability as of …", and **Remove from this device** frees the space. Nothing about
+  offline is shown unless the visitor asks. **On iPhone/iPad** the row explains the right
+  order instead: add the page to the Home Screen first, open it from there, and save there,
+  because a Home Screen app has its own storage, separate from Safari. Links to things hosted
+  elsewhere (YouTube/Vimeo videos, externally hosted tours) still need internet, as in the
+  export. This needs a secure address (`https://`, or `localhost` for local testing); desktops
+  use the standalone export instead, and the admin never uses it. Full details and the
+  reasoning: [MOBILE-OFFLINE.md](MOBILE-OFFLINE.md).
 - **Save As… / Save…:** write straight to the server (`projects/<id>/`) via `server.py`
   — no dialog, no download. (If the server isn't running they fall back to a download.)
 - **Load… / Reset:** re-import a saved file to keep fine-tuning, or revert to the
@@ -289,6 +311,18 @@ the working layout later to tweak and re-export.
   become parcels; a **Layer** picker isolates the plot-boundary layer from roads/
   dims; `TEXT`/`MTEXT` inside a parcel auto-fills its number. (Vector source ⇒ no
   draped image.)
+
+**Plot numbers.** New plots are numbered automatically from **1** — 1, 2, 3 … Type an optional
+**Number prefix** (left panel) to put text in front: prefix `A0` gives **A01, A02, A03 …**
+(joined exactly as typed, so the tenth is `A010` — use prefix `A` to get `A10`). Change the
+prefix — or press **Reset** — and numbering starts again at 1 with the new prefix (`B0` →
+B01, B02 …); a number already taken is skipped, and a deleted number is reused. The prefix is
+only a drawing aid and isn't saved; each plot's **full number** (`A01`, `B01` …) is what's
+saved, and it's what the Google Sheet's `plot_id` must match. **Next plot:** shows the number
+the next capture will get. Numbers are **unique**: renaming a plot to a number another plot
+already has is refused. Layouts saved before this may still contain repeats (e.g. every
+sector restarting at 1); those plots are **highlighted amber** with a "⚠ N share a number"
+count until each is renamed — only one of them can match a sheet row.
 
 Each captured plot gets an editable **id** and **status** in the side list, and
 **selecting a plot expands an inline data editor** (Price, Area, Facing, Dimensions,
@@ -481,7 +515,7 @@ One row per plot. Header row **exactly**:
 
 | Column     | Required | Example                                                              | Notes |
 |------------|----------|----------------------------------------------------------------------|-------|
-| `plot_id`    | yes  | `Plot-A101` or `A101`                                                | The join key → the SVG shape `id`. **Prefix-tolerant:** a bare `A101` matches `Plot-A101` (and vice-versa), so a Google Sheet can list plain plot numbers. |
+| `plot_id`    | yes  | `A101`                                                               | The join key → the plot number (the SVG shape `id`). **Matched exactly, 1-to-1** — `a101`, ` A101 ` (spaces aside) or `Plot-A101` do **not** match `A101`. The admin **Test** button lists anything that doesn't match. |
 | `status`     | yes  | `available`                                                          | `available` · `reserved` · `sold` (extendable). Drives colour. |
 | `facing`     | no   | `East Facing`                                                        | Free text, shown in panel. |
 | `size`       | no   | `1,850 sq ft`                                                        | Area. Free text, shown in panel (labelled **Area**). |
@@ -492,8 +526,12 @@ One row per plot. Header row **exactly**:
 | `notes`      | no   | `Corner plot, east-facing`                                          | Optional panel text. |
 
 The header is **order-independent and additive** — `parseCSV` is header-driven, so
-missing columns simply read blank (older 7-column files still load). The admin
-**Export site files…** writes this 9-column header.
+missing columns simply read blank (older 7-column files still load). Column names are
+**not case- or spacing-sensitive**: `Dimensions`, `Notes`, `Plot ID`, `Tour URL` read the same
+as `dimensions`, `notes`, `plot_id`, `tour_url`. Every value is read as **text, exactly as the
+cell shows it** — e.g. `30' x 40' (irregular)` or `100` in Dimensions/Notes. (Tip: format such
+columns as *Format → Number → Plain text* in Google Sheets, so Sheets itself doesn't turn an
+entry like `3/4` into a date.) The admin **Export site files…** writes this 9-column header.
 
 Status colours (legible over the photo): **available → green**,
 **reserved → amber**, **sold → muted red**, **unknown → neutral grey**. Defined
@@ -512,8 +550,9 @@ this identical when you drop in real, surveyed geometry:
    panorama's pixel dimensions** (here `0 0 12000 6000`). This is the pixel
    space the projection maps from — get it wrong and plots land in the wrong
    place.
-2. Each plot is a `<polygon class="plot" id="Plot-…">` (matching the CSV
-   `plot_id`) whose `points` are in those image pixels. (Convex polygons
+2. Each plot is a `<polygon class="plot" id="A101">` — the id is the plot number,
+   matching the CSV `plot_id` exactly — whose `points` are in those image pixels. (Files
+   saved before 2026-09-24 use `id="Plot-A101"`; the `Plot-` is dropped when they load.) (Convex polygons
    triangulate cleanly; the generator emits convex Voronoi cells.)
 3. Status colour is applied at runtime in the 3D material — no inline fills.
 4. Labels are generated from the `plot_id`; you don't need `<text>` in the SVG.
@@ -607,19 +646,36 @@ nudge `SITE` so the parcels sit over the developable ground.)*
 For the prototype, edit `projects/<id>/plots.csv` directly. To drive plot status live from a
 **Google Sheet** instead, use the admin **Plot data** control (no code edits):
 
-1. Create the sheet with the §schema header row (a `plot_id` column is required). Its values
-   match your layout's plot ids **with or without the `Plot-` prefix** — a sheet listing plain
-   numbers like `133` joins to the `Plot-133` polygon automatically.
+1. Create the sheet with the §schema header row (a `plot_id` column is required). Each value
+   must be **exactly** a plot number in your layout (`A01` matches plot `A01`; `a01` does not).
 2. Make it public — either **Share → “Anyone with the link”** (viewer) *or*
    **File → Share → Publish to web**.
 3. In `?admin=1`, Align tab → **Plot data**, tick the toggle, paste the sheet link, and click
-   **Test** (it reports row count + how many `plot_id`s match your layout). **Save**.
+   **Test** — it reports how many layout plots match, lists the plot numbers with no sheet
+   row and the sheet rows with no plot, and shows the **columns read** (so you can confirm a
+   newly added column such as `Dimensions` is picked up). **Save**.
 
-The client reads the sheet **live** (gviz CSV for a share link, the published CSV for a
-Publish-to-web link), keyed by `plot_id`, and **falls back to the committed `plots.csv`** on
-any failure. Use **↻ Refresh** to re-pull; the sync line shows *live sheet* or *cached ·
-sheet unreachable*. The config is stored per-project in `alignment.json`'s `data` block, and
-Save/Export snapshots the current sheet into `plots.csv` as the offline fallback.
+**The sheet wins.** For every plot the sheet has a row for, each column the sheet has
+replaces what was entered in the admin — **a blank cell included** (blank in the sheet means
+blank). Columns the sheet doesn't have (e.g. the media fields) and plots it has no row for
+keep the admin's values. Fields the sheet controls show a **Sheet** tag in the plot editor;
+you can still type in them, but the tag turns amber ("Sheet wins on save") and saving puts the
+sheet's value back — after the save a notice says how many values the sheet replaced. Change
+those values in the sheet instead.
+
+The client reads the sheet **live** (its plain CSV export for a share link — falling back to
+gviz — or the published CSV for a Publish-to-web link), keyed by `plot_id`, and **falls back to the committed `plots.csv`** on
+any failure. The config is stored per-project in `alignment.json`'s `data` block, and every
+Save writes `plots.csv` with the sheet already applied — the offline fallback, and what a
+standalone export shows. A phone's **saved offline copy** goes one step further: when the
+visitor saves or updates it, the phone reads the live sheet and stores `plots.csv` with the
+sheet merged in *as of that moment* (the same "sheet wins" rule, on the phone's copy only; the
+server's file is never touched). A saved copy never reads the sheet otherwise, so it shows
+"Availability as of …" wherever plot status appears.
+
+> **Status values:** the app recognises `available`, `reserved` and `sold` (any
+> capitalisation). Anything else (for example `Open`) shows as an unknown, grey plot and
+> doesn't count under Available.
 
 > **Privacy caveat:** a public sheet is **publicly readable** — fine for availability data.
 > The browser reads it directly (no server proxy), which is what lets a live sheet keep
@@ -646,7 +702,15 @@ above. Empty `tour_url` ⇒ the "Walk through" button is disabled for that plot.
   drag-placed navigation hotspots and a crossfade between rooms; several per project,
   each launched from its own **🧭 360° Tour** menu item. Works in the standalone export.
 - **Hover** highlights a plot (raycast) and shows a tooltip (id + status).
-- **Legend + status filter** — click a chip to toggle that status on/off.
+- **Legend + status filter** — Available / Reserved / Sold are independent on/off switches, all
+  **off** when the page opens, so the site plan shows plain. Turn one on to colour those plots;
+  each switch only affects its own status, and with all off no plot is coloured. The size filter
+  starts on "All sizes" and combines with them (a plot must match both). Plot numbers are
+  separate: they show or hide only with the **#** button. **Every plot can be tapped** to open
+  its info, filters on or off, and the tapped plot is outlined. The quick **hover popup** is
+  quieter: it appears only on plots a filter is colouring (none while all filters are off), so
+  moving around the layout doesn't set off popups everywhere. While a plot's info is open the view holds still (it resumes
+  its slow drift after you close it). (The admin view opens with all statuses on.)
 - **Last-synced timestamp + Refresh** — re-pulls the data source.
 - **Info panel** — id, status, size, price, block, notes, styled by status.
 - **Deep-linked 3DVista modal** — focus-trapped, Esc / backdrop to close,

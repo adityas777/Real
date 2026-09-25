@@ -27,11 +27,14 @@
        in app.js) is what makes this possible at all — see bootImageSrc's own comment for
        why this one asset skips the usual `_ver` cache-busting. Mirrors sanitizeProjectId/
        BOOT_PROJECT's own ?project= parsing (app.js) closely enough to agree on the same
-       URL, but can't reuse that code directly since it must run before app.js exists. -->
+       URL, but can't reuse that code directly since it must run before app.js exists.
+       A published demo (☁ Publish to web) has its project baked in as B91_PUBLISHED, which
+       wins over ?project= exactly as it does in BOOT_PROJECT. -->
   <script>
     (function () {
       var m = /[?&]project=([^&]+)/.exec(location.search);
-      var pid = m ? decodeURIComponent(m[1]).trim().toLowerCase() : '';
+      var pub = window.B91_PUBLISHED && window.B91_PUBLISHED.project;
+      var pid = pub ? String(pub) : (m ? decodeURIComponent(m[1]).trim().toLowerCase() : '');
       if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(pid)) pid = 'sample';
       document.write('<link rel="preload" as="image" fetchpriority="high" href="projects/' + pid + '/loading.web.jpg">');
     })();
@@ -100,6 +103,8 @@
           <button type="button" role="menuitem" data-act="bundle"
             title="Download a self-contained folder that runs on any static host / embeds via iframe">⬇ Export
             standalone site…</button>
+          <button type="button" role="menuitem" data-act="publish"
+            title="Put this project's client view online at its own shareable link">☁ Publish to web…</button>
           <button type="button" role="menuitem" data-act="rename">Rename…</button>
           <button type="button" role="menuitem" data-act="delete" class="is-danger">Delete…</button>
         </div>
@@ -367,13 +372,15 @@
       <!-- landscape twin of #areaFilterSel — the topbar it normally lives in is collapsed
            at this size, so without this the area filter would be desktop-only -->
       <div class="zoom-status-group" id="zoomStatusGroup">
-        <button class="btn zoom-status-btn" id="zoomAvailableBtn" type="button" data-status="available" aria-pressed="true" aria-label="Toggle available plots">
+        <!-- Independent on/off toggles, all OFF by default on the client (2026-09-25): each shows
+             or hides its own status's plot overlay (toggleFilter in app.js). -->
+        <button class="btn zoom-status-btn" id="zoomAvailableBtn" type="button" data-status="available" aria-pressed="false" aria-label="Show available plots">
           <span class="dot"></span>Available <span class="count">0</span>
         </button>
-        <button class="btn zoom-status-btn" id="zoomReservedBtn" type="button" data-status="reserved" aria-pressed="true" aria-label="Toggle reserved plots">
+        <button class="btn zoom-status-btn" id="zoomReservedBtn" type="button" data-status="reserved" aria-pressed="false" aria-label="Show reserved plots">
           <span class="dot"></span>Reserved <span class="count">0</span>
         </button>
-        <button class="btn zoom-status-btn" id="zoomSoldBtn" type="button" data-status="sold" aria-pressed="true" aria-label="Toggle sold plots">
+        <button class="btn zoom-status-btn" id="zoomSoldBtn" type="button" data-status="sold" aria-pressed="false" aria-label="Show sold plots">
           <span class="dot"></span>Sold <span class="count">0</span>
         </button>
         <!-- Lives INSIDE the status group (2026-09-21) so it docks with the pills: leftmost in the
@@ -428,28 +435,30 @@
       </div>
     </div>
 
-    <!-- client-only: ONE combined "Add to Home Screen" (+offline content download) prompt —
-         a single tap fires the native install dialog AND starts the content download in
-         parallel (maybeOfferOfflineSave/runOfflineDownload in app.js). Previously two
-         separate prompts shown back to back; merged per the user's explicit request since
-         a manual download step ahead of the (separate) native install step felt redundant. -->
-    <div class="offline-save-banner" id="offlineSaveBanner" role="status" hidden>
-      <div class="offline-save-prompt" id="offlineSavePrompt">
-        <span class="offline-save-icon">⬇</span>
-        <div class="offline-save-text">
-          <strong id="offlineSaveTitle">Add to Home Screen</strong>
-          <span id="offlineSaveSize">Checking size…</span>
-        </div>
-        <button class="btn btn-ghost offline-save-skip" id="offlineSaveSkip" type="button">Not now</button>
-        <button class="btn btn-primary offline-save-go" id="offlineSaveGo" type="button">Add</button>
+    <!-- client-only, phones & tablets: the offline panel. Opened ONLY from the client menu's
+         "⬇ SAVE FOR OFFLINE" / "⟳ UPDATE OFFLINE COPY" row — never shown unasked (2026-09-24,
+         MOBILE-OFFLINE.md). One panel for a first save, an update and removing the copy; on an
+         iPhone/iPad browser tab it shows the "add to Home Screen first" guide instead. Filled
+         in by openOfflinePanel / renderOfflinePanel in app.js. -->
+    <div class="offline-panel" id="offlinePanel" role="dialog" aria-labelledby="offlinePanelTitle" hidden>
+      <div class="offline-panel-head">
+        <span class="offline-panel-icon" aria-hidden="true">⬇</span>
+        <strong id="offlinePanelTitle">Save for offline</strong>
+        <button class="btn btn-icon offline-panel-close" id="offlinePanelClose" type="button" aria-label="Close">×</button>
       </div>
-      <div class="offline-save-progress" id="offlineSaveProgress" hidden>
-        <div class="offline-save-progress-head">
-          <strong>Saving for offline…</strong>
-          <span id="offlineSaveEta"></span>
+      <div class="offline-panel-body" id="offlinePanelBody"></div>
+      <div class="offline-panel-progress" id="offlinePanelProgress" hidden>
+        <div class="offline-save-bar"><div class="offline-save-bar-fill" id="offlinePanelBarFill"></div></div>
+        <div class="offline-panel-progress-meta">
+          <span id="offlinePanelPct">0%</span>
+          <span id="offlinePanelEta"></span>
         </div>
-        <div class="offline-save-bar"><div class="offline-save-bar-fill" id="offlineSaveBarFill"></div></div>
-        <span class="offline-save-pct" id="offlineSavePct">0%</span>
+        <p class="offline-panel-keep" id="offlinePanelKeep">Keep this screen open until it finishes.</p>
+      </div>
+      <p class="offline-panel-result" id="offlinePanelResult" hidden></p>
+      <div class="offline-panel-actions">
+        <button class="btn btn-ghost offline-panel-remove" id="offlinePanelRemove" type="button" hidden>Remove from this device</button>
+        <button class="btn btn-primary offline-panel-go" id="offlinePanelGo" type="button">Save</button>
       </div>
     </div>
   </main>
@@ -657,6 +666,17 @@
           <button class="ax-modebtn" id="traceModeManual" type="button"
             title="Click corners to draw a plot">Manual</button>
           <button class="ax-modebtn" id="traceModeEdit" type="button" title="Drag corners · delete plots">Edit</button>
+        </div>
+        <!-- Auto-numbering prefix (nextPlotId): new plots are numbered prefix + 1, 2, 3 … ("A0" →
+             A01, A02 …). Changing it — or Reset — restarts at 1. Not saved with the project: only
+             each plot's full number is, and that is what must match the sheet's plot_id. -->
+        <div class="trace-numbering">
+          <label class="trace-prefix-row">Number prefix
+            <input type="text" id="tracePrefix" maxlength="16" spellcheck="false" autocomplete="off"
+              placeholder="none — e.g. A0" title="Optional text put in front of each new plot number" /></label>
+          <button class="btn btn-ghost" id="tracePrefixReset" type="button"
+            title="Start numbering again from 1 with this prefix (numbers already used are skipped)">Reset</button>
+          <p class="trace-next">Next plot: <strong id="traceNextNum">1</strong></p>
         </div>
         <label class="trace-row">Colour match
           <input type="range" id="traceThresh" min="6" max="140" step="1" value="36" />
@@ -919,6 +939,46 @@
       <div style="display:flex; gap:10px; justify-content:flex-end; padding:14px 18px; border-top:1px solid rgba(255,255,255,0.1);">
         <button class="btn btn-ghost" type="button" id="exportFlaggedCancel" style="font-size:12px;">Cancel Export</button>
         <button class="btn btn-primary" type="button" id="exportFlaggedProceed" style="font-size:12px;">Export Anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── ☁ Publish to web ─────────────────────────────────────────────────────────
+       Saves the project, then server.py uploads its client view to S3 (publish_s3.py) at a
+       fixed link per project. Re-publishing updates the same link; Unpublish removes it. -->
+  <div class="modal custom-feature-modal" id="publishModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog feature-modal-dialog" role="dialog" aria-label="Publish to web" style="max-width: 520px; width: 92vw;">
+      <div class="modal-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <h3 class="modal-title" style="margin:0; font-size:15px; font-weight:700;">☁ Publish to web</h3>
+          <span style="font-size:11px; font-weight:500; color:#9aa5b1;" id="publishSub">A view-only demo link to share with your client</span>
+        </div>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body custom-modal-body publish-body">
+        <div class="publish-status" id="publishStatus">Checking…</div>
+        <div class="publish-link" id="publishLinkRow" hidden>
+          <input type="text" id="publishLink" readonly aria-label="Shareable link" />
+          <button class="btn btn-ghost" type="button" id="publishCopyBtn">Copy</button>
+          <a class="btn btn-ghost" id="publishOpenBtn" target="_blank" rel="noopener">Open ↗</a>
+        </div>
+        <p class="publish-note" id="publishNote" hidden></p>
+        <label class="publish-pass" id="publishPassRow">
+          <span>Publish password</span>
+          <input type="password" id="publishPass" autocomplete="current-password" />
+        </label>
+        <div class="publish-progress" id="publishProgress" hidden>
+          <div class="publish-progress-bar"><div id="publishProgressFill"></div></div>
+          <div class="publish-progress-text" id="publishProgressText"></div>
+        </div>
+        <div class="publish-error" id="publishError" role="alert" hidden></div>
+      </div>
+      <div class="publish-actions">
+        <button class="btn btn-ghost is-danger" type="button" id="publishUnpublishBtn" hidden>Unpublish</button>
+        <span class="publish-actions-gap"></span>
+        <button class="btn btn-ghost" type="button" data-close>Close</button>
+        <button class="btn btn-primary" type="button" id="publishGoBtn">Publish</button>
       </div>
     </div>
   </div>

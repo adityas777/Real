@@ -5,6 +5,8 @@
 # It was untracked but NOT ignored, so a single `git add -A` would have published them.
 .env.local
 .env
+# The admin's ☁ Publish password + AWS target (see plot-map/publish.config.example.json).
+plot-map/publish.config.json
 
 # Build artefacts and downloaded tools — not source
 __pycache__/
@@ -18,3 +20,7 @@ plot-map/projects/*/_originals/
 # anadmanv2 media lives on S3/CloudFront, not in git (its menu video alone is 220 MB, past
 # GitHub's 100 MB per-file limit). The project is deployed from the working copy.
 plot-map/projects/anadmanv2/
+
+# eleganzav2's main film is 207 MB — past GitHub's 100 MB per-file limit, so it can't be pushed.
+# It stays in the working copy, which is what ☁ Publish uploads from.
+plot-map/projects/eleganzav2/anandam eleganza film v4.1.mp4

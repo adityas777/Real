@@ -115,6 +115,26 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
   hits `/api/export-bundle-check` (warns, non-blocking, about any menu item that needs
   internet regardless — see **Conventions & gotchas**), then fetches `/api/export-bundle`,
   downloads the zip, and copies an `<iframe>` embed snippet.
+- **☁ Publish to web (2026-09-24):** admin ⋯ → *Publish to web…* puts ONE project's client view
+  at `https://re.build91.in/<id>/` (S3 bucket `re.build91.in`, private, behind CloudFront
+  `ESB5IEEO3UHEP` = `d9diw1qcxp0ak.cloudfront.net`, OAC; a CloudFront Function maps folder URLs
+  to `index.html` and 301s `/<id>` → `/<id>/`; missing paths → `s3-root/_404.html`, the bare
+  root → `s3-root/index.html`). Routes: `GET /api/publish/status?project=`, `POST /api/publish`
+  `{project,password[,check]}` → 202 + background job (`check:true` = password only),
+  `GET /api/publish/progress?project=`, `POST /api/unpublish` `{project,password}`. The work is
+  in **`publish_s3.py`** (boto3): each project folder is SELF-CONTAINED — its own stamped
+  `index.html` (baked `window.B91_PUBLISHED={project}` + noindex), `app.js`, `styles.css`,
+  `sw.js`, `vendor/`, generated `icons/` + branded static `manifest.webmanifest`, and
+  `projects/<id>/` holding the data files **plus only the files they reference** (a file's name
+  appearing in any JSON string or plots.csv — `_project_files`). Incremental: a per-project
+  record `<id>/.b91-publish.json` (md5 + headers; the bucket policy hides it from CloudFront) is
+  checked against a live listing, changed files upload 8-way parallel with `index.html` last,
+  stale keys are deleted, then `/<id>/*` is invalidated. Settings + the publish password live in
+  **git-ignored `publish.config.json`** (template: `publish.config.example.json`); AWS creds are
+  the machine's AWS profile and never touch a browser; `_serve_static` refuses to serve the
+  config. **DNS for `re.build91.in` is not added yet** (CNAME → the CloudFront domain, at the
+  build91.in provider — not Route 53); until it resolves, `links()` detects that by fetching the
+  root page and the dialog hands out the CloudFront link.
 - **Admin save:** `serverSave`/`saveToProject` POST to `/api/save`; Export + each "Save…"
   button go through it (download-fallback if the server is unreachable). Saving to a
   **different** project id clones it — `fetchReferencedImages` copies on-disk images
@@ -136,7 +156,8 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
 
 Top-down, by section header:
 - **CONFIG** — `TOUR_BASE_URL`. **Projects:** `sanitizeProjectId`,
-  `BUNDLE` (standalone-bundle boot flag from `window.B91_BUNDLE`), `BOOT_PROJECT`,
+  `BUNDLE` (standalone-bundle boot flag from `window.B91_BUNDLE`), `PUBLISHED` (published-demo
+  flag from `window.B91_PUBLISHED` — fixes the project, forces view-only), `BOOT_PROJECT`,
   `state.projectId`/`state.assetBase`/`state.bundle`, `dataUrl(name)` (project data file),
   `assetUrl(storedPath,ver)` (image, basename-resolved + cache-bust; in a bundle, checks
   `BUNDLE_IMAGES` first — pano/plan only, see **Standalone bundle** below). (The Google-Sheet
@@ -144,9 +165,12 @@ Top-down, by section header:
 - **`STATUS_META` / `SELECT_COLOR`**, **`els`** (all `getElementById` refs), constants
   (`R=500`, `R_PLOT=492`, `R_DRAPE=489`, `GROUND_H=1`, `FOV_MIN/MAX=20/120`,
   `PANO_TEX_CAP=8192`, `gpuMaxTexSize()`), **`state`**.
-- **Data:** `loadData` (live sheet → committed CSV fallback), `parseCSV`, `normalizeRow`
-  (lower-cases `status`), `canonPlotId`/`indexRows` (prefix-tolerant `plot_id` join —
-  bare `133` ↔ `Plot-133`), `loadCommittedCSV`. **Google Sheet source** (per project):
+- **Data:** `loadData(baseRows?)` (admin data — a restored session's rows, else plots.csv —
+  then the live sheet on top), `applySheetRows` (the sheet-wins merge), `parseCSV`,
+  `normalizeRow` (lower-cases `status`), `indexRows` (exact `plot_id` → row Map),
+  `indexSavedRows` (same, migrating legacy `Plot-` ids from our own files), `loadCommittedCSV`.
+  **Plot ids:** `legacyPlotId`, `plotNumber` (id minus the `#n` duplicate tag), `DUP_TAG`,
+  `uniquePlotId`, `dedupeGeomIds`, `plotNumberProblem` (validation). **Google Sheet source** (per project):
   `parseSheetUrl`/`sheetGid`/`sheetCsvCandidates` (share **or** Publish-to-web link →
   gviz/pub CSV endpoint), `fetchSheetRows` (→ Map or null on any failure), `sheetData`
   (serialise), `updateSheetAdminUI`/`testSheet`/`setSheetMsg` (admin URL field + Test).
@@ -307,6 +331,26 @@ Top-down, by section header:
   text wipes the icon (it did).
 - **Data join:** `colorPlots`, `applyData`, legend/`toggleFilter`, `applySelectStyle`
   (selection keeps status colour + gold outline), `applyLabelVisibility` (# toggle).
+  **Status filters = independent on/off toggles, all OFF by default on the client**
+  (2026-09-25, on request). `state.activeFilters` = the statuses whose overlay is SHOWN
+  (`statusShown`); each pill toggles only itself (`toggleFilter`), nothing resets them, and with
+  all off NO overlay shows — the plain site plan. The client starts empty; the admin starts with
+  every status incl. `unknown` (it needs the plots to align/edit). `unknown` has no pill, so on
+  the client it never gets an overlay. **Only the fill + outline follow the filters** (`colorPlots`
+  sets `p.fill.visible`/`p.line.visible`, not `p.group.visible`) so the plot NUMBER — the group's
+  label sprite — follows the `#` toggle alone. **Click and hover are separate rules.** CLICK:
+  every plot opens its card whatever the filters and `#` say (`rayHit` tests `m.parent.visible`
+  only — false just during a tour takeover; three.js raycasting ignores `visible`, so hidden fills
+  are still hit). HOVER (client): the tooltip, brightening and drift-hold happen only for plots
+  the filters are colouring (`hover` → `filtersShowPlot`) — none while every filter is off, since
+  popups on every plot got in the way of exploring the layout; the admin hovers every plot. The clicked plot is shown with its
+  selection outline even when the filters hide it (`applySelectStyle` sets the fill/line visible;
+  `restorePlotStyle` hands visibility back to `filtersShowPlot` on deselect). **Clicking a plot
+  stops the camera** (`stopCameraMotion`: kills flick inertia and any fly-in), and the idle
+  auto-pan stays off while the popup is open (renderLoop), so the popup can't slide off its plot;
+  dragging still works. Pills: on = lit (gold), off = plain (styles.css). (A first attempt that day made them a
+  "show only these" group with fading — it read as the pills swapping state; don't bring it back.)
+  The size band also starts off (`areaFilterId: null`, "All sizes") and isn't remembered.
   **Area filters** (2026-09-18, `alignment.json`'s `area` block): admin-defined size bands
   shown to the client as one dropdown. `plotAreaValue(row)` is the single place a plot's
   area becomes a NUMBER — an explicit numeric `area` column wins, else the leading number is
@@ -320,8 +364,8 @@ Top-down, by section header:
   entered figures is far less reversible than restating the unit they were always in. If
   real conversion is ever wanted, it needs to be an explicit, separately-confirmed action —
   don't quietly fold it into this. `plotMatchesAreaFilter`/`activeAreaFilter` drive
-  `colorPlots`, which recolours matches to the band's colour and **dims** (not hides)
-  everything else, ANDed with the existing status filter. `renderAreaFilterUI` builds BOTH
+  `colorPlots`, which recolours matches to the band's colour and **hides** everything else
+  (2026-09-23; it used to dim them), ANDed with the status filter. `renderAreaFilterUI` builds BOTH
   dropdowns — the topbar one and the floating twin in `.zoom-controls` — from one list,
   because the topbar is collapsed on a landscape phone; `areaFilterMatchCount`/
   `areaReadableCount` feed the admin's "N plots" / "readable on N of M" readouts, which
@@ -414,10 +458,21 @@ Top-down, by section header:
   `saveAmenitiesAs` (single file + its render blobs). Header project menu: `initProjectBar`,
   `projUrl`, `headerSave` (💾 Save), `onProjAction`/`commitProjName`, `renameProject`,
   `deleteProject`, `exportBundle` (⋯ → Export standalone site… → `/api/export-bundle` zip +
-  clipboard `<iframe>` snippet).
+  clipboard `<iframe>` snippet). **☁ Publish dialog** (`#publishModal`, wired once by
+  `wirePublishModal` from `initProjectBar`): `openPublishModal` → `refreshPublishStatus`/
+  `renderPublishStatus` (status, link, DNS note), `publishNow` (password check →
+  `exportSite()` → `POST /api/publish` → `watchPublishJob` polls progress; `publishWatch` token
+  drops stale polls), `unpublishNow` (first click arms via `unpublishArmTimer`, second fires),
+  `copyPublishLink`. `publishPassword` is memory-only — never stored.
 - **`wireAdmin`** — wires every admin control incl. tabs + the Project ID field.
-- **Trace editor** (PNG/DXF → polygons): `trace` state, flood-fill/`traceBoundary`/
-  `douglasPeucker`, `refreshTraceList` (inline per-plot data & media attachment editing), `parseMediaType`
+- **Trace editor** (PNG/DXF → polygons): `trace` state (incl. `trace.prefix`, page-only),
+  `nextPlotId` (prefix + lowest free number from 1), `applyTracePrefix`/`updateTraceNextNumber`
+  (the Number prefix field + Reset + "Next plot:"), `retagTracePlots` (re-untags a number's
+  first holder after a rename/delete), `applySheetToTracePlot` (sheet wins in the editor;
+  sets `p._sheetCols`/`p._sheetEdited` for the Sheet / "Sheet wins on save" badges),
+  flood-fill/`traceBoundary`/
+  `douglasPeucker`, `refreshTraceList` (inline per-plot data & media attachment editing; flags
+  plots sharing a number with `.is-dup`; refuses a rename to a taken/invalid number), `parseMediaType`
   (detects & handles 3D Walkthroughs, YouTube embeds, and Image URLs/files), `traceLoadImage`
   (downscales only past `min(PANO_TEX_CAP, gpuMaxTexSize())` — the same device texture
   ceiling the pano uses, **2026-09-15**, replacing a flat `TRACE_MAX=4096`; an upload at or
@@ -603,22 +658,24 @@ Top-down, by section header:
   `wireViewControls` (not just `pick()`) — a keyboard Enter/Space on a focused real
   `<button>` fires `click` directly without ever touching `#pano`'s pointer capture, so
   `pick()` alone would leave it unreachable from the keyboard.
-- **Brochure PDF viewer** — `openClientBrochureModal` (iframe on iOS/desktop; pdf.js
-  canvases on Android, which has no inline PDF viewer — see **Conventions & gotchas**),
+- **Brochure PDF viewer** — `openClientBrochureModal` (pdf.js canvases on every phone and
+  tablet — `isTouchDevice()`, since 2026-09-24 so tablets read it offline too; the native iframe
+  viewer on desktop — see **Conventions & gotchas**),
   `loadPdfJs` (on-demand classic-script load of the vendored UMD build; sets
   `GlobalWorkerOptions.workerSrc`), `renderPdfInto(src, container, onFirstPage, shouldStop)`
   (sequential page → canvas rendering, cancellable, with a first-page callback the caller
   uses to cancel its 12s stall deadline). `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`
-  are precached by `sw.js` so the brochure works when opened for the first time offline.
+  are part of every saved offline copy (the offline file list), so the brochure works offline.
 - **Shared info card + lightbox** (used by both amenity click and landmark hover/tap):
   `renderSrc` (blob URL > committed path, generic), `openAmCard`/`openLmCard`/`placeAmCard`
   (anchored to `state.cardAnchor` {lon,lat}; `state.cardHoverMode`+`keepCard`/`scheduleHideCard`
   auto-hide hover cards)/`closeAmCard`, `openLightbox`/`closeLightbox`, and
   `resizeImageToBlob` (generic longest-side≤cap downscaler for all render images).
-- **Boot `init()`** — loads geometry → alignment (session>draft>file) → menu tree known →
+- **Boot `init()`** — `registerOfflineSupport()` + `loadOfflineRecord()` kicked off → loads
+  geometry → alignment (session>draft>file) → menu tree known (offline record awaited) →
   **`computeAutoOpenTarget()` decided, `'node'` targets fired** → pano/three → drape →
   data → landmarks → **`'landmarks'` target fired** → amenities → tours →
-  **`'panotour'` target fired** → `initProjectBar()` → `registerOfflineSupport()`.
+  **`'panotour'` target fired** → `initProjectBar()` → `afterBootOffline()`.
   The client's "default screen" (added 2026-09-09, retimed the same day — see below):
   whatever the literal first row of the client menu would do on a real tap (a built-in row
   if enabled, else the first authored item) fires automatically, reusing
@@ -666,151 +723,111 @@ Top-down, by section header:
   progress to 100% and hides `#bootProgressWrap` for good the first time it fires
   (`bootProgressDone`) so its later reuse for tour-to-tour switching shows the plain
   label only, not a stale bar.
-- **Offline support (PWA), client + MOBILE only** — `registerOfflineSupport` (registers
-  `sw.js`, no-ops (and actively unregisters/clears any prior registration) if
-  `state.admin`, unsupported/insecure origin, OR `!(isMobilePortrait() || isMobileLandscape())`
-  — desktop is out of scope on purpose, since it already has a real offline mechanism via
-  Export standalone site; `navigator.serviceWorker.ready` is raced against a 5s timeout so
-  a stalled activation can't wedge the rest of boot), `isStandaloneDisplay`. **Called at
-  the very START of `init()` (2026-09-12, still fire-and-forget/non-blocking) — it used to
-  live at the very END**, after every boot-critical project file (alignment/plots/
-  landmarks/amenities/tour) had already been fetched. A service worker only intercepts
-  fetches once it's active AND controlling the page, so with the OLD placement none of
-  that config was ever cached on a genuine first visit — confirmed with a real offline
-  reload in a real browser: the menu collapsed to just the 3 built-in rows (the only
-  things that don't depend on `menuConfig`), every authored item/landmark/tour gone.
-  Registering as early as possible instead gives the worker the best realistic chance of
-  already controlling the page before those fetches fire — not a 100% guarantee on a
-  very first, very slow-network visit (the worker's own install competes for the same
-  bandwidth), but every visit after the first is fine either way, and this makes the
-  first one far more likely to succeed too. Top-level `beforeinstallprompt` listener only
-  captures `deferredInstallPrompt` — it does NOT show anything itself (used to,
-  independently of the mobile gate — see **Conventions & gotchas** for why that was a
-  real bug). The actual cache logic lives in **`sw.js`** (separate file, not part of the
-  `app.js` module — see its own header comment for the full design: three caches,
-  cache-busting-aware key normalization, admin passthrough, byte-range-aware caching for
-  anything read via HTTP Range — video, audio, AND PDFs, since pdf.js reads a PDF
-  progressively via Range requests exactly like a media element (`isRangedCacheablePath`,
-  `respondRangedAsset` — renamed 2026-09-12 from their original video-only names once
-  PDFs needed the same treatment; see **Conventions & gotchas**) — and project-asset
-  navigations — an `<iframe>` loading a PDF counts as a navigation too — routed as data,
-  not a page load).
-  **One combined "Add to Home Screen" + save-for-offline prompt** (merged 2026-09-03 from
-  two separate prompts, per explicit user request — see CHANGELOG): `collectOfflineAssets()`
-  walks `state.menuConfig.tree` + landmarks/amenities renders + pano/site-plan/logo for
-  every local (same-origin) asset in the current project; `estimateOfflineSize()`
-  HEAD-requests each one for a total byte count; `maybeOfferOfflineSave()` shows
-  `#offlineSaveBanner` (size + Add/Not now, gated per-project via `localStorage`) — ONE
-  tap on Add fires the native install prompt (`deferredInstallPrompt.prompt()`,
-  fire-and-forget) AND starts `runOfflineDownload()` in the same click handler, neither
-  blocking the other, since they're unrelated mechanisms (native prompt = app-icon
-  wrapper only; content download = the only thing that makes the site usable offline).
-  `isIosSafari()` (no `beforeinstallprompt` there, ever — Apple gives web pages no
-  install API) decides whether the banner's sub-text adds the one part that genuinely
-  can't be automated: "tap Share → Add to Home Screen after". `runOfflineDownload()` does
-  the actual fetches (plain `fetch()`, one retry per item, `res.ok` checked — a non-OK
-  response, including `sw.js`'s own synthetic offline placeholder, counts as a failure,
-  not a success; no caching code of its own — `sw.js`'s existing fetch interception does
-  the storing, exactly as if the visitor had opened each item themselves) with byte-level
-  progress via `Response.body.getReader()`, smaller files queued before video, lower
-  concurrency than a normal connection would warrant (today's demo tunnel drops requests
-  under load). Failures are tracked, not hidden: a partial run shows `"N/M saved"` and
-  does NOT set the per-project `localStorage` "saved" flag, so the prompt offers again on
-  a later visit instead of falsely declaring victory. Plot-level media
-  (`getPlotMediaList`) is deliberately not walked — always meant to be external by design,
-  same reasoning as the export-flagging feature.
-  **`warmOfflineConfigCache()` exists because a first visit can't cache its own config.**
-  The worker only intercepts fetches once it controls the page, and on a genuine first
-  visit it is still installing while boot fetches `alignment.json` and friends — so none of
-  it caches, and the next offline load shows only the built-in rows (no authored menu items
-  at all). Measured 2026-09-12: a visitor who declined the banner and visited once had the
-  full 43.7MB video cached and *no menu row left to reach it with*; a second online visit
-  fixed it by itself, which is why it hid for so long. So once registration reports ready,
-  the ~30KB of config is re-requested to force it into the cache. Keep it to the small
-  files — the pano/site-plan are megabytes and belong to the "Add" download. **Verifying
-  offline VIDEO: `readyState: 4` is not proof of playback** — it only means data is
-  buffered. Check that `currentTime` advances against wall clock, and seek deep into the
-  file (e.g. 130s of 138s); seeking is the only thing that really exercises
-  `respondRangedAsset`'s cached-Range slicing.
-  **Cold-load latency lives almost entirely in project IMAGES, not code** (profiled
-  2026-09-12 at 9 Mbps/60ms/4× CPU with the SW blocked, which is the only honest way to
-  measure a first visit). Baseline was 29.1s to usable / 27.2MB, and app.js + three.js +
-  styles together were under 350KB of it — three images were the whole critical path.
-  Fixes: a 4.8MB `Demo.web.jpg` hard-coded as `src` on `#clientContactImg` in `index.html`
-  (downloaded every visit, never shown, since `openClientContactModal` always reassigns
-  `img.src` — don't put a `src` back on that tag); the ground overlay PNG→WebP (17.0→2.5MB,
-  RGBA with real alpha so WebP not JPEG); and the pano JPEG→WebP (5.2→2.7MB). Result 9.1s
-  / 5.6MB. **When a project feels slow, profile the images before touching the code.**
-  Note `PANO_TEX_CAP` is 8192 but `loadPanoTexture` downscales to `gpuMaxTexSize()` (4096
-  on most mobile GPUs) — phones download the full-width pano and discard half of it; a
-  4096-wide mobile variant is the next available win but needs `collectOfflineAssets`, the
-  admin save path and the export bundle to agree on it.
-  **`collectOfflineAssets()` must walk `state.tours` too** — added 2026-09-12 after a
-  strict audit found all 17 of this project's virtual-tour room panoramas returning 503
-  offline. A tour room's pano is only requested when that specific room is opened, so
-  runtime caching never picks them up either unless someone walks every tour online first;
-  leaving them out of this list made VIRTUAL TOUR the one headline feature that stayed
-  broken with no signal (list opens, every room is a blank sphere). If a new content type
-  is added that loads media lazily, it belongs in this walk.
-  **Verifying "does it work offline" — read this before writing another test.** Three
-  separate false failures came out of one audit: the boot curtain clears via
-  `classList.add('is-hidden')` (not `'gone'`); `readPixels()` on three.js's canvas is
-  ALWAYS blank because the renderer runs without `preserveDrawingBuffer`, so pixel-sampling
-  the WebGL context proves nothing (screenshot the composited page instead); and **a
-  PORTRAIT phone viewport shows the "Rotate your phone" overlay instead of the map**, so
-  any visual check has to run landscape (844×390) or it is just measuring that overlay.
-  Also, a single-node tour renders no `.tour-hs` hotspots — detect a running tour by the
-  drawer's `✕ EXIT TOUR` row instead. And a fresh Playwright context starts with EMPTY
-  storage, so the download must actually be run in the same context before going offline;
-  otherwise the test proves only that an empty cache is empty.
-  **Registration is early, the BANNER is late — never re-fuse them** (2026-09-12, a real
-  bug with a nasty signature). `registerOfflineSupport()` runs at the TOP of `init()` so
-  the worker can cache boot fetches, and returns whether the worker became ready;
-  `offerOfflineSaveAfterBoot()` runs at the END of `init()` and is what actually shows the
-  banner. They were briefly fused (the banner was offered from inside
-  `registerOfflineSupport`), which meant the banner raced boot — and
-  `collectOfflineAssets()` reads `state.menuConfig`/landmarks/amenities/tours, none of
-  which exist that early. When the worker won the race, the banner offered a **19KB**
-  download (just the unconditional config files) instead of the real **230MB** one, and
-  tapping Add cached the config and nothing else: menu present offline, every video/image/
-  PDF behind it missing. It presented as "video and images randomly stopped working
-  offline," was intermittent (it depended on connection speed and whether the worker was
-  already installed), and looked nothing like a boot-order problem. If the offline
-  download ever reports an implausibly small size, check WHEN the banner ran, not what it
-  downloaded.
-  **The content caches are deliberately NOT version-namespaced** (`b91-data`, `b91-media`
-  — only `b91-shell-<VERSION>` is). `activate` deletes every cache outside the current
-  set, so while they were versioned, any `VERSION` bump wiped a visitor's entire ~200MB
-  download; the v7→v8 PDF bump did exactly that in production. `migrateLegacyContentCaches()`
-  folds any older `b91-data-v*`/`b91-media-v*` forward on activate, copying only complete
-  `200` entries so old corrupt partials are dropped rather than preserved. Don't "tidy" the
-  content caches back under `VERSION`.
-  **`app.js`'s `SW_VERSION` constant must be bumped in lockstep with `sw.js`'s `VERSION`
-  — a real bug found 2026-09-12, not just a theoretical risk.** `SW_VERSION` namespaces
-  the banner's dismissal memory (`b91-offline-declined-${SW_VERSION}-<pid>` /
-  `-saved-${SW_VERSION}-<pid>` in `localStorage`); its own comment says "must match
-  VERSION in sw.js," but it sat hardcoded at `'v5'` through three later `sw.js` version
-  bumps (`v6` the three.js swap, `v7` the video priming fix, `v8` the PDF fix) before
-  anyone noticed — meaning any earlier tap of "Skip" (or a completed download) stayed
-  permanently recorded under the stale key, silently preventing the banner from EVER
-  showing again on that browser/project, regardless of how much the underlying caching
-  code changed afterward. Found because the user asked "why can't I see it" after the
-  PDF fix — don't assume a missing banner means the feature broke; check this constant
-  first.
-  **Separately — a more alarming discovery made while fixing the above, worth its own
-  warning**: the on-disk working copy of `sw.js`, `app.js`'s `registerOfflineSupport()`
-  call site, and this file's own PDF-fix documentation were all found to have REVERTED
-  to an earlier state than what was actually committed in git — with no edit tool call
-  responsible. `sw.js` on disk had gone back to the pre-PDF-fix code
-  (`respondVideo`/`isRangedMediaPath`/etc.) even though `git show <last-good-sha>:sw.js`
-  proved the correct, renamed, version-bumped code really had been committed correctly
-  earlier the same day. This repo lives under a Windows user's Desktop folder, a path
-  OneDrive syncs by default on many Windows setups — the most likely (though
-  unconfirmed) mechanism. **The lesson: an edit tool's own "file state is current in
-  your context" assumption is not proof the disk agrees** — if a fix that was previously
-  verified and committed appears to be missing again, diff the live file against the
-  relevant commit (`git show <sha>:<path> | diff - <path>`) before concluding the code
-  regressed and re-deriving the fix from scratch.
+- **Offline (phones & tablets) — STRICT OFFLINE MODE** (rebuilt 2026-09-24; design and the
+  reasoning behind every choice in **[MOBILE-OFFLINE.md](MOBILE-OFFLINE.md)**, the serving side in
+  `sw.js`'s header). A visitor saves a project from the client menu; from then on that device runs
+  it from the saved copy, online or not — exactly like an exported standalone folder — until the
+  visitor taps Update. The code is the "Offline (phones & tablets)" section near the end of `app.js`.
+  - **One way in:** the root menu row `offlineMenuRowHtml()` — "⬇ SAVE FOR OFFLINE" / "⟳ UPDATE
+    OFFLINE COPY" / "⟳ UPDATE AVAILABLE" (+ `.cat-btn-dot`) → `openOfflinePanel()` → `#offlinePanel`
+    (`renderOfflineStatus`, `renderIosGuide`, `onOfflineGo`, `onOfflineRemove`). **Nothing about
+    offline is ever shown unasked** — the old automatic "Add to Home Screen" banner, its
+    declined/saved `localStorage` flags and `SW_VERSION` are gone. The row shows only where
+    `offlineSaveRowAvailable()`: client, not a bundle, secure context, SW + Cache Storage,
+    `isTouchDevice()`.
+  - **"Is this a phone/tablet" = `isTouchDevice()`** (primary pointer coarse, or iPadOS by touch
+    points), never the window width. Tablets are included; the brochure's pdf.js path uses the same
+    test. The old width test (`isMobilePortrait||isMobileLandscape`) failed on tablets, big phones in
+    landscape, "Desktop site" and admin-on-the-phone — and a failed test DELETED the download.
+    **Nothing deletes a saved copy except "Remove from this device".** `retireDesktopOffline()`
+    (desktops only) unregisters / clears old-style caches only when no `b91-saved@` cache exists.
+    The layout checks (`isMobilePortrait`/`isMobileLandscape`) are still right for LAYOUT.
+  - **What's saved = the server's OFFLINE FILE LIST** `{project, version, files:[{path,size,hash}]}`,
+    never listing `sw.js`. A published demo carries `offline-files.json`
+    (`publish_s3.offline_list_bytes`, uploaded LAST, `no-cache`); the local server answers
+    `/api/offline-files?project=` (`server.py` `offline_files`: the same `_project_files` "referenced
+    by name" rule as publishing, md5s cached by mtime+size, plus `manifest.webmanifest?project=` and
+    `api/pwa-icon-*?project=` exactly as the page requests them). No list (a demo published before
+    lists, the static single-site deploy) → `fallbackOfflineList()`: shell + `OFFLINE_CONFIG_FILES`
+    + the `collectOfflineAssets()` walk, no fingerprints (every Update re-downloads it all, 404s are
+    skipped). **A new app file must be in `deploy_s3.SHELL_FILES`/`SHELL_DIRS` (list) AND
+    `fallbackOfflineList` (fallback).**
+  - **Storage:** one cache per project, `b91-saved@<scope-path>:<pid>` (`offlineCacheName`), keyed
+    by `offlineKeyFor` — **identical to sw.js `cacheKeyFor`** (query dropped except `?project=`).
+    Every entry carries `X-B91-Hash` (its list fingerprint) and `Content-Length` (the boot progress
+    bar reads it). The record at `OFFLINE_RECORD_KEY` (`<scope>.b91-offline-record`: savedAt,
+    listVersion, fromList, files, bytes, `sheet {enabled, ok, readAt}`, `dataAsOf` = alignment
+    `savedAt`) is written LAST — a cache without it is not a saved copy. `b91-staging@…` holds the
+    app + data during a save.
+  - **`runOfflineSave()`**: `ensureCurrentOfflineLayer` (updates the registration; a WAITING newer
+    worker is started here — the one moment that's allowed, since the visitor asked — and the
+    controller must answer `PING`, or a pre-v50 worker would answer the downloads from its own stale
+    caches) → `planOfflineSave` (per file: `keep` = stored hash matches; `move` = found in a pre-v50
+    cache, copied not downloaded; `fetch`) → moves → `downloadOfflineItems` (media straight into the
+    saved cache, small files 3 at a time then big ones one at a time; app + json/csv/svg into
+    staging) → `saveMergedPlotsCsv` (server plots.csv + the live sheet via `mergeSheetIntoCsv`, 15s
+    limit; sheet unreachable → the server's file, or the copy's own newer merge when the server file
+    didn't change) → verify every file is really stored → `commitOfflineCopy` (staging → saved,
+    record, drop files no longer listed, `SAVED_CHANGED` to the worker, `retireLegacyDownload`).
+    `fetchOfflineFile` streams through a counting `TransformStream` straight into `cache.put` (never
+    a whole video in memory; `canStreamIntoCache` probes support once, else a Blob), rejects a byte
+    count that differs from the list, and aborts after 45s without progress. 3 retries with backoff;
+    `offlineWaitUntilUsable` waits for the page to be visible and for a connection; `holdWakeLock`
+    keeps the screen on. Every download URL carries `b91_net` (`offlineNetUrl`) — sw.js passes those
+    straight to the network.
+  - **Strict mode in the page:** `OFFLINE_COPY` (sw.js injects `window.B91_OFFLINE_COPY` into the
+    saved index.html) → `loadData` never reads the live sheet (`dataSource: 'saved'`), and
+    `offlineAsOf()` shows "Availability as of …" in the plot card (`.panel-asof`) and the area-filter
+    menu (`.area-menu-asof`).
+  - **"Update available":** `checkForOfflineUpdate()` — when the drawer is opened (and after boot if
+    it starts open), at most every 2 min, compares the list's `version` with `record.listVersion`.
+  - **iPhone/iPad:** `isIosDevice() && !isStandaloneDisplay()` → `renderIosGuide()` (add to Home
+    Screen, open it from there, save there), because a Home Screen web app's storage is separate from
+    the browser's. `applyBrand` sets `apple-mobile-web-app-title` (publish bakes it in too) so the
+    icon is findable.
+  - **No automatic reload anywhere.** sw.js never `skipWaiting()`s on its own and the old
+    `controllerchange` → reload is gone. The only reloads are after a save/update/remove the visitor
+    tapped (`onOfflineGo` → "Open saved copy", automatic after 1.5s when there's nothing else to read).
+  - **Pre-v50 downloads are adopted, not lost:** `maybeAdoptLegacyDownload()` (after boot, online,
+    touch device, not an iPhone browser tab, `b91-offline-saved-v12-<pid>` flag set) runs
+    `runOfflineSave({silent:true})` — never starts a waiting worker, gives up if anything but the app
+    + data (≤12MB) would have to be downloaded. Until then sw.js falls back to those old caches when
+    the network fails for an unsaved project.
+  - **Boot:** `registerOfflineSupport()` + `loadOfflineRecord()` start at the top of `init()` (the
+    record is awaited just before the menu renders, since the row reads it); `afterBootOffline()`
+    runs at the end.
+  **Verifying offline — read before testing (2026-09-24 session).** Phone emulation = the Browser
+  pane's `resize_window` at a width < 768 (that keeps touch emulation, i.e. `pointer: coarse`) and
+  LANDSCAPE (e.g. 740×360) — a portrait phone viewport shows the "Rotate your phone" overlay instead
+  of the map. "Offline" for localhost = `preview_stop` the server (`navigator.onLine` stays true).
+  **A hidden Browser pane makes `document.visibilityState === 'hidden'`, which PAUSES a save by
+  design** (`offlineWaitUntilUsable`) — in a test, override `visibilityState` and dispatch
+  `visibilitychange`. A published folder can be tested locally by writing `publish_s3._collect`'s
+  items to a scratch folder under the app and opening it as a sub-folder; the ROOT worker must leave
+  that sub-folder app alone (`isAppPage` — a real bug found exactly that way). **Remove every saved
+  copy you made in the preview browser afterwards**: a strict copy left there shows the user a frozen
+  project. Other traps, still true: `readyState: 4` is not proof a video plays — seek deep into it
+  (only seeking exercises `sliceRange`); `readPixels()` on the three.js canvas is always blank (no
+  `preserveDrawingBuffer`) — screenshot the page; the boot curtain clears via `.is-hidden`; a
+  single-node tour renders no `.tour-hs` hotspots.
+  **Cold-load latency lives almost entirely in project IMAGES, not code** (profiled 2026-09-12 at
+  9 Mbps/60ms/4× CPU with the SW blocked, the only honest way to measure a first visit). Baseline was
+  29.1s to usable / 27.2MB, and app.js + three.js + styles together were under 350KB of it — three
+  images were the whole critical path. Fixes: a 4.8MB `Demo.web.jpg` hard-coded as `src` on
+  `#clientContactImg` in `index.html` (downloaded every visit, never shown, since
+  `openClientContactModal` always reassigns `img.src` — don't put a `src` back on that tag); the
+  ground overlay PNG→WebP (17.0→2.5MB, RGBA with real alpha so WebP not JPEG); and the pano
+  JPEG→WebP (5.2→2.7MB). Result 9.1s / 5.6MB. **When a project feels slow, profile the images before
+  touching the code.** Phones and tablets upload textures at most 4096 wide (`textureCap()`, see
+  **Conventions & gotchas** → "iOS drops the WebGL context"), so they download the full-width pano and
+  discard part of it; a 4096-wide mobile variant file is the next available win but needs the offline
+  file list, the admin save path and the export bundle to agree on it.
+  **Warning — files on disk reverting:** the on-disk working copy of `sw.js`, `app.js` and this file
+  were once (2026-09-12) found to have REVERTED to an earlier state than what was committed in git,
+  with no edit tool call responsible. This repo lives under a Windows user folder that OneDrive may
+  sync — the most likely (unconfirmed) mechanism. **An edit tool's "file state is current" is not
+  proof the disk agrees** — if a verified, committed fix appears missing again, diff the live file
+  against the commit (`git show <sha>:<path> | diff - <path>`) before re-deriving it.
 
 **Client menu skips folders that offer no choice** (2026-09-04) — `resolveFolderTarget(node)`
 is the single decision point behind every menu-row click, returning `open` / `images` /
@@ -906,26 +923,39 @@ rebuilt when the logo is newer. **Pillow is an optional import** (`_pillow_ok()`
 server is stdlib-only by design, so without it (or without a project logo) both manifest
 and icons fall back to the bundled `icons/icon-*.png`. A standalone bundle keeps the static
 manifest: it has no server to generate anything (`setupPwaIdentity` no-ops under `BUNDLE`).
+A **published demo** is the same case: `publish_s3.py` writes an already-branded static
+manifest and generates its `icons/` at publish time (`setupPwaIdentity` no-ops under
+`PUBLISHED`). ⚠️ The repo has **no `icons/` folder** — the root `.gitignore` excludes `*.png` — so
+the "bundled" fallback above only exists on a machine that happens to have one. A published
+project with no logo gets `publish_s3._default_icon`, a gold "B91" tile whose letters are drawn
+from bars and arcs (`_draw_b91`), **never with a font**: Pillow's FreeType text calls crash
+Python natively on the admin's machine (Pillow 9.5.0 / FreeType 2.13.0 — an access violation,
+every run, 2026-09-25). A native crash in the publish thread kills `server.py` and no
+`try/except` can stop it, so **don't render text with `ImageFont` anywhere in server code.**
 
 ## Data files & contract (`projects/<id>/`)
 
 Each project directory holds these files (the client reads them cache-busted from the
 active project dir; image `file` paths are resolved by **basename** against that dir, so a
 stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
-- **`plots.svg`** — `<polygon class="plot" id="Plot-XXX" points="…">` in image-pixel
-  space; `viewBox` = the plan image size. Labels auto-derived from id.
+- **`plots.svg`** — `<polygon class="plot" id="A01" points="…">` in image-pixel
+  space; `viewBox` = the plan image size. **The id IS the plot number** (since 2026-09-24 —
+  files written before then say `id="Plot-A01"`, and `legacyPlotId` drops the `Plot-` on
+  load). A legacy repeated number carries an invisible `#n` tag (`2`, `2#2`). Labels are the id
+  minus that tag (`plotNumber`).
 - **`plots.csv`** — header `plot_id,status,facing,size,dimensions,price,block,tour_url,notes`
-  (header-driven; missing cols read blank). `status` ∈ available|reserved|sold (lower-cased
+  (header-driven; missing cols read blank). `plot_id` = the plot number, same as the SVG id.
+  `status` ∈ available|reserved|sold (lower-cased
   on load by `normalizeRow`). This is the client's **default** source *and* the **fallback**
-  when a Google Sheet is configured but unreachable (admin Save snapshots the sheet into it).
+  when a Google Sheet is configured but unreachable. Every admin Save writes it with the sheet
+  already applied (sheet wins), so it's also exactly what a standalone bundle shows.
 - **`alignment.json`** — `{ transform{tx,ty,scale,rotationDeg}, view{lonDeg,latDeg,fov},
   opacity, groundImage?{file,opacity}, panoImage?{file}, brand?{name,tagline,logo?{file}},
   bootImage?{file}, data?{source:'sheet'|'file', sheet:{url,gid?}},
-  area?{unit, filters:[{id,name,color,min?,max?}]},
-  plotOverrides?{ "<plotId>": { status?, size?, price?, … } } }`.
-  **`plotOverrides`** (added 2026-09-18) holds the per-field admin edits that outrank the
-  live Google Sheet — see the merge-precedence gotcha below. Absent ⇒ the sheet (or
-  `plots.csv`) stands unmodified.
+  area?{unit, filters:[{id,name,color,min?,max?}]} }`.
+  A **`plotOverrides`** block (2026-09-18 → 09-24: admin edits that outranked the sheet) may
+  still sit in older files; it is ignored and dropped on the next save — the sheet wins now,
+  and those same values were always written into `plots.csv` too.
   **`area`** (added 2026-09-18) is the admin's area unit + named size bands, surfaced to the
   client as one "Filter" dropdown (see the area-filter notes in the code map). Absent ⇒ no
   filter UI at all, and it is omitted whenever a project has no bands AND the default unit,
@@ -1179,13 +1209,26 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   `state.tours.length` and shows a plain notice rather than assuming; AERIAL VIEW needs
   none, since `state.home` starts at a sane default). Don't assume a data-dependent picker
   is unreachable before its data loads just because it "shouldn't" be clicked yet.
-- **`sw.js` is network-first for project CONFIG, SWR for media.** It used to be
-  stale-while-revalidate for everything under `/projects/`, which served the *previous*
-  `alignment.json` on the first load after an admin save — a freshly published menu item
-  only appeared on the SECOND reload, which reads exactly like "it didn't save". If you
-  change a caching strategy, **bump `VERSION`** (currently `v5`) or an installed worker
-  keeps serving under the old rules. `cache: 'no-store'` in `fetch` does NOT help: the
-  worker intercepts first.
+- **`sw.js` caches NOTHING by itself any more (v50, 2026-09-24).** A SAVED project is answered
+  only from its saved copy (strict offline mode); an unsaved one is plain network. Every "the
+  visitor sees a stale version" bug of the old opportunistic caching (SWR shell, network-first
+  config, primed media) is gone with it — a saved copy changes only through the visitor's Update.
+  **sw.js is updated by the browser on its own while saved copies keep running their saved
+  `app.js`, so the worker must stay compatible with every older saved copy**: its cache names
+  (`b91-saved@<scope-path>:<pid>`), the record key, `cacheKeyFor`'s key shape (== app.js
+  `offlineKeyFor`), the `b91_net` pass-through and the `PING`/`SKIP_WAITING`/`SAVED_CHANGED`
+  messages are a contract — change them only with a migration. `VERSION` (currently `v50`) is
+  now just a label the page can `PING` for.
+- **The app must keep working from a SUB-FOLDER** (published demos live at
+  `re.build91.in/<id>/`, many per origin). `sw.js` resolves every key against its own scope
+  (`self.registration.scope`), names saved copies per scope, and at the root answers only
+  **this app's own pages** (`isAppPage`: the folder or its `index.html`) and the requests those
+  pages make — anything else under the root scope (another app in a sub-folder) goes straight
+  to the network (a real bug, found 2026-09-24 by testing a published folder served locally
+  under the root app). Cleanups are scope-aware: Cache Storage is per ORIGIN, so a global sweep
+  on one demo wipes every other demo a salesperson saved on the same phone. Also keep every URL
+  in `index.html`/`app.js`/`sw.js` relative (no leading `/`) — the admin-only `/api/*` calls are
+  the one exception, and a published demo never makes them.
 - **The client nav drawer is HIDDEN in admin.** `wireAdmin` sets
   `els.catDrawer.hidden = true` because admin has its own sidebar — so a menu item can
   only ever be seen/tested at `/?project=<id>`, never at `/?admin=1&…`. This looks exactly
@@ -1195,34 +1238,55 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   for gallery, `tourId` for panotour). A `panotour` item that lost its `tourId` still
   rendered in the menu and did nothing when clicked, which is why this cost a debugging
   round. Check this function whenever a content type gains a field.
-- **With a sheet configured, plot data is a 3-layer merge — and ADMIN EDITS WIN**
-  (2026-09-18). Precedence in `loadData`: committed `plots.csv` (base — covers every plot,
-  including any the sheet has no row for) < the **live sheet** (bulk, always current) <
-  **`state.plotOverrides`** (`alignment.json`'s `plotOverrides`). Before this the sheet
-  REPLACED `state.rows` outright and `exportSite` rebuilt `plots.csv` from a fresh sheet
-  snapshot — so an admin edit was invisible to the client AND destroyed on the next save,
-  and plots missing from the sheet lost all their data. Overrides are derived by
-  **diffing `state.rows` against the sheet at save time** (`computePlotOverrides`), not by
-  tracking edits: the rows were seeded from the sheet, so anything that no longer matches is
-  an edit. That makes it self-cleaning (revert a value and the override disappears) and
-  durable across later sheet changes. Blanks are deliberately never recorded — `""` is
-  indistinguishable from "never filled in" and would let an empty field mask a real sheet
-  value. **Don't "simplify" this back into `state.rows = snap`.**
+- **With a sheet configured, THE SHEET WINS** (2026-09-24, on request — this REVERSES the
+  2026-09-18 "admin edits win" design and deletes its `plotOverrides`/`computePlotOverrides`/
+  `clearedPlotFields` machinery; don't reintroduce it without the owner asking). Precedence:
+  the admin's data (`plots.csv`, or a restored session's rows) < the **live sheet**, applied
+  by `applySheetRows` per plot the sheet lists and per column the sheet HAS — **a blank cell
+  wins too** (owner's choice: blank in the sheet means blank). Columns the sheet lacks (the
+  media ones, usually) and plots it has no row for keep the admin's values. It's applied at
+  every load (`loadData`), when Import & Trace opens (`applySheetToTracePlot`, from a fresh
+  fetch), and at every save (`exportSite` re-fetches, applies, then writes `plots.csv` — and
+  tells the admin how many values the sheet replaced). Admin fields stay EDITABLE (owner's
+  choice) but show a "Sheet" tag that turns amber once typed over. A session restore used to
+  replace `state.rows` AFTER the sheet merge (admin edits won on reload); it's now passed to
+  `loadData` as the base so the sheet still goes on top.
+- **Plot ids match the sheet EXACTLY, 1-to-1** (2026-09-24). The id is the plot number
+  (`A01`), no hidden prefix; `indexRows` keys by `plot_id` as written (trimmed) — no case
+  folding, no `Plot-` tolerance (the old `canonPlotId` is gone on purpose: it let rows land on
+  plots never named that way). `legacyPlotId` strips `Plot-` from OUR files only (plots.svg,
+  plots.csv, the admin session) — never from the sheet. Numbers must be unique: the trace
+  editor refuses a rename to a taken number and auto-numbering skips taken ones. Legacy
+  repeats (e.g. `eleganzav2`/`anandman`: 436 plots numbered 1–111 per block, 433 of them
+  sharing a number, against a sheet of `A101`–`A536`) still load via `DUP_TAG`, and are flagged
+  (`.is-dup`, "⚠ N share a number") until renamed; a tagged id (`2#2`) matches no sheet row, only
+  the first holder (`2`) can. `retagTracePlots` re-untags a number's first holder after a rename
+  or delete. **`finishTrace` rebuilds each row from the plot object** (`p._row` + its fields),
+  never by looking up the NEW id in `state.rows` — after a rename/retag that id can belong to
+  another plot's old row. `plotNumberProblem` rejects `#` and a leading `Plot-` (both would
+  corrupt the id scheme on reload).
 - **Google Sheet source is per-project & public-only.** `state.sheet` (from
   `alignment.json`'s `data`) drives **plots only** — landmarks/amenities stay file-based.
   The browser reads the sheet CSV **directly** (no server proxy), so the sheet must be
-  public: a normal share link ("Anyone with the link") → `gviz/tq?tqx=out:csv`, or a
-  Publish-to-web link → `/pub?output=csv`; `parseSheetUrl` picks the endpoint by URL shape.
+  public: a normal share link ("Anyone with the link") → **`/export?format=csv&gid=`
+  first**, `gviz/tq?tqx=out:csv` only as the fallback; a Publish-to-web link →
+  `/pub?output=csv`. `parseSheetUrl`/`sheetCsvCandidates` pick by URL shape. **Why export first
+  (2026-09-24):** gviz infers ONE type per column and returns cells that don't fit it as blank —
+  a text Dimensions/Notes value in a mostly-numeric column (or vice versa) silently vanished.
+  The export returns every cell as displayed text; its 307 redirect to
+  `*.googleusercontent.com` carries CORS headers on both hops (verified with a real browser
+  fetch from localhost). **Column names are normalised** in `parseCSV` (lower-cased, spaces/
+  hyphens → `_`, leading BOM dropped — `csvColumnKey`), so a sheet header `Dimensions`/`Notes`/
+  `Plot ID` works; Test lists the columns it read. The flip side: two headers that differ only
+  in case (`Notes` + an old `notes`) become ONE column and the right-most silently wins — Test
+  flags this via `csvDuplicateColumns` (it hid a newly added Notes column the same day).
   A private sheet / bad URL / CORS block fails silently and `loadData` falls back to the
   committed `plots.csv` (`dataSource='cached'`, sync label "cached · sheet unreachable").
   `fetchSheetRows` guards on the response actually being CSV **with a `plot_id` column**
   (Google returns a 200 HTML page for some bad requests), so don't drop that check. Google
   caches published sheets ~5 min, so status edits aren't instant. The `plot_id` join is
-  **prefix-tolerant** — `indexRows`/`canonPlotId` match sheet rows to polygons ignoring an
-  optional `Plot-` prefix (so a sheet listing bare `133` joins to `Plot-133`) and rewrite the
-  row's `plot_id` to the canonical polygon id; the admin **Test** button reports the match
-  count. This is why `loadCommittedCSV`/`fetchSheetRows`/the session restore all key rows
-  through `indexRows`, not a raw `plot_id` Map — don't revert that.
+  **exact** (see the entry above); the admin **Test** button reports matched/total and lists
+  plot numbers with no row, rows with no plot, and repeated `plot_id`s (first row wins).
 - **Project asset paths resolve by BASENAME** (`assetUrl`) against `state.assetBase`
   (`projects/<id>`), so a JSON that stores `sample/foo.jpg` still loads from the active
   project dir. Don't "fix" stored paths to absolute — basename resolution is what makes a
@@ -1248,12 +1312,12 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   file gets rewritten into `three.global.js`, `strip_named_import`'s target string (which
   must match `app.js`'s import EXACTLY or it silently no-ops, leaving a live `import`
   statement inside the bundle's non-module `<script src="app.js">` — a guaranteed
-  `SyntaxError`), and **`sw.js`'s `SHELL_URLS`** (the PWA offline precache list — pointing
-  it at the wrong file doesn't error at install time, since the OLD file still exists on
-  disk and fetches fine; it just means the file the app ACTUALLY needs is never cached,
-  so an offline visitor's pano viewer silently fails to load THREE.js — bump `VERSION` too
-  when fixing this, so an already-installed worker's stale shell cache gets discarded
-  rather than keeping the wrong file forever). `spike/index.html` also references the old
+  `SyntaxError`), and **`app.js`'s `fallbackOfflineList`** (the offline save's hard-coded
+  shell list for servers without an offline file list — pointing it at the wrong file doesn't
+  error, since the OLD file still exists on disk and fetches fine; it just means the file the
+  app ACTUALLY needs is never saved, so an offline visitor's pano viewer silently fails to load
+  THREE.js; `deploy_s3.SKIP_FILES` keeps the unused dev build out of the real file list).
+  `spike/index.html` also references the old
   path but is a dev prototype, not part of the live app or the export bundle — leave it.
   **`module_to_global`
   is NOT interchangeable between the dev and minified builds** — the dev build's export
@@ -1426,6 +1490,30 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   `loadCurrentLayoutIntoTrace` **lazily re-fetches `state.groundImage.file` into
   `state.planBlob`** when it's missing — otherwise "Import / Trace" showed plots but no
   plan image (main pano was fine). Don't remove that fetch-back.
+- **iOS drops the WebGL context when textures are too big — and then the next shader compile
+  throws** (2026-09-25, reported from iOS Chrome on re.build91.in: "Argument 1 ('shader') to
+  WebGL2RenderingContext.shaderSource must be an instance of WebGLShader", black pano, grey plots).
+  WebKit's wording for "`createShader()` returned null", which only happens on a lost context.
+  Three causes, all fixed:
+  (1) **Texture size.** iPhones report `MAX_TEXTURE_SIZE` 16384, so the old cap
+  (`min(PANO_TEX_CAP 8192, gpuMaxTexSize())`) never downscaled anything there, and the site-plan
+  drape wasn't capped at all: eleganzav2's 6144×3072 pano + 7680×5223 plan ≈ 310 MB of GPU memory
+  with mipmaps. `textureCap()` now caps phones and tablets (`isTouchDevice()`) at `MOBILE_TEX_CAP`
+  4096 for the pano, every tour room and the drape (`capTextureImage`, a 2D-canvas downscale that
+  keeps alpha) → ≈105 MB; desktop keeps full size. Texture pixel size is never read for placement
+  (the drape uses UVs), so downscaling moves nothing.
+  (2) **Context count.** `gpuMaxTexSize()` opened a new probe WebGL context on EVERY texture load
+  (every tour room and prefetch); WebKit keeps 16 per page and kills the oldest, eventually the
+  main renderer. It now asks once per page (or reads the live renderer).
+  (3) **Boot abort.** The first frame renders inside `initThree()`, so a context lost at that moment
+  threw out of `init()`: no plot data (grey plots), no landmarks/tours, and a "file://" hint that
+  made no sense on a phone. `renderLoop` now swallows a render error only when the context is lost
+  (`gpuContextLost()`) — three.js pauses and rebuilds on `webglcontextrestored` —
+  `showGpuLostNotice()` tells the visitor, and the boot-error notice gives the file:// hint only
+  for `file:` pages. **Testing:** `gl.getExtension('WEBGL_lose_context').loseContext()` /
+  `.restoreContext()` on `#pano canvas` simulates it; wrap `texStorage2D` to see upload sizes (three
+  uses texStorage2D + texSubImage2D on WebGL2), and note a hidden Browser pane pauses rAF, so
+  nothing uploads until a screenshot forces a frame.
 - **A service worker only registers on a secure context** (`https://` or `localhost`) —
   verified directly (again, same as the earlier `file://` findings): a plain LAN
   `http://192.168.x.x:8731` throws `The URL protocol of the current origin ('null') is not
@@ -1433,53 +1521,17 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   offline demo; a temporary HTTPS tunnel (e.g. `cloudflared` quick tunnel) in front of
   `server.py` is required. `localhost` itself IS exempt, so `sw.js` registration can (and
   was) verified directly on this dev machine without any tunnel.
-- **Range-requested assets can't be cached like any other GET in `sw.js`.** A `<video>`/
-  `<audio>` element requests its `src` with byte-range headers for seeking, AND pdf.js
-  reads a PDF the same way (progressive, out-of-order Range reads for the brochure viewer
-  — see `openClientBrochureModal`) — the server answers with `206 Partial Content`, and
-  caching a single 206 response under the resource's URL would silently corrupt the cache
-  (only that one byte slice would ever be served back; worse, since different Range
-  requests for the SAME file return DIFFERENT slices, each caching attempt overwrites the
-  last one under that same key — whichever slice lands last "wins" as the permanently
-  cached, corrupted copy). `respondRangedAsset` (renamed 2026-09-12 from `respondVideo`
-  once PDFs needed the exact same treatment — also renamed: `isRangedMediaPath`→
-  `isRangedCacheablePath`, `VIDEO_BLOB_CACHE`→`RANGED_BLOB_CACHE`,
-  `VIDEO_PRIME_INFLIGHT`/`primeVideoCache`→`RANGE_PRIME_INFLIGHT`/`fetchAndCacheFull`)
-  only ever answers a ranged request from cache once a **complete** (`200`) copy is
-  already held, slicing it manually into a proper `206` reply (`sliceRange`); otherwise it
-  passes the ranged request straight to the network and separately kicks off a background
-  fetch (`fetchAndCacheFull`) to prime the full-file cache for next time. This naturally
-  satisfies "cache only once actually opened," since neither a `<video>` `src` nor a PDF
-  load happens until the relevant modal actually opens (menu-item click), not on page
-  load. **`fetchAndCacheFull` is shared by BOTH the ranged-priming path AND the plain
-  (`!range`) direct-fetch path** (unified 2026-09-12) — before that, each had its OWN
-  independent "is a fetch for this key already running" check, so a request shape mix
-  pdf.js commonly produces (one main unranged streaming request ALONGSIDE a few early
-  ranged reads for out-of-order data) triggered TWO separate complete downloads of the
-  same file, not one; confirmed via real service-worker console instrumentation that
-  after unifying them, exactly one real `fetch()` happens per file (Playwright's network
-  log still shows what LOOKS like two responses per fetch — that's just how it reports a
-  worker-mediated request: the worker's own outbound fetch and the page-visible response,
-  as two separate log entries — not an actual second download; don't be misled by it).
-  **This background-priming fetch genuinely did not exist in the code for a while, this
-  paragraph's own earlier description notwithstanding** — a real bug found 2026-09-12
-  ("mobile offline users, videos not getting downloaded", then confirmed as the exact
-  same gap for PDFs, which weren't even routed through this function at all until the
-  same day): the doc/comment described this exact fallback, but the uncached-and-ranged
-  branch was just a bare network passthrough with no `event.waitUntil`/priming call
-  anywhere. Since MOBILE browsers (iOS Safari reliably, Android often too) send a `Range`
-  header on a `<video>`/PDF's very FIRST request — unlike most desktop browsers, which
-  usually send a plain GET first — this meant videos (and, separately, PDFs) were never
-  cached AT ALL on mobile, on any visit, however many times opened, while working fine in
-  desktop testing. Re-implemented for real and verified END-TO-END with an actual browser
-  (Playwright driving system Chrome): opened a video + the brochure online, polled real
-  Cache Storage until both were confirmed cached, reloaded once more online, then
-  genuinely went offline (`context.setOffline(true)`) and reloaded again — the video's
-  `readyState` came back `4` (fully loaded) with no error, and the PDF rendered the
-  identical page count it did online. If this ever looks broken again, verify with an
-  actual offline browser load, not just reading the code or a unit test in isolation — a
-  unit test using mocked `fetch`/`caches` had ALREADY "passed" while the real end-to-end
-  scenario was still broken by the missing-registration-timing bug documented above.
+- **Range requests (video, audio, pdf.js) are answered by slicing a stored WHOLE file.** A
+  `<video>`/`<audio>` element and pdf.js read files in byte ranges (mobile browsers send a
+  `Range` even on the very first request). A saved copy only ever stores complete `200`
+  files — the save downloads each file whole, without a Range — and `sw.js`'s `sliceRange`
+  cuts a proper `206` out of it (a few recent files kept as Blobs so seeking doesn't re-read
+  the cache every time). Never store a `206`: every different slice of the same file would
+  overwrite the last one under one key, leaving a corrupt fragment as "the file". (Until v49
+  the worker cached media opportunistically and needed a background "priming" fetch for
+  mobile's first ranged request — that whole mechanism is gone with strict mode.) Verified
+  2026-09-24 with the eleganzav2 walkthrough video and brochure served from a saved copy with
+  the server stopped: the video seeked to its end, pdf.js rendered the brochure.
 - **Live-server headless screenshots stay unreliable for admin verification specifically**
   (2026-09-02, offline-layer work): confirmed again that `--virtual-time-budget` +
   `--dump-dom`/`--screenshot` don't compose reliably with this app's dynamic `import('./app.js?v=...')`
@@ -1494,12 +1546,7 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
 - **The same live-server headless unreliability extends to anything gated behind
   `init()` finishing at all** (2026-09-03, confirmed narrower root cause): repeated
   captures of the plain client URL (no admin) all stalled at "Loading…" — meaning the
-  pano-texture-load step itself was hanging, well before `init()` ever reaches
-  `registerOfflineSupport()` (near the very end of the successful path). A visible
-  "Add to Home Screen" banner in such a capture is NOT evidence that `registerOfflineSupport()`
-  ran — it has its own fully independent top-level `beforeinstallprompt` listener that
-  fires and shows the banner regardless of `init()`'s progress. Don't infer anything about
-  `registerOfflineSupport()`/the offline-save flow from whether that banner appears.
+  pano-texture-load step itself was hanging, well before `init()` ever reaches its end.
   Verify new logic gated behind `init()` completing via real data checks (fetch the
   project's committed JSON directly and confirm the code's assumptions against it) and a
   careful code trace instead — and ultimately a real device, since neither headless method
@@ -1507,24 +1554,18 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   don't work at all — see the `file://` gotchas above — so it can't test this feature
   either).
 - **An `<iframe>` load is a `mode: 'navigate'` fetch, same as a real page load** — caught a
-  real bug from this (2026-09-03): the Brochure viewer's PDF loads via `<iframe src>`
-  (`openClientBrochureModal`), and `sw.js`'s navigation-fallback logic (offline + not
-  cached → serve the cached app shell) doesn't know the difference between that and the
-  actual page reloading, so it served the *whole app* inside the little brochure frame.
-  Any future navigation-mode special-casing in `sw.js` needs to check for this — project
-  assets should route through the ordinary data-cache path even when the browser labels
-  the request a "navigation".
-- **"Missing offline → works after viewing it online → then works offline" is diagnostic**
-  (2026-09-03): it means the file was never in the pre-download list and got cached only as
-  a side effect of being viewed (runtime stale-while-revalidate). Read that symptom as a
-  `collectOfflineAssets` gap, not a caching failure. It found a real one: the Contact card
-  is its own node kind (`kind: 'contact'`) with its photo at `node.contact.image`, outside
-  the `content` object — the menu walk handled only `parent`/`child` and silently skipped
-  it. When adding any new content type, the collector must be extended alongside the
-  viewer, and it must resolve the URL the SAME way the viewer does (`assetUrl(...)`, same
-  arguments) or the cache key won't match what gets requested. The collector's logic can be
-  replayed in Node against the committed project JSON to check coverage without a browser —
-  a cheap, genuinely reliable test in a session where browser testing mostly wasn't.
+  real bug from this (2026-09-03): the Brochure viewer's PDF loads via `<iframe src>` on desktop
+  (`openClientBrochureModal`), and a navigation fallback that serves the app page served the
+  *whole app* inside the little brochure frame. `sw.js` therefore treats a navigation to a
+  project file (`isProjectFile`) as a file, never as the app — keep that distinction in any
+  future navigation handling.
+- **A file missing from a saved copy is missing online too** (strict mode) — so a gap shows up
+  in the office, not in the field. What a copy holds is decided by the server's offline file
+  list, i.e. the publish rule `_project_files` (a project file goes in when its NAME appears in
+  the project's JSON or plots.csv). A new content type whose file isn't named in the data needs
+  that rule extended; the fallback walk (`collectOfflineAssets`, for servers with no list) must
+  resolve URLs the SAME way the viewer does (`assetUrl(...)`) — the Contact card photo
+  (`node.contact.image`) was once missed exactly that way (2026-09-03).
 - **Synthetic `PointerEvent`s do NOT drive the pano's pan handler in headless** — don't try
   to prove drag/look-around behaviour that way (2026-09-03). Dispatching a full
   pointerdown → 30-40 pointermove → pointerup sequence on `#pano` reaches the element (a
@@ -1534,16 +1575,12 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   "the clamp released" from "the drag never happened", so it's worthless rather than
   reassuring — measure DOM positions to expose that (banner `getBoundingClientRect().left`
   before/mid/after), and otherwise leave drag behaviour to a real-device check.
-- **Fetching a file is not the same as it being cached — verify, don't assume**
-  (2026-09-03). `cache.put()` in `sw.js` can reject independently of the fetch that fed
-  it, most plausibly on a per-origin **storage quota** (mobile browsers cap this, iOS
-  Safari tightly; video is what blows past it). Those writes are detached from the
-  response the page receives, so a failure there is invisible to the page and would be
-  reported as a successful download. `verifyCachedItems()` (app.js) therefore checks
-  Cache Storage directly after downloading — the page shares the same Cache Storage as the
-  worker, so it can confirm the worker's work, matching the same query-stripped keys
-  `cacheKeyFor` writes. Keep that check in place; "the bytes arrived" has already proven
-  twice to be a misleading proxy for "this works offline".
+- **Fetching a file is not the same as it being stored — verify, don't assume**
+  (2026-09-03, still true). `cache.put()` can fail on a per-origin **storage quota** (mobile
+  browsers cap it; video is what blows past it). `runOfflineSave` therefore checks Cache
+  Storage for every listed file before committing (step 4), and a byte count that doesn't
+  match the list's size is rejected inside the stream. Keep that check; "the bytes arrived"
+  has already proven twice to be a misleading proxy for "this works offline".
 - **Android Chrome has NO inline PDF viewer — it downloads PDFs, in an iframe and on a
   direct navigation alike** (2026-09-03, two rounds of real-device testing). First
   misdiagnosed as an offline-caching gap; the test that separated it was asking whether it
@@ -1553,8 +1590,10 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   (`application/pdf`, no `Content-Disposition`, same file previews fine on iOS): the
   browser simply lacks the capability, so nothing at the URL/markup level can fix it.
   Actual fix: `openClientBrochureModal` renders the pages itself with vendored **pdf.js**
-  (`loadPdfJs`/`renderPdfInto`, canvases in `#clientBrochureCanvas`) on Android only —
-  iOS/desktop keep the native iframe viewer, which is better where it works. pdf.js is
+  (`loadPdfJs`/`renderPdfInto`, canvases in `#clientBrochureCanvas`) — at first on Android
+  only, now on every phone and tablet (`isTouchDevice()`: an iOS iframe PDF opens a separate
+  tab in a Home Screen app and fails offline); desktop keeps the native iframe viewer, which is
+  better where it works. pdf.js is
   **v3, not v4**, on purpose: v4 needs `Promise.withResolvers` etc. that old Android
   builds lack. A hang is not a rejection, so the caller races page 1 against a 12s
   deadline and falls back to the phone's own handling rather than stranding the visitor on
@@ -1938,40 +1977,24 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   supplying depth + camera transforms (OQ-1). ⚠️ Open tension: eyeballed node placement is
   incompatible with the glide — see D-1 in that doc. **Read VIRTUAL-TOUR.md before touching
   anything tour-related, and update it in the same turn as any tour work.**
-- **Client offline layer / PWA** (added 2026-09-02, extended 2026-09-03, see CHANGELOG for
-  the full breakdown) — minimal service worker (`sw.js`) + `manifest.webmanifest` + ONE
-  combined "Add to Home Screen" + save-for-offline banner (originally two separate
-  prompts, merged 2026-09-03 per explicit user request once real testing made the
-  back-to-back feel redundant), built as the concrete next step of the mobile-offline
-  initiative so there's something real to demo. A free Cloudflare quick tunnel
-  (`cloudflared`, portable exe, not installed as a system tool) is the current stand-in for
-  real hosting, fronting the already-running `server.py` for phone testing — throwaway,
-  gets a new random URL every restart, dies when the process/session ends; a fresh restart
-  has been needed multiple times this session specifically to get a clean
-  `localStorage`/service-worker slate for retesting after a bug fix (the SAME tunnel
-  domain otherwise carries forward stale flags/cache from the previous, buggier test).
-  **Real bugs found via real-device testing (iPhone + Android), all fixed same day
-  (2026-09-03):** the Brochure PDF fell back to serving the whole app shell offline
-  (iframe navigations weren't routed as data); gallery photos/PDF/video weren't available
-  offline unless each one had specifically been opened while online first (→ the eager-
-  download feature); a failed download still counted as "100%/Done" with no way to tell
-  it apart from a real success, and always marked the project "saved" even on partial
-  failure, blocking any retry (→ honest per-item failure tracking, `"N/M saved"`, and the
-  saved flag only sets on full success); the install banner never actually disappeared
-  after Add/✕ (a `[hidden]` CSS specificity bug — see **Conventions & gotchas**); the
-  install banner also showed on desktop, because `maybeShowInstallBanner()`'s own
-  independent `beforeinstallprompt` trigger bypassed the mobile gate that only lived at
-  the registration call site (fixed properly by removing that independent trigger
-  entirely when the two banners were merged into one). **Still open:** a real
-  offline-after-cutoff test of the CURRENT merged-banner flow specifically (each fix so
-  far has needed at least one more round after "verified" — treat any single confirmation
-  from the user as provisional until they've gone through the full add-to-home-screen →
-  airplane-mode → browse-everything sequence without hitting a new issue), and exercising
-  the video/PDF byte-range caching path (`sw.js`'s `respondRangedAsset`) against a real seek/replay.
-  The per-project
-  `manifest.webmanifest` limitation (static/generic, not per-`?project=`) is intentional —
-  see the 2026-09-02 CHANGELOG entry for why it doesn't matter for the actual planned
-  rollout (per-project standalone bundle hosting has no multi-project ambiguity).
+- **Mobile offline — STRICT OFFLINE MODE (rebuilt 2026-09-24, [MOBILE-OFFLINE.md](MOBILE-OFFLINE.md)).**
+  Replaces the 2026-09-02 → 09-23 "Add to Home Screen" banner + opportunistic caching (its
+  history is in CHANGELOG). Save/update/remove from one client-menu row; a saved project runs
+  only from its copy (like the standalone export); plots.csv carries the Google Sheet merged in;
+  changed-files-only updates via the server's offline file list; "update available" dot; no
+  automatic reloads; nothing deleted automatically; iPhone/iPad guided to save inside the Home
+  Screen app. **Verified 2026-09-24 in the Browser pane with phone emulation** (localhost, and a
+  published folder built locally with `publish_s3._collect`): first save, strict boot with the
+  server stopped (menu, tour rooms, audio ranges, eleganzav2's 207MB video seek + pdf.js
+  brochure), update of only the changed files (server log), removed files dropped, update
+  available dot, iPhone guide, Remove, adoption of a pre-v50 download without re-downloading its
+  images, legacy fallback offline, "not saved" page, desktop + admin visits leaving copies alone,
+  a waiting worker started only by Update. **Still open — real devices:** iPhone (Safari tab →
+  guide → Home Screen app → save → airplane mode → force-quit → reopen) and an Android phone and
+  tablet (save + install → airplane mode → reopen from the icon; lock the screen mid-download).
+  Known platform limits (not bugs): the browser owns the storage; the worker itself still
+  auto-updates; external links need internet; an unpublished demo keeps working on phones that
+  saved it; on Android the Chrome tab shares the saved copy with the icon.
 - **Virtual tour — Phase 1 STARTED (2026-09-08).** Owner signed off the spike and chose
   crossfade + drag-to-place + separate-tours-from-menu (see VIRTUAL-TOUR.md decisions).
   **Step 1 done & verified:** `tour.json` data model (many tours/project) + a 4th admin
@@ -1995,6 +2018,13 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   — they need dragging onto real doorways. Raw PNG masters live in
   `projects/panotour-demo/_source/` so they stay out of bundles.
   **Still open in Phase 1:** info hotspots (1.8). Phase 2 (depth glide) remains deferred.
+- **☁ Publish to web** (2026-09-24) — built and verified end to end through the real admin UI
+  and the live CloudFront URL (see the CHANGELOG entry for the full list). **Open:** the
+  `re.build91.in` DNS record (owner action at the build91.in DNS provider); until then demos are
+  shared via `d9diw1qcxp0ak.cloudfront.net/<id>/`. Known behaviour, by design: the published
+  copy is independent of the local folder — Rename/Delete don't take it down (Unpublish first);
+  a file a project references but that is missing on disk simply isn't published (the demo
+  shows it as missing, same as locally).
 - Suggested next (after the tour viewer): **ROADMAP Feature 3** (enquiry/lead capture) — see
   [ROADMAP.md](ROADMAP.md). Also outstanding: a client-side **"Load site folder…"** picker —
   not built.

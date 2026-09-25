@@ -82,6 +82,9 @@ CONFIG_CACHE = "public, max-age=60"        # plots/landmarks/alignment — re-up
 BOOT_IMAGE_CACHE = "public, max-age=300"   # 5 min
 
 SHELL_FILES = ["index.html", "app.js", "styles.css", "sw.js", "manifest.webmanifest"]
+# A published demo's offline file list (publish_s3.offline_list_bytes) — what a phone reads to
+# see whether its saved copy is out of date, so it must never be served stale.
+OFFLINE_LIST = "offline-files.json"
 SHELL_DIRS = ["vendor", "icons"]
 # Never uploaded: app.js imports ./vendor/three.module.min.js and sw.js precaches only that
 # one, so the 1.3MB unminified dev build is pure bulk in a deployment. Keep it in the repo —
@@ -111,7 +114,7 @@ def content_type_for(path: Path) -> str:
 
 
 def cache_control_for(rel: str, path: Path) -> str:
-    if rel in ("index.html", "sw.js", "app.js", "styles.css", "manifest.webmanifest"):
+    if rel in ("index.html", "sw.js", "app.js", "styles.css", "manifest.webmanifest", OFFLINE_LIST):
         # app.js/styles.css are revalidated rather than immutable because sw.js precaches them
         # by their BARE url (cacheKeyFor strips the query), so a hard-cached copy could outlive
         # a deploy. Revalidation costs one conditional request and answers 304 when unchanged.
@@ -136,17 +139,23 @@ def stamp_index_html(src: Path, dest: Path, version: str) -> None:
     updates instant (the URL changes when you deploy) while letting repeat visits answer 304.
     Only the uploaded copy is rewritten; the working tree is untouched.
     """
-    html = src.read_text(encoding="utf-8")
+    html, matched = stamp_index_text(src.read_text(encoding="utf-8"), version)
+    if not matched:
+        print("  ! version stamp did not match — index.html's cache-busting markup has changed.")
+        print("    Deploying it as-is; app.js/styles.css will be re-fetched on every load.")
+    dest.write_text(html, encoding="utf-8")
+
+
+def stamp_index_text(html: str, version: str):
+    """The text half of stamp_index_html → (html, matched). Shared with publish_s3.py (the
+    admin's ☁ Publish), so both deploy paths stamp index.html identically."""
     before = html
     # styles.css is built by string concatenation inside document.write:
     #   href="styles.css?v=' + Date.now() + '"
     html = re.sub(r"styles\.css\?v='\s*\+\s*Date\.now\(\)\s*\+\s*'", f"styles.css?v={version}", html)
     # app.js is a template literal: `./app.js?v=${Date.now()}`
     html = re.sub(r"\./app\.js\?v=\$\{Date\.now\(\)\}", f"./app.js?v={version}", html)
-    if html == before:
-        print("  ! version stamp did not match — index.html's cache-busting markup has changed.")
-        print("    Deploying it as-is; app.js/styles.css will be re-fetched on every load.")
-    dest.write_text(html, encoding="utf-8")
+    return html, html != before
 
 
 def sync_file(local: Path, s3_url: str, rel: str, args) -> None:

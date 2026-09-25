@@ -5,6 +5,333 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-25 (Hover popup only for filtered plots; click unchanged)
+
+On request: the hover popups were "irritating when the user is exploring the overall layout", so
+hover and click are now separate. Click: unchanged — any plot opens its card, filters on or off.
+Hover (client): the tooltip — and the hover brightening and drift-hold that go with it — only
+shows for plots a filter is colouring (`hover` checks `filtersShowPlot`), so with every filter off
+there are no hover popups at all. The admin still hovers every plot. Verified in the Browser pane
+(eleganzav2, landscape phone) by sweeping the pointer across the layout: all filters off → 0
+tooltips (and a click still opened Plot E3); Available on → 103 tooltips, all Available; Available
++ Sold → 149, Available and Sold only. Files: `app.js`, `CLAUDE.md`, `README.md`.
+
+---
+
+## 2026-09-25 (Every plot clickable whatever the filters; camera holds while a plot's info is open)
+
+On request: "the plots should show the tool tip and be clickable also without the filters … even
+if plot numbers are off and filters are off", and "stop camera movement when any plot is clicked"
+(the moving view slid the popup off its plot).
+- `rayHit` now tests every plot's fill while the plot map is up (the filters only hide the colour
+  overlay; three.js raycasting ignores `visible`). `hover` no longer suppresses plots outside the
+  size band. The clicked plot gets its selection outline even when the filters hide it
+  (`applySelectStyle`), and `restorePlotStyle` hands it back to the filters on deselect
+  (`filtersShowPlot`).
+- `stopCameraMotion()` on a plot click kills flick inertia and any fly-in; the idle auto-pan is off
+  while the popup is open (renderLoop). Dragging still works; the drift resumes after closing.
+Verified in the Browser pane (eleganzav2, landscape phone, all filters off, # off): hovering showed
+"Plot E3 · Sold · Area … · Dimensions …", clicking opened its card with E3 outlined; a landmark
+banner used as a camera probe stayed put across frames with the card open, and moved once it was
+closed and the pointer left the plots. Files: `app.js`, `CLAUDE.md`, `README.md`.
+
+---
+
+## 2026-09-25 (Filters off by default; independent toggles; plot numbers independent)
+
+On request: "the filters should be unselected by default — both the size filters and all
+availability filters should be off by default." The size filter already started on "All sizes".
+A first attempt the same day made the status pills a "show only these" group (nothing pressed =
+everything shown, others faded while one was pressed); reported as a bug — the pills looked like
+they swapped state. Corrected to what was asked:
+- **Available / Reserved / Sold are independent on/off toggles**, all OFF when the client opens:
+  each tap flips only its own status; with all off no plot overlay shows (the plain site plan).
+  The old reset-to-all when the last one went off is gone. The admin still opens with every
+  status on (it needs the plots to align/edit). On = lit pill (gold), off = plain.
+- **Plot numbers are independent of the filters**: only a plot's fill + outline follow the
+  status/size filters now (`colorPlots` sets `fill.visible`/`line.visible` instead of hiding the
+  whole group), so the numbers show or hide with the **#** toggle alone. `rayHit` tests the fill's
+  own visibility, so a plot without an overlay still can't be hovered or opened.
+Verified in the Browser pane (eleganzav2, landscape phone + admin): all off at load with no
+overlays; a scripted sequence of taps changed only the tapped pill each time and ended with all
+off → no overlays; with # on and all filters off every plot shows its number, and with only Sold
+on the numbers stay on every plot; # off hides them; admin opens with all three on.
+Files: `app.js` (`state.activeFilters`, `statusShown`, `toggleFilter`, `colorPlots`, `rayHit`),
+`index.html` (pills start `aria-pressed="false"`), `styles.css`, `CLAUDE.md`, `README.md`.
+
+---
+
+## 2026-09-25 (iOS: "shaderSource must be an instance of WebGLShader" — GPU context lost)
+
+Reported from iOS Chrome on re.build91.in (eleganzav2): black pano, grey plots, and the notice
+"Argument 1 ('shader') to WebGL2RenderingContext.shaderSource must be an instance of WebGLShader. If
+you opened this file directly (file://)…". WebKit throws that when `createShader()` returns null,
+i.e. the WebGL context had been lost. Causes and fixes:
+- **Textures far too big on iPhones.** They report a 16384 texture limit, so nothing was downscaled:
+  the 6144×3072 pano plus the uncapped 7680×5223 site plan came to ~310 MB of GPU memory with
+  mipmaps. Phones and tablets now cap every uploaded texture (pano, tour rooms, site plan) at 4096
+  (`textureCap`, `MOBILE_TEX_CAP`, `capTextureImage`) → ~105 MB; desktop unchanged.
+- **A new WebGL context per texture load.** `gpuMaxTexSize()` opened a probe context every time
+  (every tour room/prefetch); WebKit keeps 16 per page and drops the oldest — eventually the main
+  renderer. It now asks once per page.
+- **A lost context aborted the whole boot** (the first frame renders inside `initThree`), leaving no
+  plot statuses, landmarks or tours. The render loop now skips a frame on a lost context and three.js
+  rebuilds when it comes back; the visitor gets a plain "ran short of graphics memory" notice (cleared
+  on restore); the file:// hint only shows for `file:` pages.
+Verified in the Browser pane: phone emulation uploads 4096×2048 + 4096×2786 (desktop still
+6144×3072 + 7680×5223); a simulated loss (`WEBGL_lose_context`) shows the notice with no errors and
+the view comes back complete on restore, on phone and desktop; walking three tour rooms opens no new
+WebGL contexts (it opened one per room before). Not yet tried on the reporting iPhone — the fix
+reaches re.build91.in after a re-publish (a phone with a saved offline copy gets it via Update).
+Files: `app.js`, `CLAUDE.md`.
+
+---
+
+## 2026-09-25 (Publishing a project without a logo no longer crashes the server)
+
+Found while testing offline saving: `publish_s3._default_icon` (the "B91" home-screen icon for a
+project with no logo) measured and drew its text with a TrueType font, and Pillow's FreeType
+calls crash Python natively on this machine (Pillow 9.5.0, FreeType 2.13.0 — access violation,
+12 runs of 12). Publishing runs in a thread inside `server.py`, so publishing any logo-less
+project would have taken the whole local server down; a native crash can't be caught. The
+letters are now drawn from rectangles and arcs (`_draw_b91`) at 4× size and scaled down, with no
+font at all, so the tile looks the same on every machine too. Verified: the icons at 192, 512 and
+512-maskable rendered and checked by eye; 10 of 10 repeated renders and 5 of 5 full publish
+preparations (`_collect`, no upload) for a project without a logo file, all clean. Files:
+`publish_s3.py`, `CLAUDE.md`.
+
+---
+
+## 2026-09-24 → 25 (Mobile offline rebuilt: strict offline mode, menu-only, file-list updates)
+
+Implements the agreed plan in `MOBILE-OFFLINE.md` (review findings 1, 2, 4, 5, 6, 7, the new 9,
+and strict offline mode E; 8 deferred). A saved project now always runs from its saved copy,
+like the standalone export, and changes only when the visitor taps Update.
+
+- **One menu row, nothing unasked (9):** "⬇ SAVE FOR OFFLINE" / "⟳ UPDATE OFFLINE COPY" /
+  "⟳ UPDATE AVAILABLE" + dot opens the new `#offlinePanel` (save, update, remove, iPhone guide).
+  The automatic "Add to Home Screen" banner, its declined/saved `localStorage` flags and
+  `SW_VERSION` are gone.
+- **Strict offline mode (E, 6):** `sw.js` v50 answers a saved project ONLY from its copy
+  (`b91-saved@<scope>:<pid>`, record written last) and injects `window.B91_OFFLINE_COPY` into the
+  saved index.html; an unsaved project is plain network, with a "not saved on this device" page
+  when there's none. No opportunistic caching, no `skipWaiting` in install, no page reloads except
+  after the visitor's own save/update/remove; a waiting new worker is started only by Update.
+- **Only changed files (C, D, 5):** a server OFFLINE FILE LIST with sizes + md5s — published demos
+  get `offline-files.json` (`publish_s3.offline_list_bytes`, uploaded after everything else,
+  `no-cache`); the local server answers `/api/offline-files?project=` (`server.py offline_files`,
+  hashes cached by mtime+size). Update downloads only what changed, drops what the project no
+  longer uses, and switches app + data + plots.csv over together at the end. The row shows
+  "update available" when the list's version moved on (checked when the menu opens). No list
+  (old demo, static deploy) → a fallback list from the data walk, downloaded whole.
+- **Sheet in the copy (3, 4):** every save/update merges the live Google Sheet into the copy's
+  plots.csv (`mergeSheetIntoCsv`, the admin save's "sheet wins" rule; the server file is never
+  touched); a saved copy never reads the sheet otherwise and shows "Availability as of …" in the
+  plot card and the size-filter menu.
+- **Never delete automatically (2):** device test is now `isTouchDevice()` (pointer, not window
+  width — tablets included; the brochure's pdf.js path uses it too). The old width check deleted
+  downloads on tablets, big phones in landscape, "Desktop site" and admin-on-phone; now only
+  "Remove from this device" does, and the desktop clean-up runs only when nothing is saved.
+- **Reliable downloads (7):** each file streams through a counting `TransformStream` straight into
+  Cache Storage (no whole videos in memory, smooth progress), size-checked against the list, 45s
+  stall abort, 3 retries, small files 3-at-a-time then big ones singly, pause while the page is
+  hidden / offline and resume, screen wake lock, honest "N of M saved — reason" results.
+- **iPhone (1):** in an iOS browser tab the row shows the guide (add to Home Screen → open it
+  there → save there); the Home Screen name is the project's brand (`applyBrand` + publish bakes
+  `apple-mobile-web-app-title`).
+- **Existing downloads kept:** a phone with a completed pre-v50 download is adopted quietly on its
+  next online visit (files moved, only the app + data fetched); until then sw.js falls back to
+  those caches offline.
+- Found and fixed while testing: at the site root the worker also answered page loads for a
+  different app in a sub-folder (served a root saved copy there) — it now answers only its own
+  app's pages (`isAppPage`) and their requests.
+- Verified in the Browser pane with phone emulation, on localhost and on a published folder built
+  locally from `publish_s3._collect`: see CLAUDE.md "Current status" for the list. Real iPhone /
+  Android devices still to test. Noted, not changed: the eleganzav2 sheet marks 287 plots "Open",
+  which isn't a recognised status (they show grey/unknown, online and offline alike).
+
+Files: `sw.js`, `app.js`, `index.html`, `styles.css`, `server.py`, `publish_s3.py`,
+`deploy_s3.py`, `manifest.webmanifest`, `MOBILE-OFFLINE.md`, `CLAUDE.md`, `README.md`.
+
+---
+
+## 2026-09-24 (eleganzav2: block B closed up to B1–B110)
+
+On request: the plots numbered B101–B111 were renamed B100–B110 (11 plots), so block B runs
+B1–B110 with no gap and there is no B111. Edited `projects/eleganzav2/plots.svg` (polygon id +
+label) and `plots.csv` (plot_id) only; shapes and all other data untouched; `alignment.json`
+`savedAt` bumped so the files win over any older admin session. Backup in
+`projects/eleganzav2/.backup-renumber-20260924-191742/`. Verified: 436/436 plots match the live
+sheet exactly, no repeated numbers; the only sheet row with no plot is `B111`.
+
+---
+
+## 2026-09-24 (Test warns when two sheet columns read as the same name)
+
+Reported: "Notes column is added but is not picked up from sheet in admin display". Cause: the
+eleganzav2 sheet now has BOTH the new `Notes` column and the original lowercase `notes` (last
+column). With case-insensitive headers both read as `notes`, and the right-most — the old one —
+wins, so A1 kept showing "Corner plot" instead of "Corner Plot facing the garden". (Dimensions,
+added the same way, was picked up fine.) Data fix, on the sheet: delete the old `notes` column.
+Code: `parseCSV` split into `csvRows` (raw cells) + `csvColumnKey` (the header normalisation) so
+`csvDuplicateColumns` can list header names that collapse to one key; admin **Test** now says
+e.g. "2 columns read as “notes” (Notes, notes) — only the right-most is used; delete or rename
+the others", and shows ⚠. Verified against the live sheet. Files: `app.js`, `CLAUDE.md`.
+
+---
+
+## 2026-09-24 (Sheet "Dimensions"/"Notes" columns read as text, whatever their capitalisation)
+
+Requested: add "Dimensions" and "Notes" columns to the Google Sheet; whatever string is in them
+for a plot takes priority and shows in the plot info. Two things stood in the way:
+- **Header case.** `parseCSV` matched column names exactly, so a column headed `Dimensions`
+  was ignored (the app reads `dimensions`). Headers are now normalised — lower-cased, spaces/
+  hyphens → `_`, a leading byte-order mark dropped — so `Dimensions`, `Notes`, `Plot ID`,
+  `Tour URL` all work. Applies to plots.csv too (an Excel "CSV UTF-8" save now loads).
+- **Values as strings.** A shared sheet was read through gviz, which guesses one type per
+  column and returns the cells that don't fit it as BLANK (a `30x40` in a mostly-numeric column,
+  a `100` in a text column). `sheetCsvCandidates` now tries the plain CSV export
+  (`/export?format=csv&gid=…`) first — every cell as displayed text — with gviz as fallback.
+  Its redirect carries CORS headers on both hops; verified by a real fetch from the page.
+With the sheet-wins rule already in place, a sheet Dimensions/Notes value overrides the
+admin's for that plot (a blank cell clears it). The plot info card already showed both fields.
+Test now also lists the **columns read**. sw.js VERSION v48 → v49.
+
+Verified: eleganzav2's live sheet reads via the export link (Test: 436/436 match, columns
+listed); a throwaway project whose data file had `Plot ID,Status,Dimensions,Notes` headers
+with a BOM and CRLF loaded `30' x 40' (irregular)` / `100` intact into the editor, `SOLD` as
+sold, and the client plot card showed Dimensions and Notes. Throwaway project deleted.
+
+Files: `app.js`, `sw.js`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-24 (Plot data: the Google Sheet wins, exact 1-to-1 plot ids, number prefix)
+
+Requested: (1) sheet values take precedence over admin-entered values for conflicting fields;
+(2) plot numbers map 1-to-1 to the sheet's `plot_id` — remove the existing mapping logic;
+(3) an optional, non-persistent prefix for auto-numbered plots ("A0" → A01, A02 …; change it
+and Reset → B01, B02 …), with the full number saved and used for the sheet match. Decided with
+the owner: a **blank** sheet cell wins too; admin fields stay **editable** but the sheet
+overwrites them on save/reload (with a warning); the prefix is **joined as typed** (A0 + 10 =
+A010); new duplicate numbers are **blocked**, existing ones **flagged**.
+
+**Sheet wins** (`applySheetRows`, replacing the 09-18 `plotOverrides` design): for each plot the
+sheet lists, every column the sheet has replaces the admin's value, blanks included; other
+columns and unlisted plots keep admin data. Applied on load (a restored admin session is now the
+BASE, with the sheet on top — it used to overwrite the sheet), when Import & Trace opens, and on
+every save (which writes `plots.csv` with the sheet applied and then says "The Google Sheet
+replaced N values on M plots"). Editor fields the sheet controls carry a "Sheet" tag that turns
+amber ("⚠ Sheet wins on save") once typed over. Removed: `plotOverrides`, `computePlotOverrides`,
+`applyPlotOverrides`, `clearedPlotFields`, `OVERRIDE_FIELDS`, `autofillPlotFromSheet`,
+`findSheetRowForId`, `SHEET_AUTOFILL_FIELDS`, `_statusTouched`/`_sheetFilled`. An old
+`plotOverrides` block is ignored and dropped on the next save — checked on `eleganzav2`: its
+`plots.csv` already holds the same values.
+
+**Exact ids:** the plot id IS the plot number — no hidden `Plot-` prefix, no `canonPlotId`
+(case-blind, prefix-optional) matching. `indexRows` keys by `plot_id` exactly (trimmed);
+`legacyPlotId` strips `Plot-` from our own files on load (plots.svg, plots.csv, session), never
+from the sheet. Test now lists matched/total, plot numbers with no row, rows with no plot, and
+repeated `plot_id`s. `buildPlotsSVG` now escapes the id/label (numbers are free text).
+
+**Numbering:** Import & Trace has a **Number prefix** field + **Reset** + "Next plot: …".
+`nextPlotId` = prefix + lowest free number from 1 (was a fixed `Plot-A101`, `A102` …), so a
+new prefix restarts at 1 and deleted numbers are reused. Renaming to a taken number, or one
+containing `#` / starting with `Plot-`, is refused. Existing repeats load (tagged `#n`) and
+are highlighted with a "⚠ N share a number" count; `retagTracePlots` re-untags a number's first
+holder when a repeat is resolved. `finishTrace` now rebuilds each row from the plot object
+(`p._row` + edited fields) so a rename can never hand a plot another plot's old row. DXF import
+keeps each parcel's own label (duplicates flagged), auto-numbering the unlabelled ones.
+
+**What this means for existing projects:** `malathalli` (sheet ids = its plot numbers) keeps
+matching. **`eleganzav2` / `anandman` match nothing**: 436 plots numbered 1–111 per block
+(433 share a number) against a sheet of `A101`–`A536` — the same as before, since the old
+fuzzy match couldn't join those either; the plots show their saved admin data until the
+plots are renumbered to unique numbers and the sheet's `plot_id` column is made to match.
+
+Verified in the admin UI on throwaway copies (deleted afterwards): a malathalli copy with
+deliberate conflicts (sheet value beat the admin's facing/status; a blank sheet cell cleared the
+admin's tour URL; a plot with no sheet row kept its admin note; `Plot-` ids migrated; 26/30
+sheet-controlled); prefix A0 → A01, A02; prefix B0 + Reset → B01; renames to a taken number /
+`C#1` refused; renaming to a sheet id pulled that row; typing over a sheet field showed the
+warning; Save → notice "replaced 1 value on 1 plot", files with plain ids, sheet values, no
+`plotOverrides`; client view boots with correct status counts. An `eleganzav2` data copy showed
+"436 plots · ⚠ 433 share a number"; renaming one "2" → A102 took the sheet row, and after Save
+the four remaining "2"s each kept their own block/facing/size. sw.js VERSION v47 → v48.
+
+Files: `app.js`, `index.html`, `styles.css`, `sw.js`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-24 (☁ Publish to web — one-click S3 demo link per project)
+
+Requested: "the admin can finally upload project to s3 from where it can be shared with client for
+demo" (local saving stays as it is). Decisions made with the user up front: a new bucket
+`re.build91.in`, one sub-folder per project; a plain public link; each project folder carries its
+OWN copy of the app (publishing one never changes another); re-publishing keeps the same link,
+plus an Unpublish; anyone in admin may publish, with a password; AWS set up by CLI.
+
+**AWS (created by CLI, ap-south-1 / us-east-1):** private S3 bucket `re.build91.in` (all public
+access blocked, SSE-S3) behind CloudFront distribution `ESB5IEEO3UHEP`
+(`d9diw1qcxp0ak.cloudfront.net`, alias `re.build91.in`, ACM wildcard cert, HTTPS-only, Origin
+Access Control `E24QVDGLP4KG3P`). A CloudFront Function `re-build91-in-folder-index` maps
+`/<p>/` → `/<p>/index.html` and redirects `/<p>` → `/<p>/` (query kept). Missing paths answer
+404 with `s3-root/_404.html` ("This demo isn't available"); the bare root shows
+`s3-root/index.html` (deliberately no project list). The bucket policy lets only this
+distribution read, and denies it `*/.b91-publish.json` (the publisher's upload record).
+**Outstanding: the DNS record** — `re.build91.in` CNAME → `d9diw1qcxp0ak.cloudfront.net` at the
+build91.in DNS provider (not Route 53). Until then the dialog hands out the CloudFront link.
+
+**New `publish_s3.py`** (driven by server.py; boto3): builds `<project>/` = stamped `index.html`
+with `window.B91_PUBLISHED={project}` + `noindex` injected, `app.js`, `styles.css`, `sw.js`,
+`vendor/` (minus the unminified three.js), generated `icons/` (the project logo letterboxed by
+server.py's `_build_icon`, else a gold "B91" tile — the repo has no `icons/` since `*.png` is
+git-ignored), a static branded `manifest.webmanifest` (start_url/scope `./`), and
+`projects/<project>/` = the data files **plus only the files they reference** (any JSON string
+or plots.csv text naming the file). That last rule is deliberate: `sample/` holds personal PDFs
+and screen recordings nothing uses, and a published link is public. Uploads are incremental
+(md5 + headers vs a per-project record, confirmed against a live listing), 8-way parallel,
+content before code and `index.html` last, stale objects deleted, then a `/<project>/*`
+invalidation. Content-Type/Cache-Control reuse `deploy_s3.py`'s rules (`stamp_index_text` was
+split out of `stamp_index_html` so both stamp identically).
+
+**server.py:** `GET /api/publish/status`, `POST /api/publish` (202 + background job; `{check:true}`
+only verifies the password), `GET /api/publish/progress`, `POST /api/unpublish`. Password from
+git-ignored `publish.config.json` (constant-time compare, 1 s delay on a miss); AWS credentials
+come from the machine's AWS profile and never reach a browser. `_serve_static` refuses to serve
+`publish.config.json` under any spelling.
+
+**app.js / index.html / styles.css:** ⋯ → **☁ Publish to web…** dialog (status, link + Copy/Open,
+DNS note, password, progress bar, Unpublish with a second-click confirm). Order: password check →
+`exportSite()` save → publish → poll. `PUBLISHED` boot flag: fixed project, always view-only
+(`?admin` ignored), `setupPwaIdentity` skipped; index.html's boot-image preload honours it.
+
+**Sub-folder fixes (were latent bugs for any sub-path deploy):** sw.js `cacheKeyFor` resolved
+relative URLs against the origin root, so a demo at `/<p>/` keyed its whole shell as `/app.js`
+etc. and could never find it offline — now resolves against the worker's own URL. The shell cache
+is named per scope (`b91-shell@/<p>/:<VERSION>`; unchanged `b91-shell-<VERSION>` at the root) and
+the activate sweep only deletes its own scope's old shells — with one global name, one demo
+updating would have wiped every other demo's offline shell on the same phone. app.js's desktop
+"not eligible" cleanup likewise only removes its own scope's worker/shell/content entries on a
+sub-path. sw.js VERSION v46 → v47.
+
+Verified end to end on a throwaway copy of `malathalli` via the real admin UI and the live
+CloudFront URL: wrong password refused without saving; publish (28 files, 11.4 MB, stray file
+left out); every Content-Type/Cache-Control as designed; `/<p>` 301; unknown path → the 404 page;
+demo boots view-only despite `?admin=1&project=sample`, no JS errors; on a phone viewport the
+worker registers at `/<p>/`, controls the page, and the scoped shell holds the right keys; desktop
+cleanup removed only its own scope (a planted "other demo" cache survived); re-publish uploaded
+only 2 changed files and deleted 1 stale one; concurrent publish → 409; Unpublish (API and the
+two-click UI) removed all objects and the link fell back to the 404 page. Test project removed
+locally and from S3.
+
+Files: `publish_s3.py` (new), `publish.config.example.json` (new), `publish.config.json` (new,
+git-ignored), `s3-root/index.html` + `s3-root/_404.html` (new), `server.py`, `deploy_s3.py`,
+`app.js`, `index.html`, `styles.css`, `sw.js`, repo `.gitignore`, repo `.claude/launch.json`
+(new — the preview tool reads the repo root's), `README.md`, `CLAUDE.md`.
+
+---
+
 ## 2026-09-23 (Standalone export: hand the zip to the browser instead of buffering it in memory)
 
 Reported: "I am not able to do export standalone site as before, which used to directly download

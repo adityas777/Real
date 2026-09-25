@@ -1,0 +1,9 @@
+{
+  "bucket": "re.build91.in",
+  "region": "ap-south-1",
+  "awsProfile": "default",
+  "distributionId": "ESB5IEEO3UHEP",
+  "publicBaseUrl": "https://re.build91.in",
+  "cloudfrontDomain": "d9diw1qcxp0ak.cloudfront.net",
+  "password": "choose-a-publish-password"
+}

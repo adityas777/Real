@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "plot-map",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["plot-map/server.py", "8731"],
+      "port": 8731
+    }
+  ]
+}

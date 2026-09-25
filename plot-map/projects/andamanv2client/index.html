@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
+  <title>Build91 · Interactive Plot Map</title>
+  <meta name="description"
+    content="Interactive township plot map — clickable, status-coloured plots over an aerial render, linking to 3DVista walkthroughs." />
+  <!-- cache-busted so CSS edits always take effect on reload (mirrors the app.js import at the bottom) -->
+  <script>document.write('<link rel="stylesheet" href="styles.css?v=336db43">');</script>
+  <noscript>
+    <link rel="stylesheet" href="styles.css" />
+  </noscript>
+
+  <!-- Speculative preload of the admin's loading-screen image (2026-09-16), so the
+       browser starts downloading it immediately on first paint instead of only once
+       app.js has loaded AND fetched alignment.json to learn it exists — that gap was
+       reported as "takes a few seconds to load" (the very thing meant to COVER the
+       loading wait was itself part of the wait). Deliberately BEFORE any JS/module
+       fetch: this is a static <link>, found by the browser's HTML preloader during the
+       initial parse, not something app.js has to run first. Always fires, even for a
+       project with no custom image set — a same-origin 404 here is cheap (one small
+       failed request, no visible effect, just an "unused preload" console note) and the
+       alternative (waiting to know for sure) reintroduces the exact delay this exists to
+       remove. The fixed, un-versioned filename ("loading.web.jpg", set by setBootImage
+       in app.js) is what makes this possible at all — see bootImageSrc's own comment for
+       why this one asset skips the usual `_ver` cache-busting. Mirrors sanitizeProjectId/
+       BOOT_PROJECT's own ?project= parsing (app.js) closely enough to agree on the same
+       URL, but can't reuse that code directly since it must run before app.js exists. -->
+  <script>
+    (function () {
+      var m = /[?&]project=([^&]+)/.exec(location.search);
+      var pid = m ? decodeURIComponent(m[1]).trim().toLowerCase() : '';
+      if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(pid)) pid = 'sample';
+      document.write('<link rel="preload" as="image" fetchpriority="high" href="projects/' + pid + '/loading.web.jpg">');
+    })();
+  </script>
+
+  <!-- PWA identity for the client (view-only) experience — see sw.js for the offline
+       cache layer this supports and registerOfflineSupport() in app.js, which is the only
+       thing that actually activates it (never registered on ?admin=1 pages). The tags
+       below are static markup and harmless to have present everywhere. -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0c0d11" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Build91" />
+</head>
+
+<body>
+  <!-- Boot curtain: hides the pano until it's actually showing the right thing — see
+       hideBootCurtain()'s comment in app.js. Solid, not transparent, so the raw unstyled
+       DOM and the pano's own default boot camera position are never visible even for a
+       frame; JS reveals it once boot has settled on the client's real starting screen. -->
+  <div id="bootCurtain">
+    <span class="boot-curtain-label">Loading…</span>
+    <div class="boot-progress-wrap" id="bootProgressWrap">
+      <div class="boot-progress" role="progressbar" aria-label="Loading progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="boot-progress-fill" id="bootProgressFill"></div>
+      </div>
+      <span class="boot-progress-pct" id="bootProgressPct">0%</span>
+    </div>
+  </div>
+  <!-- ─── Top bar ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" id="brandMark">B91</span>
+      <div class="brand-text">
+        <strong id="brandName">Build91</strong>
+        <span id="brandTagline">Interactive Plot Map</span>
+      </div>
+    </div>
+
+    <!-- project switcher + (admin) manage menu -->
+    <div class="proj" id="proj" hidden>
+      <span class="proj-label">Project</span>
+      <select class="proj-select" id="projSelect" aria-label="Switch project"></select>
+      <div class="proj-tools" id="projTools" hidden>
+        <button class="btn btn-primary proj-save" id="projSave" type="button"
+          title="Save all project files (plots, alignment, landmarks, amenities, images) into this project">💾
+          Save</button>
+        <button class="btn btn-ghost proj-settings-btn" id="projSettingsBtn" type="button"
+          title="Project settings: Site branding, Project name, Tagline, Logo" aria-haspopup="dialog"
+          aria-expanded="false">⚙️ Settings</button>
+        <div class="proj-custom-menu-wrapper" style="position: relative; display: inline-block;">
+          <button class="btn btn-ghost proj-custom-menu-btn" id="projMenuBuilderBtn" type="button" aria-haspopup="menu"
+            aria-expanded="false" title="Client Sidebar Menu Builder">📋 Menu Builder ▾</button>
+          <div class="proj-custom-dropdown proj-current-menu-dropdown" id="projMenuBuilderDropdown" role="menu" style="width: 380px; max-height: 520px; overflow-y: auto;" hidden>
+            <!-- Dynamic tree view & Add root buttons injected by app.js -->
+          </div>
+        </div>
+        <button class="btn btn-icon proj-menu-btn" id="projMenuBtn" type="button" aria-haspopup="true"
+          aria-expanded="false" title="Project actions">⋯</button>
+        <div class="proj-menu" id="projMenu" role="menu" hidden>
+          <button type="button" role="menuitem" data-act="new">＋ New project…</button>
+          <button type="button" role="menuitem" data-act="saveas">Duplicate as…</button>
+          <button type="button" role="menuitem" data-act="bundle"
+            title="Download a self-contained folder that runs on any static host / embeds via iframe">⬇ Export
+            standalone site…</button>
+          <button type="button" role="menuitem" data-act="rename">Rename…</button>
+          <button type="button" role="menuitem" data-act="delete" class="is-danger">Delete…</button>
+        </div>
+        <!-- Project settings popover: Site branding, Name, Tagline, Logo -->
+        <div class="proj-settings-popover" id="projSettingsPopover" role="dialog" aria-label="Project Settings" hidden>
+          <div class="proj-settings-head">
+            <div>
+              <strong>Project Settings</strong>
+              <p class="proj-settings-sub">Site branding &amp; header details</p>
+            </div>
+            <button class="btn btn-icon proj-settings-close" id="projSettingsClose" type="button" aria-label="Close settings">×</button>
+          </div>
+          <div class="ax-brand">
+            <label class="ax-brand-field">Project name
+              <input type="text" id="axBrandName" placeholder="e.g. Dholera Greens" maxlength="60" /></label>
+            <label class="ax-brand-field">Tagline
+              <input type="text" id="axBrandTagline" placeholder="e.g. Interactive Plot Map" maxlength="60" /></label>
+            <div class="ax-brand-logo">
+              <button class="btn btn-ghost" id="axBrandLogo" type="button"
+                title="Upload a builder/site logo shown in the title bar">🏷 Logo…</button>
+              <input type="file" id="axBrandLogoFile" accept="image/png,image/jpeg,image/webp,image/svg+xml,image/*"
+                hidden />
+              <span class="ax-brand-logo-name" id="axBrandLogoName">no logo</span>
+              <button class="btn btn-ghost ax-brand-logo-clear" id="axBrandLogoClear" type="button" title="Remove the logo"
+                hidden>Clear</button>
+            </div>
+            <div class="ax-brand-logo">
+              <button class="btn btn-ghost" id="axBootImagePick" type="button"
+                title="Upload an image shown as the loading screen while the site boots">🖼 Loading page image…</button>
+              <input type="file" id="axBootImageFile" accept="image/png,image/jpeg,image/webp,image/*" hidden />
+              <span class="ax-brand-logo-name" id="axBootImageName">no loading page image</span>
+              <button class="btn btn-ghost ax-brand-logo-clear" id="axBootImageClear" type="button"
+                title="Remove the loading page image" hidden>Clear</button>
+            </div>
+            <p class="ax-audio-hint">Shown full-screen behind the "Loading…" text while the site is still
+              fetching the panorama and plot layout — replaces the plain dark background with a branded
+              image (e.g. a logo on a matching backdrop, or a render of the project).</p>
+            <div class="ax-brand-logo ax-brand-audio">
+              <button class="btn btn-ghost" id="axAudioPick" type="button"
+                title="Upload background music — an audio file, or a video whose sound track you want">🎵 Audio…</button>
+              <input type="file" id="axAudioFile"
+                accept="audio/*,video/*,.mp3,.m4a,.aac,.ogg,.oga,.wav,.weba,.mp4,.m4v,.mov,.mkv,.webm"
+                hidden />
+              <span class="ax-brand-logo-name" id="axAudioName">no audio</span>
+              <button class="btn btn-ghost ax-brand-logo-clear" id="axAudioClear" type="button"
+                title="Remove the background audio" hidden>Clear</button>
+            </div>
+            <p class="ax-audio-hint">Plays quietly on loop for visitors, who can silence it with the
+              <strong>🔊</strong> button. A <strong>video works too</strong> — only its sound is used and the
+              picture is never shown, so a clip you like the music from is fine (it is stored at full size
+              though, so an audio file is lighter for visitors). Browsers refuse to start sound before a
+              visitor interacts with the page, so it begins on their first tap. It does not auto-play here
+              in admin — press <strong>🔊</strong> to preview.</p>
+          </div>
+        </div>
+        <!-- inline naming / confirm row (reused by new / duplicate / rename / delete) -->
+        <div class="proj-name" id="projName" hidden>
+          <input type="text" id="projNameInput" placeholder="project-id" maxlength="64" autocapitalize="off"
+            autocomplete="off" spellcheck="false" />
+          <button class="btn btn-primary" id="projNameOk" type="button">OK</button>
+          <button class="btn btn-icon" id="projNameCancel" type="button" aria-label="Cancel">✕</button>
+          <p class="proj-name-hint" id="projNameHint"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Admin-defined area bands. Rendered by renderAreaFilterUI; hidden when the project
+         has none. Declared here but ADOPTED into #legend as its last item by renderLegend
+         (which wipes its own children, so the move has to repeat on every rebuild) — that
+         puts it right after the Sold chip, in the slot the removed "Unknown" chip used to
+         hold. The landscape twin lives in .zoom-controls, because the whole topbar is
+         collapsed on a landscape phone (see styles.css). -->
+    <select class="area-filter-sel" id="areaFilterSel" aria-label="Filter plots by area" hidden></select>
+    <div class="legend" id="legend" role="group" aria-label="Status legend and filters">
+      <!-- legend / filter chips injected by app.js -->
+    </div>
+  </header>
+
+  <!-- ─── Map stage (360° panorama viewer) ──────────────────────────────────── -->
+  <main class="stage" id="stage">
+    <!-- WebGL canvas (equirectangular sphere + projected plot overlay) mounts here -->
+    <div class="pano" id="pano" role="img" aria-label="Interactive 360° aerial site panorama with selectable plots">
+      <!-- landmark banners + connector lines + pins, projected from the 3D scene each frame -->
+      <div class="landmarks" id="landmarks" aria-hidden="true"></div>
+      <!-- in-layout amenity icon-pins (clickable → info card + render lightbox), projected each frame -->
+      <div class="amenities" id="amenities" aria-hidden="true"></div>
+      <!-- mobile-only: shown when renderLandmarks caps how many banners render at once
+           (too many overlap on a narrow screen) — taps into the Landmarks category picker -->
+      <button class="lm-overflow-hint" id="lmOverflowHint" type="button" hidden></button>
+      <!-- virtual-tour navigation hotspots, projected from the 3D scene each frame while a
+           tour has taken over the viewer (VIRTUAL-TOUR.md Phase 1 / D-11) -->
+      <div class="tour-hs-layer" id="tourHotspots" hidden></div>
+      <!-- Furnished / unfurnished toggle (2026-09-21). A room may carry two panoramas of the
+           SAME viewpoint; this flips between them without moving the camera, and the choice
+           persists as the visitor walks the tour. Only rendered when some room in the open
+           tour has both (renderTourVariantBar); in a room that has only one, the missing
+           side is disabled rather than removed so the bar never jumps. Labels are per-tour
+           and admin-editable, so they are filled in by JS, not written here. -->
+      <div class="tour-variants" id="tourVariants" role="group" aria-label="Room version" hidden>
+        <button class="tour-variant-btn" id="tourVariantA" type="button" data-variant="a" aria-pressed="true"></button>
+        <button class="tour-variant-btn" id="tourVariantB" type="button" data-variant="b" aria-pressed="false"></button>
+      </div>
+      <!-- virtual-tour minimap: the tour's isometric/floor-plan image with one dot per room,
+           drawn BARE (no panel/border — see styles.css) in the compass's own top-right slot,
+           which renderClientTourMap hides for the duration. Only shown while a tour that HAS
+           a map is open. Tapping a dot jumps to that room — routed through pick(), not the
+           dot's own click, because #pano eats it (see the pointer-capture gotcha).
+           A tour can carry SEVERAL isometrics (2026-09-18) — #tourMapSwitch flips between
+           them with a 3D rotation (see switchTourMap/styles.css .tour-map-inner.is-flipping),
+           hidden by renderClientTourMap whenever there's only one. #tourMapPips is the small
+           position indicator ("which of N is this"), same visibility rule. Both are OUTSIDE
+           #tourMapInner on purpose — they must not spin along with the flip. -->
+      <div class="tour-map" id="tourMap" hidden>
+        <div class="tour-map-inner" id="tourMapInner">
+          <img id="tourMapImg" alt="Tour map" />
+          <div class="tour-map-dots" id="tourMapDots"></div>
+        </div>
+        <button class="tour-map-switch" id="tourMapSwitch" type="button" aria-label="Switch map view" title="Switch map view" hidden>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.66-5.66M20 12a8 8 0 0 1-13.66 5.66" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M17.5 3.5v3.5H14M6.5 20.5V17H10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="tour-map-pips" id="tourMapPips" hidden></div>
+        <!-- Dismiss / restore the whole minimap. One button that swaps icon rather than a
+             one-way close, so there's always a way back (see toggleTourMapHidden); CSS
+             repositions it into the corner once `.is-map-hidden` collapses everything else.
+             Two inline SVGs swapped by that class — the same icon-halves pattern the audio
+             button uses, NOT textContent (which would wipe the SVG). -->
+        <button class="tour-map-hide" id="tourMapHide" type="button" aria-label="Hide the map" title="Hide the map" aria-pressed="false" hidden>
+          <svg class="tm-ico-hide" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.8 2.8M9.4 5.2A9.5 9.5 0 0 1 12 5c5 0 9 4.5 9 7a12 12 0 0 1-2.4 3.3M6.2 6.4C3.9 7.9 3 10.2 3 12c0 2.5 4 7 9 7 1.4 0 2.7-.35 3.8-.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <svg class="tm-ico-show" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4.5 3 7v12.5l6-2.5 6 2.5 6-2.5V4.5L15 7 9 4.5zM9 4.5V17M15 7v12.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ─── Client Navigation Drawer (Left Panel Overlay) ────────────────────────── -->
+    <aside class="cat-drawer" id="catDrawer" aria-label="Client Navigation">
+      <button class="cat-drawer-toggle" id="catDrawerToggle" type="button" aria-label="Toggle Navigation Panel" title="Toggle Navigation">
+        <span class="cat-toggle-ico" id="catToggleIco">‹</span>
+      </button>
+      <div class="cat-drawer-inner">
+        <!-- Phone only: the project's logo/name above the menu. The top bar that normally
+             carries the branding is squeezed on portrait and hidden entirely on landscape,
+             so on a phone the drawer is the only place the visitor sees whose site this is.
+             Populated by applyBrand() in app.js; CSS hides it on desktop. -->
+        <div class="cat-drawer-brand" id="catDrawerBrand" aria-hidden="true">
+          <span class="cat-drawer-logo" id="catDrawerLogo"></span>
+          <strong class="cat-drawer-name" id="catDrawerName"></strong>
+          <span class="cat-drawer-tagline" id="catDrawerTagline"></span>
+        </div>
+        <!-- Level 1: Main Menu. Populated entirely by renderClientSidebar() (app.js) —
+             left empty here on purpose, since anything placed in this markup would only
+             ever flash for a frame before being overwritten (and, worse, would need to
+             be kept in sync by hand with the built-in/authored items it can never
+             actually match). -->
+        <div class="cat-menu-level" id="catLevel1">
+          <nav class="cat-nav" id="catNavL1" aria-label="Main Menu"></nav>
+        </div>
+
+        <!-- Level 2: Landmarks Sub-Menu. #catNav's rows are populated entirely by
+             renderLandmarkCategoryNav() (app.js) from the project's real landmark
+             categories — same reasoning as #catNavL1 above. -->
+        <div class="cat-menu-level" id="catLevel2" hidden>
+          <div class="cat-drawer-head">
+            <button class="cat-back-btn" id="catBackBtn" type="button" aria-label="Back">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+          </div>
+          <nav class="cat-nav" id="catNav" aria-label="Landmark Categories"></nav>
+        </div>
+
+        <!-- Level 2 & 3: Custom Feature Sub-Menu (Videos, Tours, Brochures, Location Intel) -->
+        <div class="cat-menu-level" id="catLevelSubMenu" hidden>
+          <div class="cat-drawer-head" style="display:flex; align-items:center; justify-content:space-between; padding-bottom:8px;">
+            <button class="cat-back-btn" id="catSubMenuBackBtn" type="button" aria-label="Back">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+            <span class="cat-drawer-title" id="catSubMenuTitle" style="font-weight:700; font-size:11px; letter-spacing:0.5px; color:#f8fafc; text-transform:uppercase; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">SUB MENU</span>
+          </div>
+          <nav class="cat-nav" id="catSubMenuNav" aria-label="Custom Sub Menu">
+            <!-- Dynamic sub-group and item buttons generated by app.js -->
+          </nav>
+        </div>
+
+        <div class="cat-drawer-foot">
+          <button class="btn btn-icon cat-foot-btn" id="fsToggle" type="button" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
+            <svg class="ftr-ico" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5" />
+              <rect x="8" y="8" width="8" height="8" rx="1" />
+            </svg>
+          </button>
+          <button class="btn btn-icon cat-foot-btn" id="audioToggle" type="button" title="Toggle Sound" aria-label="Toggle Sound">
+            <svg class="ftr-ico ftr-ico-audio" viewBox="0 0 24 24" aria-hidden="true">
+              <polygon class="spk-body" points="4,9 8,9 13,5 13,19 8,15 4,15" />
+              <g class="spk-on"><path d="M16 9.2a4 4 0 0 1 0 5.6M18.6 6.6a7.6 7.6 0 0 1 0 10.8" /></g>
+              <g class="spk-off"><path d="M17 9.5l4.5 5M21.5 9.5l-4.5 5" /></g>
+            </svg>
+          </button>
+          <!-- Auto-pan. Shows the ACTION, not the state: pause bars while the camera is
+               drifting (press = stop), a play triangle once stopped (press = resume). The
+               orbit arcs around them say WHAT is being paused, so it doesn't read as a
+               media control for the background audio sitting next to it. -->
+          <button class="btn btn-icon cat-foot-btn is-active" id="autoPanToggle" type="button"
+            title="Stop the camera moving" aria-label="Stop the camera moving">
+            <svg class="ftr-ico ftr-ico-pan" viewBox="0 0 24 24" aria-hidden="true">
+              <!-- Two opposing arcs read as "rotating" without arrowheads: at the 19px this
+                   renders at, arrowheads collapse into ~2px blobs and merge with the glyph.
+                   Each arc spans 140 degrees so the pair reads as a broken RING; at 100 they
+                   read as plain parentheses (compared side by side at 4x). -->
+              <g class="pan-orbit">
+                <path d="M15.28 2.98 A9.6 9.6 0 0 1 15.28 21.02" />
+                <path d="M8.72 21.02 A9.6 9.6 0 0 1 8.72 2.98" />
+              </g>
+              <g class="pan-stop"><rect x="9.7" y="9" width="1.7" height="6" rx=".5" /><rect x="12.6" y="9" width="1.7" height="6" rx=".5" /></g>
+              <g class="pan-go"><polygon points="10.2,8.9 15.1,12 10.2,15.1" /></g>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- look-around / zoom controls -->
+    <!-- Compass (client). The ROSE IS FIXED — north stays at the top, which is what makes
+         it readable at a glance — and the shaded CONE sweeps round to show which way the
+         camera is looking, exactly as the reference tour's compass behaves. Rotating the
+         whole rose instead (the first attempt) forces the letters to counter-rotate and
+         still leaves the viewer working out which way is up. -->
+    <div class="compass" id="compass" aria-hidden="true">
+      <svg viewBox="0 0 120 120" class="compass-svg">
+        <circle cx="60" cy="60" r="47" class="cp-face" />
+        <!-- the view cone: rotated each frame to the current heading -->
+        <defs>
+          <radialGradient id="cpFaceGrad" cx="50%" cy="42%" r="65%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity=".38" />
+            <stop offset="70%" stop-color="#ffffff" stop-opacity=".14" />
+            <stop offset="100%" stop-color="#ffffff" stop-opacity=".05" />
+          </radialGradient>
+        </defs>
+        <circle cx="60" cy="60" r="47" fill="url(#cpFaceGrad)" />
+        <g id="compassCone"><path class="cp-cone" d="M60 60 L39.9 19.7 A45 45 0 0 1 80.1 19.7 Z" /></g>
+        <circle cx="60" cy="60" r="47" class="cp-ring" />
+        <circle cx="60" cy="60" r="39" class="cp-ring cp-ring-2" />
+        <!-- 8-point rose, each point split white/black for the classic nautical look -->
+        <g class="cp-rose">
+          <polygon points="60,14 62.6,58 60,60" class="cp-lt" /><polygon points="60,14 57.4,58 60,60" class="cp-dk" />
+          <polygon points="60,106 62.6,62 60,60" class="cp-dk" /><polygon points="60,106 57.4,62 60,60" class="cp-lt" />
+          <polygon points="14,60 58,57.4 60,60" class="cp-lt" /><polygon points="14,60 58,62.6 60,60" class="cp-dk" />
+          <polygon points="106,60 62,57.4 60,60" class="cp-dk" /><polygon points="106,60 62,62.6 60,60" class="cp-lt" />
+          <polygon points="31,31 59.3,57.9 60,60" class="cp-sm-lt" /><polygon points="31,31 57.9,59.3 60,60" class="cp-sm-dk" />
+          <polygon points="89,89 60.7,62.1 60,60" class="cp-sm-lt" /><polygon points="89,89 62.1,60.7 60,60" class="cp-sm-dk" />
+          <polygon points="89,31 62.1,59.3 60,60" class="cp-sm-dk" /><polygon points="89,31 60.7,57.9 60,60" class="cp-sm-lt" />
+          <polygon points="31,89 57.9,60.7 60,60" class="cp-sm-dk" /><polygon points="31,89 59.3,62.1 60,60" class="cp-sm-lt" />
+        </g>
+        <polygon points="60,14 61.3,58 60,60 58.7,58" class="cp-n" />
+        <circle cx="60" cy="60" r="3" class="cp-hub" />
+        <text x="60" y="27" class="cp-lbl">N</text>
+        <text x="60" y="99" class="cp-lbl">S</text>
+        <text x="25" y="65" class="cp-lbl">W</text>
+        <text x="95" y="65" class="cp-lbl">E</text>
+      </svg>
+    </div>
+
+    <div class="zoom-controls" role="group" aria-label="View controls">
+      <!-- landscape-only: the topbar's Available/Reserved/Sold legend is hidden in
+           landscape (see styles.css) to free up vertical space on a short screen; this
+           button takes over just the "Available" filter toggle, in the same spot -->
+      <!-- landscape twin of #areaFilterSel — the topbar it normally lives in is collapsed
+           at this size, so without this the area filter would be desktop-only -->
+      <div class="zoom-status-group" id="zoomStatusGroup">
+        <button class="btn zoom-status-btn" id="zoomAvailableBtn" type="button" data-status="available" aria-pressed="true" aria-label="Toggle available plots">
+          <span class="dot"></span>Available <span class="count">0</span>
+        </button>
+        <button class="btn zoom-status-btn" id="zoomReservedBtn" type="button" data-status="reserved" aria-pressed="true" aria-label="Toggle reserved plots">
+          <span class="dot"></span>Reserved <span class="count">0</span>
+        </button>
+        <button class="btn zoom-status-btn" id="zoomSoldBtn" type="button" data-status="sold" aria-pressed="true" aria-label="Toggle sold plots">
+          <span class="dot"></span>Sold <span class="count">0</span>
+        </button>
+        <!-- Lives INSIDE the status group (2026-09-21) so it docks with the pills: leftmost in the
+             landscape phone row (CSS order), first in the desktop column. -->
+        <select class="area-filter-sel is-floating" id="areaFilterSelMobile" aria-label="Filter plots by area" hidden></select>
+      </div>
+      <button class="btn btn-icon" id="labelToggle" type="button" aria-pressed="false" aria-label="Show plot numbers"
+        title="Show plot numbers">#</button>
+      <!-- Both are AMENITY controls (2026-09-22): 📍 shows/hides each amenity's POINT, 🏛 its NAME. -->
+      <button class="btn btn-icon" id="amenityPointToggle" type="button" aria-pressed="true" aria-label="Hide amenity points"
+        title="Hide amenity points">📍</button>
+      <button class="btn btn-icon" id="amenityToggle" type="button" aria-pressed="true" aria-label="Hide amenity names"
+        title="Hide amenity names">🏛️</button>
+      <button class="btn btn-icon" id="zoomIn" type="button" aria-label="Zoom in">+</button>
+      <button class="btn btn-icon" id="zoomOut" type="button" aria-label="Zoom out">−</button>
+      <button class="btn btn-icon" id="zoomReset" type="button" aria-label="Recenter on plots"
+        title="Recenter on plots">⊡</button>
+    </div>
+
+    <!-- hint -->
+
+
+    <!-- hover tooltip -->
+    <div class="tooltip" id="tooltip" role="status" aria-hidden="true"></div>
+
+    <!-- non-blocking notice (e.g. data-load fallback) -->
+    <!-- Background music (admin-uploaded, client-only). Kept in the DOM rather than created
+         on demand so a single element owns playback state across the whole session. -->
+    <audio id="siteAudio" loop preload="none"></audio>
+
+    <div class="notice" id="notice" role="alert" hidden></div>
+
+    <!-- Portrait-phone only: an animated nudge to rotate, shown once per visit and
+         dismissed on tap or as soon as the device is turned (showRotateHint in app.js).
+         Replaces a plain text toast — the motion communicates the ask faster than the
+         sentence does. -->
+    <div class="rotate-hint" id="rotateHint" hidden>
+      <div class="rotate-hint-card">
+        <svg class="rotate-hint-phone" viewBox="0 0 64 104" aria-hidden="true">
+          <rect class="rh-body" x="4" y="4" width="56" height="96" rx="9" />
+          <rect class="rh-screen" x="10" y="14" width="44" height="76" rx="4" />
+          <circle class="rh-dot" cx="32" cy="96" r="2.4" />
+        </svg>
+        <svg class="rotate-hint-arrow" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M8 26a15 15 0 1 1 6 10" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" />
+          <path d="M13 26 L8 26 L8 21" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <strong>Rotate your phone</strong>
+        <span>The map opens up in landscape</span>
+      </div>
+    </div>
+
+    <!-- client-only: ONE combined "Add to Home Screen" (+offline content download) prompt —
+         a single tap fires the native install dialog AND starts the content download in
+         parallel (maybeOfferOfflineSave/runOfflineDownload in app.js). Previously two
+         separate prompts shown back to back; merged per the user's explicit request since
+         a manual download step ahead of the (separate) native install step felt redundant. -->
+    <div class="offline-save-banner" id="offlineSaveBanner" role="status" hidden>
+      <div class="offline-save-prompt" id="offlineSavePrompt">
+        <span class="offline-save-icon">⬇</span>
+        <div class="offline-save-text">
+          <strong id="offlineSaveTitle">Add to Home Screen</strong>
+          <span id="offlineSaveSize">Checking size…</span>
+        </div>
+        <button class="btn btn-ghost offline-save-skip" id="offlineSaveSkip" type="button">Not now</button>
+        <button class="btn btn-primary offline-save-go" id="offlineSaveGo" type="button">Add</button>
+      </div>
+      <div class="offline-save-progress" id="offlineSaveProgress" hidden>
+        <div class="offline-save-progress-head">
+          <strong>Saving for offline…</strong>
+          <span id="offlineSaveEta"></span>
+        </div>
+        <div class="offline-save-bar"><div class="offline-save-bar-fill" id="offlineSaveBarFill"></div></div>
+        <span class="offline-save-pct" id="offlineSavePct">0%</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- ─── Admin alignment toolbar (revealed only in ?admin=1) ───────────────── -->
+  <section class="adminbar" id="adminBar" aria-label="Overlay alignment controls" hidden>
+    <header class="adminbar-head">
+      <span class="admin-tag">ADMIN</span>
+      <strong id="axTitle">Align overlay</strong>
+      <p id="axSubtitle">Pick a drag mode, then drag in the pano. Sliders scale/rotate/fade.</p>
+    </header>
+    <div class="ax-tabs" role="tablist">
+      <button class="ax-tab-btn is-on" id="axTabBtnAlign" type="button" role="tab" aria-selected="true">Align</button>
+      <button class="ax-tab-btn" id="axTabBtnLandmarks" type="button" role="tab"
+        aria-selected="false">Landmarks</button>
+      <button class="ax-tab-btn" id="axTabBtnAmenities" type="button" role="tab"
+        aria-selected="false">Amenities</button>
+      <button class="ax-tab-btn" id="axTabBtnTour" type="button" role="tab"
+        aria-selected="false">Tour</button>
+    </div>
+    <div class="ax-tab" id="axTabAlign">
+      <div class="ax-mode" role="group" aria-label="Drag mode">
+        <button class="ax-modebtn is-on" id="axModeLook" type="button" title="Drag to look around">Look around</button>
+        <button class="ax-modebtn" id="axModeMove" type="button" title="Drag to reposition the whole layout">Move
+          layout</button>
+      </div>
+      <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
+        Import / Trace plots…</button>
+      <div class="ax-pano">
+        <button class="btn btn-ghost" id="axPano" type="button"
+          title="Choose the 360° background panorama the client view uses (exported with the site files)">🖼 Background
+          pano…</button>
+        <input type="file" id="axPanoFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+        <p class="ax-pano-name" id="axPanoName">Using the default panorama.</p>
+      </div>
+      <div class="ax-scale">
+        <div class="ax-scale-head">
+          <span>Scale</span>
+          <div class="ax-stepper" role="group" aria-label="Scale value">
+            <button class="ax-stepbtn" id="axScaleDown" type="button" aria-label="Decrease scale">−</button>
+            <input class="ax-num" id="axScaleNum" type="number" min="0.05" max="3" step="0.01" value="1.00"
+              inputmode="decimal" aria-label="Scale (×)" />
+            <button class="ax-stepbtn" id="axScaleUp" type="button" aria-label="Increase scale">+</button>
+          </div>
+        </div>
+        <input type="range" id="axScale" min="0.05" max="3" step="0.01" value="1" />
+      </div>
+      <div class="ax-scale">
+        <div class="ax-scale-head">
+          <span>Rotate</span>
+          <div class="ax-stepper" role="group" aria-label="Rotation value (degrees)">
+            <button class="ax-stepbtn" id="axRotDown" type="button" aria-label="Rotate −0.1°">−</button>
+            <input class="ax-num" id="axRotNum" type="number" min="-180" max="180" step="0.1" value="0.0"
+              inputmode="decimal" aria-label="Rotation in degrees" />
+            <button class="ax-stepbtn" id="axRotUp" type="button" aria-label="Rotate +0.1°">+</button>
+          </div>
+        </div>
+        <input type="range" id="axRot" min="-180" max="180" step="0.1" value="0" />
+      </div>
+      <label class="ax-row">Opacity
+        <input type="range" id="axOpacity" min="0.15" max="1" step="0.05" value="0.5" />
+        <output id="axOpacityVal">50%</output>
+      </label>
+      <label class="ax-row" id="axPlanRow" hidden>Plan image
+        <input type="range" id="axPlanOpacity" min="0" max="1" step="0.05" value="1" />
+        <output id="axPlanOpacityVal">100%</output>
+      </label>
+      <div class="adminbar-actions">
+        <button class="btn btn-ghost" id="axReset" type="button">Reset</button>
+      </div>
+    </div><!-- /axTabAlign -->
+
+    <div class="ax-tab" id="axTabLandmarks" hidden>
+      <button class="btn btn-import" id="axLmAdd" type="button">＋ Add landmark</button>
+      <p class="ax-lm-empty" id="axLmEmpty">No landmarks yet.</p>
+      <ul class="ax-lm-list" id="axLmList" aria-label="Landmarks"></ul>
+    </div><!-- /axTabLandmarks -->
+
+    <div class="ax-tab" id="axTabAmenities" hidden>
+      <p class="ax-lm-intro">Mark amenities inside the layout — a clubhouse, temple, pool, park… Each is an
+        <strong>icon pin</strong> with a name (its label) and the usual details, plus a <strong>render image</strong>
+        that opens full-screen when clicked. Drag the pin to place it. No status/colour — these aren't for sale.
+      </p>
+      <button class="btn btn-import" id="axAmAdd" type="button">＋ Add amenity</button>
+      <p class="ax-lm-empty" id="axAmEmpty">No amenities yet.</p>
+      <ul class="ax-lm-list" id="axAmList" aria-label="Amenities"></ul>
+    </div><!-- /axTabAmenities -->
+
+    <div class="ax-tab" id="axTabTour" hidden>
+      <p class="ax-lm-intro">Build multi-node 360° <strong>virtual tours</strong>. Add a tour, then upload a
+        panorama for each <strong>node</strong> (room / viewpoint). Placing the hotspots that link one node to the
+        next — and the visitor's crossfade walkthrough — happen in the tour viewer (next build step). A saved tour
+        is launched from a menu item.</p>
+      <button class="btn btn-import" id="axTourAdd" type="button">＋ Add tour</button>
+      <p class="ax-lm-empty" id="axTourEmpty">No tours yet.</p>
+      <div class="ax-tour-list" id="axTourList" aria-label="Tours"></div>
+      <input type="file" id="axTourNodeFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+      <!-- one isometric / floor-plan image per tour (see setTourMapFromFile) -->
+      <input type="file" id="axTourMapFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+      <div class="adminbar-actions">
+        <button class="btn btn-ghost" id="axTourLoad" type="button">Load…</button>
+        <input type="file" id="axTourFile" accept="application/json,.json" hidden />
+        <button class="btn btn-primary" id="axTourSaveBtn" type="button">Save tours…</button>
+      </div>
+    </div><!-- /axTabTour -->
+
+    <div class="adminbar-actions ax-session">
+      <button class="btn btn-ghost" id="axSessionClear" type="button"
+        title="Discard the working session stored in this browser">Discard session</button>
+    </div>
+    <p class="adminbar-sess" id="axSessionStatus" aria-live="polite">Work auto-saves in this browser as you go.</p>
+    <p class="adminbar-foot" id="axStatus">Drag/scale/rotate, then click <strong>Save</strong> in the top bar to save all changes.</p>
+  </section>
+
+  <!-- ─── Info panel ──────────────────────────────────────────────────────── -->
+  <aside class="panel" id="panel" aria-hidden="true" aria-labelledby="panelTitle" tabindex="-1">
+    <button class="panel-close btn btn-icon" id="panelClose" type="button" aria-label="Close panel">×</button>
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <span class="status-badge" id="panelBadge">—</span>
+        <p class="panel-block" id="panelBlock"></p>
+      </div>
+      <h2 class="panel-title" id="panelTitle">Plot</h2>
+    </div>
+    <dl class="panel-grid" id="panelGrid"></dl>
+    <p class="panel-notes" id="panelNotes"></p>
+    <button class="btn btn-primary panel-cta" id="walkBtn" type="button" disabled>
+      <span>Walk through this plot</span>
+      <span class="panel-cta-arrow" aria-hidden="true">→</span>
+    </button>
+    <p class="panel-hint" id="walkHint"></p>
+  </aside>
+
+  <!-- ─── Amenity info card (name + details + render thumbnail) ─────────────── -->
+  <aside class="panel am-card" id="amCard" aria-hidden="true" aria-labelledby="amCardTitle" tabindex="-1">
+    <button class="panel-close btn btn-icon" id="amCardClose" type="button" aria-label="Close amenity card">×</button>
+    <div class="panel-head">
+      <div class="panel-head-top">
+        <span class="am-card-ico" id="amCardIco" aria-hidden="true">🏛️</span>
+        <p class="panel-block" id="amCardBlock"></p>
+      </div>
+      <h2 class="panel-title" id="amCardTitle">Amenity</h2>
+    </div>
+    <button class="am-card-thumb" id="amCardThumb" type="button" hidden title="View full render">
+      <img id="amCardImg" alt="" />
+      <span class="am-card-thumb-hint"> ⤢</span>
+    </button>
+    <dl class="panel-grid" id="amCardGrid"></dl>
+    <p class="panel-notes" id="amCardNotes"></p>
+    <button class="btn btn-primary panel-cta" id="amCardWalk" type="button" hidden>
+      <span>Walk through</span>
+      <span class="panel-cta-arrow" aria-hidden="true">→</span>
+    </button>
+  </aside>
+
+  <!-- ─── Full-render lightbox ─────────────────────────────────────────────── -->
+  <div class="modal lightbox" id="lightbox" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="lightbox-inner" role="dialog" aria-modal="true" aria-label="Amenity render">
+      <button class="btn btn-icon lightbox-close" id="lightboxClose" type="button" aria-label="Close render">×</button>
+      <img class="lightbox-img" id="lightboxImg" alt="" />
+      <p class="lightbox-cap" id="lightboxCap"></p>
+    </div>
+  </div>
+
+  <!-- ─── Tour modal ──────────────────────────────────────────────────────── -->
+  <div class="modal" id="modal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-bar">
+        <h3 class="modal-title" id="modalTitle">Walkthrough</h3>
+        <div class="modal-actions">
+          <a class="btn btn-ghost" id="modalOpenNew" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+          <button class="btn btn-icon" id="modalClose" type="button" aria-label="Close walkthrough">×</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="modal-spinner" id="modalSpinner">Loading walkthrough…</div>
+        <iframe class="modal-iframe" id="tourFrame" title="3DVista walkthrough"
+          allow="fullscreen; xr-spatial-tracking; gyroscope; accelerometer" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Trace editor (admin: PNG / DXF → plot polygons) ───────────────────── -->
+  <div class="tracewin" id="traceWin" aria-hidden="true">
+    <header class="tracewin-bar">
+      <span class="admin-tag">ADMIN</span>
+      <strong>Import &amp; Trace</strong>
+      <span class="trace-hint" id="traceHint">Load a site-plan image, then click inside each plot to capture it.</span>
+      <div class="tracewin-actions">
+        <label class="btn btn-ghost" title="PNG/JPG site plan">Load image
+          <input type="file" id="traceFile" accept="image/png,image/jpeg,image/webp,image/*" hidden /></label>
+        <label class="btn btn-ghost" title="DXF export of a DWG/CAD plan">Load DXF
+          <input type="file" id="traceDxf" accept=".dxf,application/dxf,image/vnd.dxf,text/plain" hidden /></label>
+        <button class="btn btn-primary" id="traceFinish" type="button">Use these plots →</button>
+        <button class="btn btn-icon" id="traceClose" type="button" aria-label="Close trace editor">×</button>
+      </div>
+    </header>
+    <div class="tracewin-body">
+      <aside class="trace-tools">
+        <div class="ax-mode" role="group" aria-label="Trace mode">
+          <button class="ax-modebtn is-on" id="traceModeAuto" type="button"
+            title="Click inside a plot to auto-detect it">Auto</button>
+          <button class="ax-modebtn" id="traceModeManual" type="button"
+            title="Click corners to draw a plot">Manual</button>
+          <button class="ax-modebtn" id="traceModeEdit" type="button" title="Drag corners · delete plots">Edit</button>
+        </div>
+        <label class="trace-row">Colour match
+          <input type="range" id="traceThresh" min="6" max="140" step="1" value="36" />
+          <output id="traceThreshVal">36</output></label>
+        <label class="trace-row">Smoothing
+          <input type="range" id="traceSimplify" min="0" max="14" step="0.5" value="3" />
+          <output id="traceSimplifyVal">3</output></label>
+        <label class="trace-check"><input type="checkbox" id="traceSnap" checked /> Snap to shared corners</label>
+        <div class="trace-tool-actions">
+          <button class="btn btn-ghost" id="traceUndo" type="button">Undo last</button>
+          <button class="btn btn-ghost" id="traceClear" type="button">Clear all</button>
+        </div>
+        <p class="trace-dxflayer" id="traceDxfLayer" hidden>Layer:
+          <select id="traceLayerSel"></select>
+        </p>
+        <div class="ax-data">
+          <p class="ax-brand-head">Plot data <span>· area unit &amp; live status</span></p>
+          <!-- Project-wide area unit. Lives with the plot data (not the Area-filters panel)
+               because it describes the DATA, not the filters: it's the unit every plot's
+               area is expressed in, and changing it rewrites each plot's Area text to match
+               (see applyAreaUnitToPlots). -->
+          <label class="ax-unit-row">Area unit
+            <select id="axAreaUnit" aria-label="Area unit"></select>
+          </label>
+          <label class="ax-data-toggle"><input type="checkbox" id="axSheetOn" /> Pull plot status &amp; details from a
+            Google Sheet</label>
+          <div class="ax-data-body" id="axSheetBody" hidden>
+            <label class="ax-brand-field">Sheet link
+              <input type="text" id="axSheetUrl" placeholder="Paste the Google Sheet share / “Publish to web” link"
+                spellcheck="false" /></label>
+            <div class="ax-data-actions">
+              <button class="btn btn-ghost" id="axSheetTest" type="button" title="Fetch the sheet and check it">Test</button>
+              <button class="btn btn-ghost" id="axSheetSample" type="button" title="Download a sample sheet with the exact columns expected">📥 Download sample sheet</button>
+              <!-- Intentionally empty: setSheetMsg() fills this with Test results / errors.
+                   The standing how-to text that used to sit here was removed (2026-09-18,
+                   on request) — it was a wall of prose in a narrow sidebar, and the same
+                   guidance is reachable via the sample-sheet download beside it. -->
+              <span class="ax-data-note" id="axSheetMsg"></span>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <!-- The captured-plot list gets its own full-height column beside the tools sidebar
+           (2026-09-18). It used to sit at the BOTTOM of that sidebar, below the sliders and
+           the Plot Data block, so it was squeezed into a sliver and every plot's inline
+           editor had to be reached by scrolling the whole column. -->
+      <aside class="trace-plots" aria-label="Captured plots">
+        <p class="trace-count" id="traceCount">0 plots</p>
+        <ul class="trace-list" id="traceList"></ul>
+      </aside>
+      <div class="trace-stage" id="traceStage">
+        <canvas id="traceCanvas"></canvas>
+        <p class="trace-empty" id="traceEmpty">Load a PNG/JPG site plan — or a DXF — to begin. Scroll to zoom · drag to
+          pan.</p>
+        <!-- Area unit + admin-defined size bands, floated over the top-right of the stage
+             rather than stacked in the Align sidebar (2026-09-18: that column was already
+             crowded, and this belongs with the plot data it filters). The client shows
+             these as one "Filter" dropdown; picking a band recolours the plots inside it
+             (see colorPlots). Collapsible, so it never permanently covers the plan. -->
+        <div class="ax-area" id="axAreaPanel">
+          <button class="ax-area-head" id="axAreaToggle" type="button" aria-expanded="true">
+            <span>Area filters</span><span class="ax-area-chev">▾</span>
+          </button>
+          <div class="ax-area-body" id="axAreaBody">
+            <p class="ax-area-note" id="axAreaNote"></p>
+            <div class="ax-area-list" id="axAreaList" aria-label="Area filters"></div>
+            <button class="btn btn-ghost ax-area-add" id="axAreaAdd" type="button">＋ Add filter</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Unified Admin Menu Node Builder Wizard Modal ─────────────────────────────── -->
+  <div class="modal custom-feature-modal" id="adminNodeBuilderModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog feature-modal-dialog" role="dialog" aria-label="Menu Item Setup" style="max-width: 620px; width: 95vw;">
+      <div class="modal-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <h3 class="modal-title" id="nodeBuilderModalTitle" style="margin:0; font-size:15px; font-weight:700;">✨ Add Menu Item</h3>
+          <span id="wizardStepIndicator" style="font-size:11px; font-weight:600; color:var(--gold,#facc15);">Step 1 of 4</span>
+        </div>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body custom-modal-body" style="padding:18px;">
+        
+        <!-- STEP 1: What are you adding? (Notion-style Compact Choice Rows) -->
+        <div id="wizardStep1" class="wizard-step">
+          <p class="custom-modal-desc" style="font-size:12.5px; font-weight:600; color:#f8fafc; margin:0 0 10px 0;">What type of item are you adding?</p>
+          <div class="wizard-rows-grid" style="display:flex; flex-direction:column; gap:6px;">
+            
+            <button type="button" class="wizard-choice-row" data-choice="parent">
+              <span class="wizard-row-icon">📁</span>
+              <span class="wizard-row-title">Folder</span>
+              <span class="wizard-row-desc">Groups other items together.</span>
+            </button>
+            
+            <button type="button" class="wizard-choice-row" data-choice="child">
+              <span class="wizard-row-icon">📄</span>
+              <span class="wizard-row-title">Content Item</span>
+              <span class="wizard-row-desc">Single video, PDF, image, gallery, or tour.</span>
+            </button>
+            
+            <button type="button" class="wizard-choice-row" id="wizardChoiceContact" data-choice="contact">
+              <span class="wizard-row-icon">📞</span>
+              <span class="wizard-row-title">Contact Card</span>
+              <span class="wizard-row-desc">Project contact info.</span>
+              <span class="wizard-card-badge" id="wizardContactBadge" style="display:none; font-size:10px; padding:2px 6px; border-radius:4px; background:rgba(250,204,21,0.2); color:#facc15; margin-left:auto;">✓ Already Added</span>
+            </button>
+            
+          </div>
+        </div>
+
+        <!-- STEP 2a: Folder Setup -->
+        <div id="wizardStep2a_Folder" class="wizard-step" style="display:none;">
+          <p class="custom-modal-desc" style="font-size:13px; font-weight:600; color:#f8fafc; margin:0 0 14px 0;">Folder Details</p>
+          <div class="form-group">
+            <label class="form-label">Folder Name / Title:</label>
+            <input type="text" id="wizardFolderTitleInput" placeholder="e.g. VIRTUAL TOURS or WALKTHROUGH VIDEOS" class="form-input-text" />
+          </div>
+          </div>
+        </div>
+
+        <!-- STEP 2b: Content Item Setup -->
+        <div id="wizardStep2b_Content" class="wizard-step" style="display:none;">
+          <p class="custom-modal-desc" style="font-size:13px; font-weight:600; color:#f8fafc; margin:0 0 10px 0;">Item Title &amp; Content Type</p>
+          
+          <div class="form-group" style="margin-bottom:12px;">
+            <label class="form-label">Item Title:</label>
+            <input type="text" id="wizardContentTitleInput" placeholder="e.g. Model Villa Walkthrough" class="form-input-text" />
+          </div>
+
+          <label class="form-label" style="margin-bottom:6px;">Select Content Type:</label>
+          <div class="wizard-types-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:14px;">
+            <button type="button" class="wizard-type-card is-active" data-type="video">
+              <span class="wizard-type-icon">🎬</span>
+              <span class="wizard-type-label">Video</span>
+            </button>
+            <button type="button" class="wizard-type-card" data-type="pdf">
+              <span class="wizard-type-icon">📄</span>
+              <span class="wizard-type-label">PDF</span>
+            </button>
+            <button type="button" class="wizard-type-card" data-type="image">
+              <span class="wizard-type-icon">🖼️</span>
+              <span class="wizard-type-label">Image</span>
+            </button>
+            <!-- 360° walkthrough authored in the admin Tour tab; stores a tourId, not a URL -->
+            <button type="button" class="wizard-type-card" data-type="panotour">
+              <span class="wizard-type-icon">🧭</span>
+              <span class="wizard-type-label">360° Tour</span>
+            </button>
+            <!-- Built-in viewer actions. These were once hardcoded rows in the client
+                 drawer; they are now authored like anything else, so a project only shows
+                 them if it wants them. Neither takes any configuration. -->
+            <button type="button" class="wizard-type-card" data-type="landmarks">
+              <span class="wizard-type-icon">📍</span>
+              <span class="wizard-type-label">Landmarks</span>
+            </button>
+            <button type="button" class="wizard-type-card" data-type="aerial">
+              <span class="wizard-type-icon">🗺️</span>
+              <span class="wizard-type-label">Aerial View</span>
+            </button>
+          </div>
+
+          <p class="form-hint" id="wizardNoConfigHint" style="display:none; margin-bottom:14px;"></p>
+
+          <!-- Tour picker: replaces the URL/upload row for the panotour type, because the
+               content is a tour already stored in this project's tour.json. -->
+          <div class="form-group" id="wizardTourGroup" style="display:none; margin-bottom:14px;">
+            <label class="form-label" for="wizardTourSelect">Which tour should this open?</label>
+            <select class="form-input" id="wizardTourSelect"></select>
+            <p class="form-hint" id="wizardTourHint" style="margin-top:6px;"></p>
+          </div>
+
+          <!-- Upload vs URL Segmented Toggle -->
+          <div id="wizardSourceGroup">
+            <label class="form-label">Content Source:</label>
+            <div class="wizard-source-toggle" style="display:flex; gap:6px; margin-top:4px; margin-bottom:12px;">
+              <button type="button" class="btn btn-ghost wizard-source-btn is-active" data-source="url" style="flex:1; font-size:12px;">🔗 Paste a URL</button>
+              <button type="button" class="btn btn-ghost wizard-source-btn" data-source="upload" style="flex:1; font-size:12px;">📁 Upload from Device</button>
+            </div>
+
+            <!-- Single Input Box based on active toggle -->
+            <div id="wizardUrlInputGroup" class="form-group">
+              <input type="text" id="wizardUrlInput" placeholder="https://example.com/video.mp4 or YouTube / Vimeo link" class="form-input-text" />
+            </div>
+
+            <div id="wizardFileInputGroup" class="form-group" style="display:none;">
+              <input type="file" id="wizardFileInput" multiple class="form-input-file" accept="video/mp4,video/webm,video/ogg,video/quicktime,.mp4,.webm,.mov" />
+              <div class="file-status" id="wizardFileStatus" style="font-size:11px; color:#94a3b8; margin-top:4px;">No file chosen (you can select one or more files)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- STEP 2c: Contact Card Fields -->
+        <div id="wizardStep2c_Contact" class="wizard-step" style="display:none;">
+          <p class="custom-modal-desc" style="font-size:13px; font-weight:600; color:#f8fafc; margin:0 0 10px 0;">Contact Details</p>
+          <div class="form-group">
+            <label class="form-label">Project Title / Name:</label>
+            <input type="text" id="wizardContactTitle" placeholder="e.g. Anandam Eleganza - Premium Villa Plots" class="form-input-text" />
+          </div>
+          <div class="form-group" style="margin-top:8px;">
+            <label class="form-label">Site Address / Description:</label>
+            <textarea id="wizardContactAbout" rows="2" placeholder="e.g. Beside Loha Market, Sondongari Main Road, Raipur" class="form-input-textarea"></textarea>
+          </div>
+          <div class="form-group" style="margin-top:8px;">
+            <label class="form-label">Phone Number:</label>
+            <input type="text" id="wizardContactPhone" placeholder="e.g. +91 7389705477" class="form-input-text" />
+          </div>
+          <div class="form-group" style="margin-top:8px;">
+            <label class="form-label">Email Address:</label>
+            <input type="email" id="wizardContactEmail" placeholder="e.g. anandameleganza@gmail.com" class="form-input-text" />
+          </div>
+          <div class="form-group" style="margin-top:8px;">
+            <label class="form-label">Project Image / Site Photo:</label>
+            <input type="file" id="wizardContactImageFile" accept="image/*" class="form-input-file" />
+            <span class="file-status" id="wizardContactImageStatus" style="font-size:11px; color:#94a3b8; display:block; margin-top:4px;">No image selected</span>
+          </div>
+        </div>
+
+        <!-- STEP 3: Visual Placement Picker -->
+        <div id="wizardStep3_Placement" class="wizard-step" style="display:none;">
+          <p class="custom-modal-desc" style="font-size:13px; font-weight:600; color:#f8fafc; margin:0 0 10px 0;">Where should this item be placed?</p>
+          <div class="wizard-placement-list" id="wizardPlacementList" style="display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; padding:4px;">
+            <!-- Visual Indented Folder Picker generated by JS -->
+          </div>
+        </div>
+
+        <!-- STEP 4: Confirmation Summary -->
+        <div id="wizardStep4_Confirm" class="wizard-step" style="display:none;">
+          <p class="custom-modal-desc" style="font-size:13px; font-weight:600; color:#f8fafc; margin:0 0 10px 0;">Confirm Item Creation</p>
+          <div class="wizard-summary-card" style="padding:14px; background:rgba(15,23,42,0.8); border:1px solid rgba(250,204,21,0.3); border-radius:8px;">
+            <p id="wizardSummaryText" style="margin:0; font-size:13px; font-weight:600; color:#f8fafc; line-height:1.5;">Summary text</p>
+          </div>
+        </div>
+
+        <!-- Wizard Navigation Action Bar -->
+        <div class="modal-actions-bar" style="margin-top:20px; display:flex; justify-content:space-between; align-items:center;">
+          <button class="btn btn-ghost" id="wizardBackBtn" type="button" style="font-size:12px;">← Back</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-ghost" type="button" data-close style="font-size:12px;">Cancel</button>
+            <button class="btn btn-primary" id="wizardNextBtn" type="button" style="font-size:12px;">Next Step →</button>
+          </div>
+        </div>      </div>
+    </div>
+  </div>
+
+  <!-- ─── Export Pre-flight: Online-Only Content Warning ────────────────────────── -->
+  <div class="modal custom-feature-modal" id="exportFlaggedModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog feature-modal-dialog" role="dialog" aria-label="Items that need internet" style="max-width: 560px; width: 92vw;">
+      <div class="modal-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <h3 class="modal-title" style="margin:0; font-size:15px; font-weight:700;">⚠️ Some items link online instead of a file</h3>
+          <span style="font-size:11px; font-weight:500; color:#9aa5b1;">These won't load once the export is opened offline</span>
+        </div>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body custom-modal-body" id="exportFlaggedList" style="padding:18px; max-height:50vh; overflow-y:auto;"></div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; padding:14px 18px; border-top:1px solid rgba(255,255,255,0.1);">
+        <button class="btn btn-ghost" type="button" id="exportFlaggedCancel" style="font-size:12px;">Cancel Export</button>
+        <button class="btn btn-primary" type="button" id="exportFlaggedProceed" style="font-size:12px;">Export Anyway</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin: place one dot per room on a tour's isometric / floor-plan image. Click a room
+       in the list to arm it, then click the image to drop (or move) that room's dot; dots
+       can also be dragged. Coordinates are stored 0..1 (see buildToursData) so the same
+       map renders at any size in the client minimap. -->
+  <div class="modal custom-feature-modal" id="tourMapModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog feature-modal-dialog" role="dialog" aria-label="Place rooms on the tour map" style="max-width: 980px; width: 95vw;">
+      <div class="modal-bar" style="display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid rgba(255,255,255,0.1);">
+        <div>
+          <h3 class="modal-title" id="tourMapModalTitle" style="margin:0; font-size:15px; font-weight:700;">🗺 Place rooms on the map</h3>
+          <span style="font-size:11px; font-weight:500; color:#9aa5b1;" id="tourMapModalHint">Pick a room on the right, then click the map to place its dot. Drag a dot to fine-tune.</span>
+        </div>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body custom-modal-body tourmap-modal-body">
+        <div class="tourmap-stage" id="tourMapStage">
+          <div class="tourmap-canvas" id="tourMapCanvas">
+            <img id="tourMapEditImg" alt="Tour map" />
+            <div class="tourmap-editdots" id="tourMapEditDots"></div>
+          </div>
+        </div>
+        <div class="tourmap-side">
+          <p class="tourmap-side-h">Rooms in this tour</p>
+          <div class="tourmap-nodes" id="tourMapNodeList"></div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; justify-content:flex-end; padding:14px 18px; border-top:1px solid rgba(255,255,255,0.1);">
+        <button class="btn btn-primary" type="button" data-close style="font-size:12px;">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Client Display Modals ──────────────────────────────────────────────── -->
+
+  <!-- Client Video Modal (Location Intel & Walkthrough) -->
+  <div class="modal custom-feature-modal" id="clientVideoModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog video-modal-dialog" role="dialog" aria-label="Video Player">
+      <div class="modal-bar">
+        <h3 class="modal-title" id="clientVideoTitle">Video Player</h3>
+        <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+      </div>
+      <div class="modal-body video-modal-body" style="padding:0; background:#000;">
+        <video id="clientVideoPlayer" controls autoplay style="width:100%; height:100%; max-height:80vh; display:block;"></video>
+        <iframe id="clientVideoIframe" style="width:100%; height:500px; max-height:80vh; border:none; display:none;" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client Gallery Modal (Lightbox Viewer matching Image 2) -->
+  <div class="modal custom-feature-modal gallery-lightbox-modal" id="clientGalleryModal" aria-hidden="true" hidden>
+    <div class="modal-backdrop gallery-lightbox-backdrop" data-close></div>
+    <div class="gallery-lightbox-container" role="dialog" aria-modal="true" aria-label="Photo Gallery">
+      <!-- Close Button (White square button matching Image 2) -->
+      <button class="gallery-lightbox-close" id="galleryCloseBtn" type="button" aria-label="Close" data-close>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+
+      <!-- Slideshow Autoplay Toggle (pause/play swap via is-paused; starts playing) -->
+      <button class="gallery-lightbox-autoplay" id="galleryAutoplayBtn" type="button" aria-label="Pause slideshow" aria-pressed="true">
+        <svg class="gallery-autoplay-ico gallery-autoplay-pause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="5" width="4" height="14" rx="1"></rect>
+          <rect x="14" y="5" width="4" height="14" rx="1"></rect>
+        </svg>
+        <svg class="gallery-autoplay-ico gallery-autoplay-play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="7 4 20 12 7 20 7 4"></polygon>
+        </svg>
+      </button>
+
+      <!-- Previous Image Arrow Button (Circular dark button with white border and arrow) -->
+      <button class="gallery-lightbox-nav gallery-lightbox-prev" id="galleryPrevBtn" type="button" aria-label="Previous Image">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- Full-Scale Stage for Image with small padding -->
+      <div class="gallery-lightbox-stage" id="galleryStage">
+        <img class="gallery-lightbox-img" id="galleryActiveImg" src="" alt="Gallery Image" />
+      </div>
+
+      <!-- Next Image Arrow Button (Circular dark button with white border and arrow) -->
+      <button class="gallery-lightbox-nav gallery-lightbox-next" id="galleryNextBtn" type="button" aria-label="Next Image">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- Floating Bottom Caption & Counter -->
+      <div class="gallery-lightbox-caption" id="galleryCaptionBar">
+        <span class="gallery-caption-title" id="galleryImgName"></span>
+        <span class="gallery-caption-counter" id="galleryImgCounter"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client Brochure Modal -->
+  <div class="modal custom-feature-modal" id="clientBrochureModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-dialog brochure-modal-dialog" role="dialog" aria-label="Project Brochure">
+      <div class="modal-bar">
+        <h3 class="modal-title">📄 Project Brochure</h3>
+        <div style="display:flex; gap:8px;">
+          <a class="btn btn-ghost" id="clientBrochureDownload" href="#" download target="_blank">Download PDF ⬇</a>
+          <button class="btn btn-icon modal-close-btn" type="button" data-close>×</button>
+        </div>
+      </div>
+      <div class="modal-body brochure-modal-body" style="padding:0; background:#525659;">
+        <iframe id="clientBrochureFrame" style="width:100%; height:75vh; border:none; display:block; background:#525659;" allow="autoplay"></iframe>
+        <!-- Android Chrome (older builds especially) has no inline PDF viewer at all and
+             downloads PDFs instead of showing them — confirmed on a real device, online and
+             off. There, app.js renders the pages here with pdf.js instead of using the
+             iframe above. See openClientBrochureModal/renderPdfInto. -->
+        <div id="clientBrochureCanvas" class="brochure-canvas" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client Contact Us Modal (Exact Replica of User Reference Image 2) -->
+  <div class="contact-modal" id="clientContactModal" aria-hidden="true" hidden>
+    <div class="contact-modal-backdrop" data-close></div>
+    <div class="contact-modal-dialog" role="dialog" aria-label="Contact Information">
+
+      <!-- Left Side Image -->
+      <div class="contact-modal-left">
+        <!-- No src here on purpose: openClientContactModal ALWAYS assigns img.src before the
+             modal is shown (the project's own contact photo, else the project pano, else the
+             sample fallback), so a hard-coded one is never the image anyone sees — it just
+             made every visitor download this 4.8MB JPEG during boot, on every project, for a
+             modal most of them never open. It was the third-heaviest request on a cold load
+             (~15s of a 4G first visit) and pure waste. -->
+        <img id="clientContactImg" alt="Project Site Map" decoding="async" />
+      </div>
+
+      <!-- Right Side Info -->
+      <div class="contact-modal-right">
+        <button class="contact-modal-close" id="clientContactClose" type="button" aria-label="Close">✕</button>
+
+        <div class="contact-info-wrap">
+          <span class="contact-eyebrow">Get in touch</span>
+          <h2 class="contact-title" id="clientContactTitle">Anandam Eleganza - Premium Villa Plots</h2>
+
+          <div class="contact-info-block">
+            <p class="contact-info-row" id="clientContactAboutRow"><span class="contact-info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-7.58-7-12a7 7 0 0 1 14 0c0 4.42-7 12-7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></span><span id="clientContactAbout">Site Address: Beside Loha Market, Sondongari Main Road, Hirapur, Raipur, Chhatisgarh</span></p>
+            <p class="contact-info-row" id="clientContactPhoneContainer"><span class="contact-info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z"/></svg></span><a id="clientContactPhone" href="tel:+917389705477">+91 7389705477</a></p>
+            <p class="contact-info-row" id="clientContactEmailContainer"><span class="contact-info-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span><a id="clientContactEmail" href="mailto:anandameleganza@gmail.com">anandameleganza@gmail.com</a></p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- cache-busted import so code edits always take effect on reload (no hard-refresh needed) -->
+  <script type="module">import(`./app.js?v=336db43`);</script>
+</body>
+
+</html>

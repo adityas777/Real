@@ -1,326 +1,253 @@
-// sw.js — Build91 Plot Map: minimal offline layer for the CLIENT (view-only) experience.
+// sw.js — Build91 Plot Map: the offline layer for the CLIENT (view-only) experience.
 //
-// Registered only from client (non-admin) pages — see app.js's registerOfflineSupport().
-// That said, once installed its scope is the whole origin ("/", the default scope for a
-// worker served from the root), so as a second line of defence this file itself never
-// touches admin traffic either: every fetch handler below checks for `admin=1` before
-// doing anything (see isAdminRequest) and falls straight through to a plain network fetch
-// when it finds it, so an admin session in the same browser is never served stale/cached
-// data by a worker that happened to get installed from an earlier client visit.
+// STRICT OFFLINE MODE (2026-09-24, see MOBILE-OFFLINE.md). A phone or tablet can SAVE a project
+// (client menu → "⬇ SAVE FOR OFFLINE"): the page downloads every file the project needs — the app
+// itself, its data, its media, and plots.csv with the Google Sheet merged in — into one cache per
+// project, `b91-saved@<scope>:<project>`, and writes a small record there last. From then on that
+// project ALWAYS runs from the saved copy, whatever the connection, exactly like an exported
+// standalone folder: every request is answered from the cache and never from the network. The
+// only way anything in it changes is the user tapping "⟳ UPDATE OFFLINE COPY" in the same menu.
 //
-// Cache key normalization: every data/asset fetch in app.js is cache-busted with a
-// `?t=`/`?v=` query param (dataUrl/assetUrl) so the LIVE server always sees a fresh
-// request — but that means the exact request URL is different on every single load, which
-// would defeat Cache Storage's exact-match lookups. cacheKeyFor() strips the query string
-// so the cache is keyed on the stable resource identity instead; requests still go to the
-// network with their original cache-busting query intact.
-
-// Bump this whenever the caching STRATEGY changes (not just the app code): the old caches
-// are deleted on activate, so an already-installed worker cannot keep serving data under
-// the previous rules. v2: project config moved to network-first. v3-v4: reserved by the
-// Virtual Tours branch. v5: isRangedMediaPath widened to cover audio extensions, since an
-// <audio> element makes the same byte-range requests as <video> and needs the same
-// respondVideo/sliceRange treatment. v6: SHELL_URLS now precaches the MINIFIED three.js
-// build (app.js's own import switched to it, 2026-09-11, for load-time — see CLAUDE.md's
-// "vendored three.js path appears in FOUR places" gotcha) — bumped so an already-installed
-// worker's v5 shell cache (which had the OLD, now-unused three.module.js precached and was
-// therefore MISSING the file the app actually loads) gets discarded rather than silently
-// leaving a visitor's offline pano viewer unable to find its own THREE.js. v7:
-// respondVideo (since renamed, see v8) gained the background priming fetch for a ranged
-// first-request — existing cached videos aren't invalidated by this (purely additive:
-// previously-uncached mobile videos can now get cached, nothing already stored changes
-// shape), bumped per this file's own policy of one per strategy change regardless. v8:
-// PDFs (the brochure viewer, read progressively by pdf.js via Range requests exactly like
-// a media element) are now routed through the same safe path — renamed respondVideo/
-// VIDEO_BLOB_CACHE/VIDEO_PRIME_INFLIGHT/primeVideoCache/isRangedMediaPath to their generic
-// respondRangedAsset/RANGED_BLOB_CACHE/RANGE_PRIME_INFLIGHT/primeRangedCache/
-// isRangedCacheablePath names since "video" no longer describes what they cover. PDFs were
-// previously falling through to the plain staleWhileRevalidate path, where pdf.js's several
-// different-byte-range 206 responses for the same file kept overwriting each other under
-// one cache key — the brochure could never actually be reconstructed offline. v9: a batch
-// of client-side app.js fixes (2026-09-18, incl. the VIRTUAL TOUR menu-row fix below) were
-// reported as "still there" on a mobile client — an already-installed worker was still
-// serving the OLD app.js out of its v8 shell cache, since a plain page reload never re-hits
-// the network for anything the shell cache already has an entry for. Bumped so that shell
-// gets discarded and re-fetched; per the policy above, this does NOT touch a visitor's
-// downloaded offline content (data/media aren't version-namespaced). v10: same session,
-// one more app.js change (submenu header text removed) landed right after v9 — bumped
-// again rather than assuming no client had already picked up v9 in between. v11: tour
-// maps went from one isometric per tour to several, with a client switch button + a 3D
-// flip transition (2026-09-18) — a substantial app.js/index.html/styles.css change,
-// bumped per this file's policy of one per shell-affecting change. v12: fixes to that
-// same feature (switching to a dot-less isometric hid the whole minimap; the flip revealed
-// an image that hadn't downloaded yet).
-const VERSION = 'v46';
-// Only the SHELL is version-namespaced. The shell is CODE (app.js/styles/vendor) — a new
-// deploy genuinely invalidates it, and it's ~2MB, cheap to re-fetch.
+// This worker's job is deliberately small, because the browser updates it on its own whenever
+// it changes (that can't be switched off) while a saved copy keeps running the app code it was
+// saved with. So whatever this file does must keep working with OLDER saved copies of app.js —
+// the cache names, the record key, cacheKeyFor's key shape and the NET_PARAM pass-through are a
+// contract with every saved copy out there. Change them only with a migration.
 //
-// DATA and MEDIA are deliberately NOT versioned, as of 2026-09-12, and this is load-bearing:
-// they hold the visitor's actual downloaded CONTENT (project images in data, video/audio/PDF
-// in media — together the whole ~200MB "Includes offline access" download). When these were
-// versioned, every VERSION bump deleted them via the activate sweep below, and a phone that
-// had downloaded everything for offline use silently lost ALL of it the next time it
-// connected — which is exactly what happened when v7→v8 shipped: "video and images worked
-// perfectly yesterday, now nothing plays offline." Un-versioning them means a caching-strategy
-// change costs a visitor the small shell re-fetch, never their content. That's safe because
-// these entries are plain complete 200 responses keyed by stable URL — always valid to serve
-// as an offline fallback regardless of which strategy stored them — and online visitors still
-// get fresh copies anyway (config is networkFirst, images are staleWhileRevalidate).
-// Corrupt-entry risk (the thing a bump WOULD have flushed) is handled directly instead: the
-// migration below refuses to carry over anything that isn't a complete 200.
-const SHELL_CACHE = `b91-shell-${VERSION}`;
-const DATA_CACHE = 'b91-data';
-const MEDIA_CACHE = 'b91-media';
-const ALL_CACHES = [SHELL_CACHE, DATA_CACHE, MEDIA_CACHE];
-// Versioned content caches written by any earlier build, to be folded into the un-versioned
-// ones on activate rather than deleted (see migrateLegacyContentCaches).
-const LEGACY_CONTENT_PREFIXES = ['b91-data-', 'b91-media-'];
+//  • A SAVED project: answered from its saved copy only. A navigation opens the saved index.html
+//    (with `window.B91_OFFLINE_COPY` injected, which is how the page knows it runs strict); a
+//    file the copy doesn't have is a 404, online or not — the same behaviour in the field as in
+//    the office. Requests carrying NET_PARAM (the page's own save/update downloads and its "is
+//    there an update?" check) go straight to the network.
+//  • An UNSAVED project: plain network, nothing cached. With no connection it falls back to what
+//    an older version of this worker cached (see LEGACY below) and otherwise shows a short
+//    "not saved on this device" page instead of the browser's own error.
+//  • Admin pages and admin requests: never touched.
+//
+// New versions of this file do NOT take over by themselves (no skipWaiting in install): the
+// running app is never swapped or reloaded under the user. A new version starts when every
+// window of the app has been closed, or when the page asks for it (SKIP_WAITING) during a
+// save/update the user started. There is no automatic page reload anywhere.
+//
+// LEGACY. Up to v49 this worker cached opportunistically into `b91-shell-<v>` /
+// `b91-shell@<scope>:<v>`, `b91-data` and `b91-media` (and older `b91-data-*`/`b91-media-*`). A
+// phone that downloaded a project that way must keep working offline until it is adopted into
+// a saved copy (app.js moves those files over — no second download — and then deletes them), so
+// those caches are read, never written, and only when the network fails for an unsaved project.
+// Nothing here deletes them.
+const VERSION = 'v50';
 
-// The minimum needed to boot the client shell (pano engine + UI) with zero network.
-// Project data (alignment/plots/landmarks/amenities json+csv+svg), the pano/plan images,
-// and any menu media are deliberately NOT listed here — they're cached opportunistically
-// the first time they're actually requested (see the fetch handler), so a visitor who
-// never opens a given video never downloads it just by loading the app.
-// pdf.js is here rather than left to runtime caching because the Android path that needs
-// it (see openClientBrochureModal — that browser has no inline PDF viewer of its own) has
-// to work with no connection, and a visitor may well open the brochure for the first time
-// only after going offline. ~1.4MB, precached once.
-const SHELL_URLS = ['./', './index.html', './app.js', './styles.css', './vendor/three.module.min.js',
-  './vendor/pdf.min.js', './vendor/pdf.worker.min.js',
-  './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+const SCOPE_URL = self.registration.scope;                 // this worker's folder, e.g. https://re.build91.in/eleganzav2/
+const SCOPE_PATH = new URL(SCOPE_URL).pathname;
+const SAVED_PREFIX = `b91-saved@${SCOPE_PATH}:`;           // + project id
+const RECORD_KEY = new URL('.b91-offline-record', SCOPE_URL).href;   // one per saved cache, written last
+const NET_PARAM = 'b91_net';                               // "always the network" marker (app.js OFFLINE_NET)
+const PROJECT_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const LEGACY_SHELL_PREFIX = SCOPE_PATH === '/' ? 'b91-shell-' : `b91-shell@${SCOPE_PATH}:`;
 
-self.addEventListener('install', (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(SHELL_CACHE);
-    await Promise.all(SHELL_URLS.map(async (u) => {
-      try { const res = await fetch(u, { cache: 'no-store' }); if (res.ok) await cache.put(cacheKeyFor(u), res); } catch {}
-    }));
-    await self.skipWaiting();
-  })());
+self.addEventListener('install', () => {
+  // Nothing to precache: a saved copy is written by the page, and an unsaved visit is plain
+  // network. Deliberately no skipWaiting() — see the header.
 });
-
-// Fold any older VERSIONED data/media cache into its un-versioned replacement, so upgrading
-// to this build doesn't cost a visitor content they already downloaded. Entries are copied
-// one at a time and only when they're a COMPLETE 200 — a stored 206/partial is the corrupt
-// shape the old PDF bug produced, and carrying that forward would preserve the very thing a
-// version bump used to flush. Anything already present in the destination wins (it was
-// written by current code). The legacy cache is dropped once drained, so this runs once.
-async function migrateLegacyContentCaches(keys) {
-  const legacy = keys.filter((k) => LEGACY_CONTENT_PREFIXES.some((p) => k.startsWith(p)));
-  for (const name of legacy) {
-    try {
-      const dest = await caches.open(name.startsWith('b91-media-') ? MEDIA_CACHE : DATA_CACHE);
-      const src = await caches.open(name);
-      for (const req of await src.keys()) {
-        try {
-          if (await dest.match(req)) continue;
-          const res = await src.match(req);
-          if (res && res.status === 200 && !res.headers.get('Content-Range')) await dest.put(req, res);
-        } catch {}   // one unreadable entry must not abort the whole migration
-      }
-      await caches.delete(name);
-    } catch {}
-  }
-}
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
-    // Claim first: migration below can take a while on a phone holding a few hundred MB, and
-    // there's no reason for the page to sit uncontrolled (falling through to the network for
-    // everything, caching nothing) while it runs.
-    await self.clients.claim();
-    const keys = await caches.keys();
-    const isLegacyContent = (k) => LEGACY_CONTENT_PREFIXES.some((p) => k.startsWith(p));
-    // Superseded SHELL caches only — content caches are migrated, not dropped.
-    await Promise.all(keys
-      .filter((k) => !ALL_CACHES.includes(k) && !isLegacyContent(k))
-      .map((k) => caches.delete(k)));
-    await migrateLegacyContentCaches(keys);
-  })());
+  // Only reached when no older version is running any more (or the page asked, SKIP_WAITING):
+  // claiming then hands the open page to this version at once, so a save it just started goes
+  // through the rules above rather than an older worker's.
+  event.waitUntil(self.clients.claim());
 });
 
+self.addEventListener('message', (event) => {
+  const type = event.data && event.data.type;
+  if (type === 'SKIP_WAITING') self.skipWaiting();
+  else if (type === 'SAVED_CHANGED') forgetSaved();
+  else if (type === 'PING' && event.ports && event.ports[0]) event.ports[0].postMessage({ ok: true, version: VERSION });
+});
+
+// The cache key for a URL: resolved against this worker's folder, every query parameter dropped
+// except ?project= (the app's own `?v=`/`?t=` cache-busters change on every load). app.js keys the
+// files it saves with the same rule (offlineKeyFor), so the two must stay identical.
 function cacheKeyFor(url) {
-  const u = new URL(url, self.location.origin);
-  // Preserve ?project= so each project gets its own navigation + data cache entry.
-  // Without this, a second visit to /?project=anandman overwrites the cached
-  // /?project=eleganza shell (both keyed as bare "/"), so tapping the home-screen
-  // icon for eleganza would launch anandman — or fall back to "sample" if the wrong
-  // shell happened to be cached.
-  // All other query params (cache-busters like ?t= and ?v= added by app.js) are
-  // stripped so the cache key stays stable across reloads.
+  const u = new URL(url, SCOPE_URL);
   const project = u.searchParams.get('project');
   u.search = '';
+  u.hash = '';
   if (project) u.searchParams.set('project', project);
   return u.toString();
 }
 
-// Anything fetched with byte-range requests: <audio>/<video> elements, AND pdf.js (used
-// for the brochure viewer on mobile — see openClientBrochureModal — which reads a PDF
-// progressively via Range requests exactly like a media element, not as one big download).
-// Caching a single 206 under the resource URL silently corrupts the cache (only that one
-// slice would ever be served again) — the exact hazard respondRangedAsset exists to
-// prevent. Background music (added 2026-09-04) went through the ordinary cache path until
-// audio extensions were added here; PDFs (2026-09-12) had the exact same gap — routed
-// through the plain staleWhileRevalidate path, where pdf.js's several different-byte-range
-// 206 responses for the SAME file kept overwriting each other under one cache key, so the
-// brochure was never actually reconstructible offline (whichever slice landed last "won"
-// and any offline open got a corrupted fragment, not the real document).
-function isRangedCacheablePath(pathname) {
-  return /\.(mp4|webm|ogg|mov|m4v|mkv|mp3|m4a|aac|oga|wav|weba|flac|pdf)$/i.test(pathname);
+// ─── Which saved copy (if any) a request belongs to ─────────────────────────
+// In a published demo's folder there is exactly one project, so "the one saved here" is the
+// answer. At the site root (local server, the single-site deploy) several projects share one
+// address: the project is in the path (projects/<id>/…), in the request's own ?project=, or in
+// the ?project= of the page that made the request — else the app's own default, "sample".
+const savedMemo = new Map();                                  // cache name → Promise<Cache|null>
+let scopePidMemo = null;                                      // Promise<project id|null>, published folders only
+function forgetSaved() {
+  savedMemo.clear();
+  scopePidMemo = null;
+  RANGED_BLOBS.clear();                                       // an update may have replaced a file held here
 }
 
-async function isAdminRequest(event, requestUrl) {
-  if (requestUrl.searchParams.has('admin')) return true;
-  if (!event.clientId) return false;
-  try {
-    const client = await self.clients.get(event.clientId);
-    return !!(client && /[?&]admin=1(&|$)/.test(client.url));
-  } catch { return false; }
+function savedCacheNamed(name) {
+  if (!savedMemo.has(name)) {
+    savedMemo.set(name, (async () => {
+      if (!(await caches.has(name))) return null;
+      const cache = await caches.open(name);
+      // The record is written LAST, so a cache without one is a first save still in progress
+      // (or one that failed) — not a saved copy yet.
+      return (await cache.match(RECORD_KEY)) ? cache : null;
+    })().catch(() => null));
+  }
+  return savedMemo.get(name);
 }
 
-// Serve from cache immediately if we have it (fast + works offline), and refresh the cache
-// in the background from the network so the next load picks up any admin edit — no manual
-// versioning needed since the page's own cache-busting query already forces a fresh fetch.
-// Network-first, cache as the offline fallback. Used ONLY for the small project CONFIG
-// files (alignment/plots/landmarks/amenities/tour — json, csv, svg).
-//
-// Why these can't be stale-while-revalidate: they are the output of the admin editor, and
-// SWR serves the previous copy on the first load after a save, so a freshly published menu
-// item / tour / landmark simply does not appear until the visitor reloads a SECOND time.
-// That reads as "my change didn't save" and cost a real debugging round. They are a few KB
-// each, so paying a network round-trip for correctness is cheap; images and media (large,
-// and already cache-busted by their own `_ver` token) stay on SWR.
-async function networkFirst(cache, request) {
-  const key = cacheKeyFor(request.url);
+// `clientUrl` is the page that made the request (null for a page load itself).
+async function projectFor(url, clientUrl) {
+  if (SCOPE_PATH !== '/') {
+    if (!scopePidMemo) {
+      scopePidMemo = caches.keys().then((all) => {
+        const names = all.filter((n) => n.startsWith(SAVED_PREFIX));
+        return names.length === 1 ? names[0].slice(SAVED_PREFIX.length) : null;
+      }).catch(() => null);
+    }
+    return scopePidMemo;
+  }
+  const inPath = /^projects\/([^/]+)\//.exec(url.pathname.slice(SCOPE_PATH.length));
+  let pid = (inPath && inPath[1]) || url.searchParams.get('project') || (clientUrl && clientUrl.searchParams.get('project')) || '';
+  pid = String(pid || 'sample').trim().toLowerCase();
+  return PROJECT_RE.test(pid) ? pid : null;
+}
+
+async function savedCopyFor(url, clientUrl) {
+  const pid = await projectFor(url, clientUrl);
+  return pid ? savedCacheNamed(SAVED_PREFIX + pid) : null;
+}
+
+// This app's own pages in this folder: the folder itself or its index.html (any ?query). Only
+// these open from a saved copy. Anything else under the same scope — at the site root that
+// includes other apps in sub-folders, e.g. a demo folder built for testing — is not ours, and is
+// left to the network untouched.
+function isAppPage(url) {
+  const rel = url.pathname.slice(SCOPE_PATH.length);
+  return rel === '' || rel === 'index.html';
+}
+function isProjectFile(url) {
+  return url.pathname.slice(SCOPE_PATH.length).startsWith('projects/');
+}
+
+// ─── Fetch ──────────────────────────────────────────────────────────────────
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;                           // admin saves (POST) and the like
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;            // YouTube/Vimeo/Google Sheet/CDN links
+  if (!url.href.startsWith(SCOPE_URL)) return;
+  if (url.searchParams.has(NET_PARAM)) return;                // the page's own save/update downloads
+  if (req.mode === 'navigate') {
+    if (url.searchParams.has('admin')) return;                // the admin: always live
+    // A PDF opened in a frame is a navigation too — a file of the project, so it's ours.
+    if (!isAppPage(url) && !isProjectFile(url)) return;
+  }
+  event.respondWith(handle(event, req, url));
+});
+
+async function handle(event, req, url) {
+  let clientUrl = null;
+  if (req.mode !== 'navigate' && event.clientId) {
+    try {
+      const client = await self.clients.get(event.clientId);
+      if (client) {
+        clientUrl = new URL(client.url);
+        // Requests from an admin page, or from a page that isn't this app (see isAppPage), go
+        // straight to the network. (A worker's own requests — pdf.js — count as the app's.)
+        if (clientUrl.searchParams.has('admin') || (client.type === 'window' && !isAppPage(clientUrl))) return fetch(req);
+      }
+    } catch {}
+  }
+  // A page load re-reads which projects are saved, so a copy saved or removed in another tab —
+  // or while this worker was asleep — is always picked up by the next open.
+  if (req.mode === 'navigate') forgetSaved();
+  const saved = await savedCopyFor(url, clientUrl);
+  return saved ? fromSaved(saved, req, url) : fromNetwork(req, url);
+}
+
+async function fromSaved(cache, req, url) {
+  // Opening the app → the saved index.html (a PDF opened in a frame is a navigation too, but
+  // it's a file, not the app).
+  if (req.mode === 'navigate' && !isProjectFile(url)) {
+    const page = await cache.match(new URL('index.html', SCOPE_URL).href);
+    if (!page) return notSavedPage();
+    const html = await page.text();
+    const flag = `<script>window.B91_OFFLINE_COPY = ${JSON.stringify({ worker: VERSION })};</script>`;
+    return new Response(html.replace(/<head[^>]*>/i, (m) => m + flag), {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  const res = await cache.match(cacheKeyFor(url.href));
+  if (!res) return new Response('Not in the saved copy', { status: 404, statusText: 'Not in the saved copy' });
+  const range = req.headers.get('range');
+  return range ? sliceRange(cacheKeyFor(url.href), res, range) : res;
+}
+
+async function fromNetwork(req, url) {
   try {
-    const res = await fetch(request);
-    if (res && res.ok) cache.put(key, res.clone()).catch(() => {});
-    return res;
+    return await fetch(req);
   } catch {
-    const cached = await cache.match(key);
-    if (cached) return cached;
+    const legacy = await fromLegacy(req, url);
+    if (legacy) return legacy;
+    if (req.mode === 'navigate') return notSavedPage();
     return new Response('Offline', { status: 503, statusText: 'Offline' });
   }
 }
 
-async function staleWhileRevalidate(cache, request) {
-  const key = cacheKeyFor(request.url);
-  const cached = await cache.match(key);
-  const network = fetch(request).then((res) => {
-    // cache.put can reject on its own (storage quota, most plausibly — video is what
-    // blows past it). Swallowing it here only prevents a noisy unhandled rejection; the
-    // page verifies what actually landed via verifyCachedItems (app.js) rather than
-    // trusting this to have worked.
-    if (res && res.ok) cache.put(key, res.clone()).catch(() => {});
-    return res;
-  }).catch(() => null);
-  if (cached) { network.catch(() => {}); return cached; }
-  const res = await network;
-  return res || new Response('Offline', { status: 503, statusText: 'Offline' });
+// What an older version of this worker cached for this folder (see LEGACY in the header).
+async function legacyCaches() {
+  const names = (await caches.keys()).filter((n) => n.startsWith(LEGACY_SHELL_PREFIX)
+    || n === 'b91-data' || n === 'b91-media' || n.startsWith('b91-data-') || n.startsWith('b91-media-'));
+  return Promise.all(names.map((n) => caches.open(n)));
 }
 
-// Range-requested assets (video, audio, and pdf.js's PDF reads) need their own strategy:
-// the client requests them with byte-range headers (for seeking/streaming/progressive PDF
-// rendering), and caching a single 206 partial-content response under the resource's key
-// would silently corrupt the cache (only that one slice would ever be served again). So a
-// range request is only ever answered from cache once we already hold a COMPLETE (status
-// 200) copy — sliced manually to build a proper 206 reply — and is otherwise passed
-// straight to the network, with a separate unranged fetch kicked off in the background to
-// prime the full-file cache for next time (including offline playback).
-const RANGED_BLOB_CACHE = new Map();
-
-// MOBILE browsers (iOS Safari reliably, Android often too) send a Range header on the very
-// FIRST request for a <video>/<audio> element, AND pdf.js does the same for a PDF — before
-// playback/rendering even starts, just to probe the file — where desktop browsers usually
-// send a plain GET first. Every write to the cache used to live only in
-// respondRangedAsset's `!range` branch, so on mobile the asset was never actually cached on
-// ANY visit, however many times it was opened: the "opportunistic offline caching" this
-// file exists for silently never fired for the device class it matters most for
-// (2026-09-12: reported first for video, then confirmed the exact same gap existed for the
-// PDF brochure, which wasn't even routed through this function at all until the same fix).
-// Fixed by firing this plain, unranged fetch of the same URL in the background the first
-// time a ranged request finds nothing cached yet, purely to populate the cache for next
-// time — the visible request is still answered straight from the network immediately
-// after, so playback/rendering is never held up waiting on the full download. Deduped by
-// key: several range requests for the same asset (a video's metadata probe then playback
-// then seeks; a PDF's many out-of-order page reads) arriving while that download is still
-// in flight must only ever start ONE background fetch, not one per request — once it
-// lands, `full` is set on the NEXT request and this whole priming path is skipped from
-// then on. This also fixed an incidental bandwidth waste for PDFs: before being routed
-// here, every one of pdf.js's range requests independently triggered its own
-// staleWhileRevalidate "revalidate" fetch of the same file, observed as TWO full 36MB
-// downloads for a single brochure open — now there's at most one deduped background fetch.
-// One shared tracker for "a full-file fetch of this key is already in flight," used by
-// BOTH the plain (`!range`) path below AND the ranged-priming path — not just ranged
-// requests among themselves. pdf.js in particular doesn't only make range requests: it
-// commonly issues one main, unranged streaming request for the bulk of the file ALONGSIDE
-// a few early ranged reads for out-of-order data (e.g. the xref table near the end).
-// Before this was unified, each path had its own independent "am I already fetching this"
-// check, so those two request shapes for the SAME uncached file each started their OWN
-// full download — observed directly as two separate complete 36MB fetches for a single
-// brochure open. Whichever request (ranged or not) gets here first starts the ONE fetch;
-// every other concurrent request for the same key, ranged or not, joins the same promise.
-const RANGE_PRIME_INFLIGHT = new Map();   // cache key -> in-flight full-file fetch Promise
-function fetchAndCacheFull(cache, key, url) {
-  if (RANGE_PRIME_INFLIGHT.has(key)) return RANGE_PRIME_INFLIGHT.get(key);
-  const task = fetch(url, { cache: 'no-store' })
-    .then(async (res) => {
-      // Awaited (not fire-and-forget) so a waitUntil(task) caller's stay-alive tracking
-      // actually covers the cache WRITE too, not just the network fetch finishing.
-      if (res && res.ok && res.status === 200) await cache.put(key, res.clone()).catch(() => {});
-      return res;
-    })
-    .finally(() => RANGE_PRIME_INFLIGHT.delete(key));
-  RANGE_PRIME_INFLIGHT.set(key, task);
-  return task;
-}
-
-async function respondRangedAsset(cache, request, event) {
-  const key = cacheKeyFor(request.url);
-  const full = await cache.match(key);
-  const range = request.headers.get('range');
-
-  if (full) {
-    if (!range) return full.clone();
-    let blob = RANGED_BLOB_CACHE.get(key);
-    if (!blob) {
-      blob = await full.blob();
-      RANGED_BLOB_CACHE.set(key, blob);
-      if (RANGED_BLOB_CACHE.size > 5) {
-        const oldestKey = RANGED_BLOB_CACHE.keys().next().value;
-        RANGED_BLOB_CACHE.delete(oldestKey);
+async function fromLegacy(req, url) {
+  try {
+    const opened = await legacyCaches();
+    if (!opened.length) return null;
+    const keys = req.mode === 'navigate' && !isProjectFile(url)
+      ? [cacheKeyFor(url.href), cacheKeyFor('./index.html')]
+      : [cacheKeyFor(url.href)];
+    for (const key of keys) {
+      for (const cache of opened) {
+        const res = await cache.match(key);
+        if (!res) continue;
+        const range = req.headers.get('range');
+        return range ? sliceRange(key, res, range) : res;
       }
     }
-    return sliceRange(blob, range, full.headers.get('Content-Type') || 'application/octet-stream');
-  }
-
-  if (!range) {
-    // Nothing cached yet, and this request already wants the whole file — it CAN be the
-    // caching fetch itself, so it joins the same shared tracker instead of always
-    // starting its own independent fetch (that dedup matters when a ranged probe for the
-    // same key got here microseconds earlier and is already mid-download).
-    try { return (await fetchAndCacheFull(cache, key, request.url)).clone(); }
-    catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
-  }
-
-  // Ranged AND nothing cached yet — mobile's own metadata-probe request (or pdf.js's first
-  // page read) lands here. Answer it from the network immediately so playback/rendering
-  // isn't held up, but keep the priming fetch alive past this handler's own return via
-  // waitUntil — otherwise the browser is free to tear the worker down the instant this
-  // response is sent, cutting the download short.
-  event.waitUntil(fetchAndCacheFull(cache, key, request.url));
-  try { return await fetch(request); } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
+  } catch {}
+  return null;
 }
 
-function sliceRange(blob, rangeHeader, contentType) {
+// ─── Byte ranges ────────────────────────────────────────────────────────────
+// <video>/<audio> and pdf.js read files in byte ranges. The cache holds whole files, so a range
+// request is answered by slicing the stored copy. A few recently used files are kept as Blobs so
+// seeking through one video doesn't re-read it from the cache on every request.
+const RANGED_BLOBS = new Map();                                 // key → Blob (most recent last)
+async function sliceRange(key, res, rangeHeader) {
+  let blob = RANGED_BLOBS.get(key);
+  if (!blob) {
+    blob = await res.blob();
+    RANGED_BLOBS.set(key, blob);
+    while (RANGED_BLOBS.size > 3) RANGED_BLOBS.delete(RANGED_BLOBS.keys().next().value);
+  }
+  const contentType = res.headers.get('Content-Type') || 'application/octet-stream';
   const total = blob.size;
   const m = /bytes=(\d*)-(\d*)/.exec(rangeHeader || '');
   let start = m && m[1] ? parseInt(m[1], 10) : 0;
   let end = m && m[2] ? parseInt(m[2], 10) : total - 1;
   if (Number.isNaN(start)) start = 0;
   if (Number.isNaN(end) || end >= total) end = total - 1;
-  const chunk = blob.slice(start, end + 1, contentType);
-  return new Response(chunk, {
+  return new Response(blob.slice(start, end + 1, contentType), {
     status: 206,
     statusText: 'Partial Content',
     headers: {
@@ -332,72 +259,25 @@ function sliceRange(blob, rangeHeader, contentType) {
   });
 }
 
-self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return; // never intercept admin saves (POST) or anything else
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // never touch cross-origin (YouTube/Vimeo/CDN links)
-
-  const isProjectAsset = url.pathname.includes('/projects/') || url.pathname.includes('/data/');
-
-  // A browser treats an <iframe src="...pdf"> as a navigation of that nested frame — same
-  // `mode: 'navigate'` as loading the actual page. The Brochure viewer does exactly this
-  // (openClientBrochureModal sets an <iframe>'s src straight to the PDF path). Route that
-  // case as a plain data asset (cache/serve the PDF itself) BEFORE the real-page-navigation
-  // branch below, whose offline fallback assumes it's always safe to hand back the cached
-  // app shell — correct for reopening the app itself, but it was wrongly serving the whole
-  // index.html *inside* the brochure iframe whenever the PDF wasn't cached and the network
-  // was down, instead of either the cached PDF or a clean failure.
-  if (req.mode === 'navigate' && isProjectAsset) {
-    event.respondWith((async () => staleWhileRevalidate(await caches.open(DATA_CACHE), req))());
-    return;
-  }
-
-  if (req.mode === 'navigate') {
-    if (url.searchParams.has('admin')) return; // admin document load — untouched, straight to network
-    event.respondWith((async () => {
-      const cache = await caches.open(SHELL_CACHE);
-      const cached = (await cache.match(cacheKeyFor(req.url))) || (await cache.match(cacheKeyFor('./index.html')));
-      const network = fetch(req).then((res) => {
-        if (res.ok) cache.put(cacheKeyFor(req.url), res.clone()).catch(() => {});
-        return res;
-      });
-      // Nothing cached yet (first ever visit) — the network is the only option.
-      if (!cached) {
-        try { return await network; }
-        catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
-      }
-      // True stale-while-revalidate: serve the cached copy INSTANTLY so the app opens
-      // with zero delay regardless of signal strength, and let the network fetch run in
-      // the background to refresh the cache for the NEXT visit. The old 2500ms race was
-      // well-intentioned (always serve the freshest copy when online) but caused a
-      // noticeable blank/spinner every open on a weak signal — unacceptable for an app
-      // that was downloaded specifically to avoid that. A hard-offline visit gets the
-      // cached copy just as fast; an online visit gets it equally fast and picks up any
-      // updates on the following open instead of this one.
-      network.catch(() => {}); // background refresh — failure is fine, cache still valid
-      return cached;
-    })());
-    return;
-  }
-
-  event.respondWith((async () => {
-    if (await isAdminRequest(event, url)) return fetch(req);
-
-    if (isRangedCacheablePath(url.pathname)) return respondRangedAsset(await caches.open(MEDIA_CACHE), req, event);
-
-    if (SHELL_URLS.some((u) => cacheKeyFor(u) === cacheKeyFor(req.url))) {
-      return staleWhileRevalidate(await caches.open(SHELL_CACHE), req);
-    }
-
-    if (isProjectAsset) {
-      // Config (the admin's output) must be fresh when online; media stays SWR.
-      const cache = await caches.open(DATA_CACHE);
-      return /\.(json|csv|svg)$/i.test(url.pathname)
-        ? networkFirst(cache, req)
-        : staleWhileRevalidate(cache, req);
-    }
-
-    try { return await fetch(req); } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
-  })());
-});
+// ─── "Not saved on this device" ─────────────────────────────────────────────
+function notSavedPage() {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not saved on this device</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #0c0d11; color: #e8e6df;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { min-height: 100%; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; }
+  h1 { font-size: 18px; margin: 0 0 8px; color: #d4af37; font-weight: 600; }
+  p { margin: 0 0 6px; max-width: 420px; color: #a9a79f; }
+  button { margin-top: 18px; padding: 10px 20px; border-radius: 999px; border: 1px solid #d4af37;
+    background: transparent; color: #d4af37; font: inherit; }
+</style></head><body><main>
+  <h1>This project isn't saved on this device</h1>
+  <p>Connect to the internet and open it again.</p>
+  <p>To use it without a connection, open the menu and choose <strong>Save for offline</strong>.</p>
+  <button type="button" onclick="location.reload()">Try again</button>
+</main></body></html>`;
+  return new Response(html, { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+}

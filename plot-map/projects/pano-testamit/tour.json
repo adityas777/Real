@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 virtual tours",
-  "savedAt": "2026-09-08T14:13:09.518Z",
+  "savedAt": "2026-09-09T07:49:41.589Z",
   "tours": [
     {
       "id": "t1",
@@ -10,19 +10,19 @@
       "nodes": [
         {
           "id": "n1",
-          "name": "01-master-bedroom.web",
+          "name": "Master Bed 1",
           "pano": {
             "file": "sample/tour-t1-n1.web.jpg"
           },
           "defaultView": {
-            "lonDeg": -175.03,
-            "latDeg": -16,
-            "fov": 75
+            "lonDeg": -539.59,
+            "latDeg": -12.1,
+            "fov": 63
           }
         },
         {
           "id": "n2",
-          "name": "1._Master_Bedroom",
+          "name": "Living",
           "pano": {
             "file": "sample/tour-t1-n2.web.jpg"
           },
@@ -34,7 +34,7 @@
         },
         {
           "id": "n3",
-          "name": "02-bedroom.web",
+          "name": "Bedroom 2",
           "pano": {
             "file": "sample/tour-t1-n3.web.jpg"
           },
@@ -51,8 +51,8 @@
           "to": "n2",
           "label": "",
           "hotspot": {
-            "lonDeg": -16.24,
-            "latDeg": -24.59
+            "lonDeg": -19.42,
+            "latDeg": -14.78
           }
         },
         {

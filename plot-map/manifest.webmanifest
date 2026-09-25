@@ -1,7 +1,7 @@
 {
   "name": "Build91 Interactive Plot Map",
   "short_name": "Build91",
-  "description": "Browse the plot layout, landmarks, and amenities — works offline once opened.",
+  "description": "Browse the plot layout, landmarks, and amenities — works offline once saved.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

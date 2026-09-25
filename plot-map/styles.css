@@ -336,8 +336,9 @@ body {
 .chip:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .chip .dot { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 0 3px rgba(255,255,255,.04); }
 .chip .count { color: var(--text-mute); font-variant-numeric: tabular-nums; }
-.chip[aria-pressed="false"] { opacity: .4; filter: grayscale(.6); }
-.chip[aria-pressed="false"] .count { text-decoration: line-through; }
+/* Status chips are independent on/off toggles, OFF by default on the client (2026-09-25): on =
+   lit (gold border + tint), off = plain. Each chip's look depends on its own state only. */
+.chip[aria-pressed="true"] { border-color: var(--gold-soft); color: var(--text); background: rgba(212,175,55,.14); }
 
 .chip[data-status="available"] .dot { background: var(--available); }
 .chip[data-status="reserved"]  .dot { background: var(--reserved); }
@@ -389,10 +390,9 @@ body:not(.is-admin) .zoom-status-group .area-filter-sel.is-floating { order: -1;
 .zoom-status-btn[data-status="reserved"] .dot { background: var(--reserved); }
 .zoom-status-btn[data-status="sold"] .dot { background: var(--sold); }
 .zoom-status-btn .count { color: var(--text-mute); font-variant-numeric: tabular-nums; }
-/* "On" is the louder state: a lit border reads as active without needing a label. */
-.zoom-status-btn[aria-pressed="true"] { border-color: var(--gold-soft, rgba(212,175,55,.5)); }
-.zoom-status-btn[aria-pressed="false"] { opacity: .45; filter: grayscale(.6); }
-.zoom-status-btn[aria-pressed="false"] .count { text-decoration: line-through; }
+/* Same scheme as the header chips (see .chip above): an independent toggle each — on = lit
+   (gold border + tint), off = plain. */
+.zoom-status-btn[aria-pressed="true"] { border-color: var(--gold-soft, rgba(212,175,55,.5)); background: rgba(58,49,18,.92); }
 
 /* ─── Rotate-to-landscape hint (portrait phone, client only) ─────────────────── */
 /* A BLOCKING gate, not an overlay hint: on a portrait phone the content isn't shown at all
@@ -937,54 +937,75 @@ body.is-admin .compass { display: none; }
 }
 .notice strong { color: var(--reserved); }
 
-/* ─── Offline-save banner (client-only: ONE combined "Add to Home Screen" + offline
-   content-download prompt, app.js) — a single tap fires the native install dialog and
-   starts the content download together; previously two separate banners shown back to
-   back, merged into this one per the user's explicit request. Sized to comfortably hold
-   the progress bar once downloading starts. ───────────────────────────────────────── */
-.offline-save-banner {
+/* ─── Offline panel (client-only, phones & tablets) — opened ONLY from the client menu's
+   "SAVE FOR OFFLINE" / "UPDATE OFFLINE COPY" row (app.js openOfflinePanel; MOBILE-OFFLINE.md).
+   A first save, an update, removing the copy, and the iPhone "add to Home Screen first" guide
+   all happen here. Nothing about offline is shown on the home view. ─────────────────────── */
+.offline-panel {
   position: absolute;
   left: 50%; bottom: 16px;
   transform: translateX(-50%);
   z-index: 26;
-  width: min(94vw, 460px);
-  background: rgba(21,23,30,.94);
+  width: min(94vw, 440px);
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  background: rgba(21,23,30,.96);
   backdrop-filter: blur(8px);
   border: 1px solid var(--gold-soft, rgba(212,175,55,.5));
   border-radius: 14px;
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
   box-shadow: 0 12px 30px rgba(0,0,0,.5);
   animation: pop .22s var(--ease);
 }
-/* explicit [hidden] override, stated defensively — this element has no unconditional
-   `display` of its own today so isn't actually affected, but a class/element selector
-   setting `display` unconditionally silently beats `[hidden]` if declared later in the
-   cascade (equal specificity) — bit this project three times already (see CLAUDE.md's
-   Conventions & gotchas), so this is here so a future edit can't reintroduce it by accident. */
-.offline-save-banner[hidden] { display: none; }
+/* explicit [hidden] override — a class selector setting `display` unconditionally silently
+   beats `[hidden]` if declared later in the cascade (see CLAUDE.md's Conventions & gotchas). */
+.offline-panel[hidden], .offline-panel [hidden] { display: none; }
 @media (max-width: 480px) {
-  .offline-save-banner { left: 10px; right: 10px; bottom: 10px; transform: none; width: auto; }
+  .offline-panel { left: 10px; right: 10px; bottom: 10px; transform: none; width: auto; }
 }
-.offline-save-prompt { display: flex; align-items: center; gap: 10px; }
-.offline-save-icon { font-size: 18px; flex: none; color: var(--gold); }
-.offline-save-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-.offline-save-text strong { font-size: 13px; }
-.offline-save-text span { font-size: 11.5px; color: var(--text-mute); }
-.offline-save-skip { padding: 7px 12px; font-size: 12.5px; flex: none; background: transparent; }
-.offline-save-go { padding: 7px 14px; font-size: 12.5px; flex: none; }
-.offline-save-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.offline-save-progress-head strong { font-size: 13px; }
-.offline-save-progress-head span { font-size: 11px; color: var(--text-mute); white-space: nowrap; }
+.offline-panel-head { display: flex; align-items: center; gap: 10px; }
+.offline-panel-icon { font-size: 17px; flex: none; color: var(--gold); }
+.offline-panel-head strong { flex: 1; font-size: 14px; }
+.offline-panel-close { flex: none; width: 30px; height: 30px; font-size: 18px; line-height: 1; }
+.offline-panel-body { margin-top: 6px; }
+.offline-panel-body p { margin: 5px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--text-dim); }
+.offline-panel-body p.is-muted { color: var(--text-mute); font-size: 12px; }
+.offline-panel-body p.is-warn { color: var(--reserved); }
+.offline-panel-body p.is-good { color: var(--available); }
+.offline-panel-steps { margin: 8px 0 0; padding-left: 20px; font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
+.offline-panel-steps li { margin: 4px 0; }
+.offline-panel-share { display: inline-block; width: 15px; height: 15px; vertical-align: -2px; color: var(--gold); }
+.offline-panel-progress { margin-top: 10px; }
+.offline-panel-progress-meta {
+  display: flex; justify-content: space-between; gap: 10px; margin-top: 5px;
+  font-size: 11px; color: var(--text-mute); font-variant-numeric: tabular-nums;
+}
+.offline-panel-keep { margin: 6px 0 0; font-size: 11.5px; color: var(--text-mute); }
+.offline-panel-result { margin: 10px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--text); }
+.offline-panel-result.is-warn { color: var(--reserved); }
+.offline-panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.offline-panel-remove { margin-right: auto; padding: 7px 10px; font-size: 12px; background: transparent; color: var(--text-mute); }
+.offline-panel-remove.is-armed { color: var(--sold); border-color: var(--sold); }
+.offline-panel-go { padding: 8px 16px; font-size: 12.5px; }
 .offline-save-bar {
-  margin-top: 8px; height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden;
+  height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden;
 }
 .offline-save-bar-fill {
   height: 100%; width: 0%; border-radius: 999px;
   background: linear-gradient(90deg, var(--gold-soft), var(--gold));
   transition: width .25s var(--ease);
 }
-.offline-save-pct {
-  display: block; margin-top: 5px; font-size: 11px; color: var(--text-mute); font-variant-numeric: tabular-nums;
+/* "Update available" dot on the menu row (checked quietly when the menu opens) */
+.cat-btn-dot {
+  display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%;
+  background: var(--gold); vertical-align: 1px; box-shadow: 0 0 0 3px rgba(212,175,55,.18);
+}
+/* "Availability as of …" — shown wherever plot status is read while running a saved copy */
+.panel-asof { margin: 8px 0 0; font-size: 11px; color: var(--text-mute); }
+.panel-asof[hidden] { display: none; }
+.area-menu-asof {
+  padding: 7px 10px 4px; margin-top: 4px; border-top: 1px solid var(--line);
+  font-size: 10.5px; color: var(--text-mute); white-space: nowrap;
 }
 
 /* ─── Info popover (plot hotspot card) ──────────────────────────────────────── */
@@ -1446,6 +1467,15 @@ body.is-admin .compass { display: none; }
 .trace-dxflayer[hidden] { display: none; }
 .trace-dxflayer select, .trace-status { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
 .trace-count { font-size: 11px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .6px; margin: 0; flex: none; }
+.trace-count.is-warn { color: var(--reserved); }
+/* Auto-numbering prefix (nextPlotId) */
+.trace-numbering { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: end; }
+.trace-prefix-row { display: grid; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.trace-prefix-row input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12px; }
+.trace-prefix-row input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+.trace-numbering .btn { padding: 6px 12px; font-size: 12px; }
+.trace-next { grid-column: 1 / -1; margin: 0; font-size: 11.5px; color: var(--text-mute); }
+.trace-next strong { color: var(--gold-soft); font-weight: 700; }
 /* flex:1 + min-height:0 is what actually makes this scroll inside .trace-plots — a flex
    item's default min-height:auto refuses to shrink below its content, so overflow-y alone
    would just push the list past the column instead of scrolling it (the recurring trap
@@ -1454,11 +1484,15 @@ body.is-admin .compass { display: none; }
 .trace-li { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 5px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--bg); cursor: pointer; }
 .trace-li.is-sel { border-color: var(--gold); }
 .trace-id { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
+/* A number more than one plot holds — can't match the sheet 1-to-1 until renamed. */
+.trace-li.is-dup { border-color: rgba(240, 189, 69, .55); }
+.trace-li.is-dup .trace-id { border-color: var(--reserved); background: rgba(240, 189, 69, .1); }
 .trace-status-sheet-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--status-available, #34c77b); flex-shrink: 0;
 }
 .trace-status-sheet-dot[hidden] { display: none; }
+.trace-status-sheet-dot.is-warn { background: var(--reserved); }
 .trace-del { width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-size: 15px; line-height: 1; }
 .trace-del:hover { color: #e3b341; border-color: #5a4a2a; }
 .trace-edit { grid-column: 1 / -1; display: grid; gap: 7px; margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--line); cursor: default; }
@@ -1470,6 +1504,8 @@ body.is-admin .compass { display: none; }
   background: rgba(52, 199, 123, 0.14);
   border-radius: 4px; padding: 1px 5px;
 }
+.trace-field-sheet-badge[hidden] { display: none; }
+.trace-field-sheet-badge.is-warn { color: var(--reserved); background: rgba(240, 189, 69, .14); }
 .trace-field input { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
 .trace-field input:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
 .trace-media-box { display: grid; gap: 6px; background: var(--panel-2); padding: 8px; border-radius: 6px; border: 1px solid var(--line); margin-top: 4px; }
@@ -2078,6 +2114,44 @@ body.is-admin .cat-drawer { display: none !important; }
   gap: 16px;
   background: transparent; /* .modal-body defaults to solid black (for video/image modals) — this wizard sits on the dialog's own dark panel color instead */
 }
+
+/* ☁ Publish to web dialog (#publishModal). Every piece toggled via [hidden] also sets its own
+   display below, so each gets an explicit [hidden] rule — see the CLAUDE.md gotcha. */
+.publish-body { gap: 14px; padding: 18px; }
+.publish-status { font-size: 13.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.publish-status.is-bad { color: var(--sold); font-weight: 500; }
+.publish-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--unknown); flex: none; }
+.publish-dot.is-live { background: var(--available); box-shadow: 0 0 0 3px rgba(58, 209, 127, .18); }
+.publish-link { display: flex; gap: 8px; align-items: center; }
+.publish-link[hidden] { display: none; }
+.publish-link input {
+  flex: 1; min-width: 0; font: inherit; font-size: 12.5px; color: var(--gold-soft);
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.publish-link .btn { font-size: 12px; padding: 7px 10px; text-decoration: none; }
+.publish-note { margin: 0; font-size: 12px; line-height: 1.45; color: var(--text-dim); }
+.publish-note strong { color: var(--text); font-weight: 600; word-break: break-all; }
+.publish-pass { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.publish-pass[hidden] { display: none; }
+.publish-pass input {
+  font: inherit; font-size: 13px; color: var(--text);
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.publish-pass input:focus { outline: none; border-color: var(--gold); }
+.publish-progress { display: flex; flex-direction: column; gap: 6px; }
+.publish-progress[hidden] { display: none; }
+.publish-progress-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .08); overflow: hidden; }
+.publish-progress-bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--gold), var(--gold-soft)); transition: width .3s var(--ease); }
+.publish-progress-text { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+.publish-error { font-size: 12.5px; line-height: 1.45; color: #ffb4ae; background: rgba(224, 106, 98, .12);
+  border: 1px solid rgba(224, 106, 98, .35); border-radius: var(--radius-sm); padding: 8px 10px; }
+.publish-error[hidden] { display: none; }
+.publish-actions { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-top: 1px solid rgba(255, 255, 255, .1); }
+.publish-actions .btn { font-size: 12px; }
+.publish-actions-gap { flex: 1; }
+.publish-actions .btn.is-danger { color: var(--sold); border-color: rgba(224, 106, 98, .45); }
+.publish-actions .btn.is-danger:hover:not(:disabled) { background: rgba(224, 106, 98, .12); }
+.publish-actions .btn[hidden] { display: none; }
 .custom-modal-desc {
   margin: 0;
   font-size: 13px;
