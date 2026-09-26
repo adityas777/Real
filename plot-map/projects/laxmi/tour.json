@@ -1,99 +1,78 @@
 {
   "version": 1,
   "note": "Build91 virtual tours",
-  "savedAt": "2026-09-22T06:46:08.054Z",
+  "savedAt": "2026-09-25T12:38:52.741Z",
   "tours": [
     {
-      "id": "t1",
+      "id": "t4",
       "name": "Tour 1",
       "startNode": "n1",
       "nodes": [
         {
           "id": "n1",
-          "name": "LIVING_ROOM_FURNISHED",
+          "name": "Living_Curtainclose_1_",
           "pano": {
-            "file": "sample/tour-t1-n1.web.jpg"
-          },
-          "panoAlt": {
-            "file": "sample/tour-t1-n1-b.web.jpg"
+            "file": "sample/tour-t4-n1.web.jpg"
           },
           "defaultView": {
-            "lonDeg": 175.66,
-            "latDeg": 2.06,
-            "fov": 95
+            "lonDeg": 178.28,
+            "latDeg": -6.83,
+            "fov": 89
           }
         },
         {
           "id": "n2",
-          "name": "KITCHEN_FURNISHED",
+          "name": "Curtains_open",
           "pano": {
-            "file": "sample/tour-t1-n2.web.jpg"
-          },
-          "defaultView": {
-            "lonDeg": 174.63,
-            "latDeg": -5.84,
-            "fov": 120
-          }
-        },
-        {
-          "id": "n3",
-          "name": "LIVING_ROOM_WINDOW_VIEW_FURNISHED",
-          "pano": {
-            "file": "sample/tour-t1-n3.web.jpg"
+            "file": "sample/tour-t4-n2.web.jpg"
           },
           "isView": true,
           "viewOf": "n1",
           "defaultView": {
-            "lonDeg": -179.51,
-            "latDeg": -0.16,
-            "fov": 106
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
+          }
+        },
+        {
+          "id": "n3",
+          "name": "Curtains_Close",
+          "pano": {
+            "file": "sample/tour-t4-n3.web.jpg"
+          },
+          "isView": true,
+          "viewOf": "n1",
+          "defaultView": {
+            "lonDeg": 0,
+            "latDeg": 0,
+            "fov": 75
           }
         }
       ],
       "links": [
         {
           "from": "n1",
-          "to": "n2",
-          "label": "",
-          "hotspot": {
-            "lonDeg": 134.16,
-            "latDeg": -28.82
-          },
-          "icon": "chevron",
-          "rot": 306
-        },
-        {
-          "from": "n1",
           "to": "n3",
           "label": "",
           "hotspot": {
-            "lonDeg": 168.26,
-            "latDeg": -17.3
+            "lonDeg": -169.89,
+            "latDeg": 0.88
           },
-          "icon": "chevron",
+          "icon": "ring",
+          "rot": 0
+        },
+        {
+          "from": "n1",
+          "to": "n2",
+          "label": "",
+          "hotspot": {
+            "lonDeg": -169.89,
+            "latDeg": 0.88
+          },
+          "icon": "ring",
           "rot": 0
         }
       ]
-    },
-    {
-      "id": "t2",
-      "name": "Tour 2",
-      "startNode": "n1",
-      "nodes": [
-        {
-          "id": "n1",
-          "name": "KITCHEN_FURNISHED",
-          "pano": {
-            "file": "sample/tour-t2-n1.web.jpg"
-          },
-          "defaultView": {
-            "lonDeg": 174.58,
-            "latDeg": -3.5,
-            "fov": 101
-          }
-        }
-      ],
-      "links": []
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "note": "Build91 landmark hotspots",
-  "savedAt": "2026-09-25T04:39:24.950Z",
+  "savedAt": "2026-09-25T11:52:55.038Z",
   "landmarks": [
     {
       "id": "lm1",
@@ -16,8 +16,8 @@
         "latDeg": -3.96
       },
       "banner": {
-        "lonDeg": 23.26,
-        "latDeg": 5.49
+        "lonDeg": 24.82,
+        "latDeg": 4.98
       }
     },
     {
@@ -33,8 +33,8 @@
         "latDeg": -3.13
       },
       "banner": {
-        "lonDeg": -41.73,
-        "latDeg": 35.43
+        "lonDeg": -43.7,
+        "latDeg": 30.46
       }
     },
     {
@@ -67,8 +67,8 @@
         "latDeg": -1.87
       },
       "banner": {
-        "lonDeg": 3.1,
-        "latDeg": 30.09
+        "lonDeg": 4.64,
+        "latDeg": 27.56
       }
     },
     {
@@ -84,8 +84,8 @@
         "latDeg": -1.6
       },
       "banner": {
-        "lonDeg": 20.35,
-        "latDeg": 18.08
+        "lonDeg": 23.55,
+        "latDeg": 16.55
       }
     },
     {
@@ -118,8 +118,8 @@
         "latDeg": -2.35
       },
       "banner": {
-        "lonDeg": -27.08,
-        "latDeg": 10.73
+        "lonDeg": -30.57,
+        "latDeg": 10.08
       }
     },
     {
@@ -135,8 +135,8 @@
         "latDeg": -6.23
       },
       "banner": {
-        "lonDeg": -14.99,
-        "latDeg": 39.84
+        "lonDeg": -13.44,
+        "latDeg": 35.6
       }
     },
     {
@@ -148,12 +148,12 @@
       "featured": true,
       "category": "COMMERCIAL",
       "hotspot": {
-        "lonDeg": 36.95,
-        "latDeg": -2.89
+        "lonDeg": 32.2,
+        "latDeg": -3.81
       },
       "banner": {
-        "lonDeg": 37.06,
-        "latDeg": 9.04
+        "lonDeg": 35.03,
+        "latDeg": 7.45
       }
     },
     {
@@ -186,8 +186,8 @@
         "latDeg": -1.52
       },
       "banner": {
-        "lonDeg": -65.01,
-        "latDeg": 9.7
+        "lonDeg": -59.72,
+        "latDeg": 10.15
       }
     },
     {
@@ -254,8 +254,8 @@
         "latDeg": -2.14
       },
       "banner": {
-        "lonDeg": -46.45,
-        "latDeg": 21.35
+        "lonDeg": -50.17,
+        "latDeg": 20.65
       }
     },
     {
