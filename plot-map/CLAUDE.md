@@ -594,6 +594,10 @@ Top-down, by section header:
   links carrying `toggle:true`; clicking either link calls `tourGoTo(...,{holdView:true})`
   so yaw/pitch/FOV stay fixed while the alternate panorama crossfades in. The dialog asks
   for both action labels, validates before decoding, and remains open on a decode failure.
+  **Twins share hotspots (2026-09-26):** `toggleGroupOf(tour, nodeId)` = nodes joined by
+  `toggle:true` links; `rebuildTourHotspotDOM` also draws the twins' non-toggle links (own link
+  to the same target wins), flagged `.is-shared`. Per view the admin can hide one (`hideIn: [nodeId]`, "Show here"
+  switch in the Tour tab panel) or drag it (`pos[nodeId]`); label/target/delete stay on the owner.
   **Each link carries `icon` + `rot`** (2026-09-18) — which marker it draws as
   (`TOUR_HS_ICONS`: chevron/stairs/door/ring, **SVG not emoji**, since these must rotate and
   animate) and which way an aimable one points. Entries declare `rotatable` (gates the admin

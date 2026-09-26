@@ -3921,7 +3921,7 @@ function buildSession() {                                // a complete snapshot 
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null,
         panoAlt: n.panoAlt || null, panoAltBlob: n.panoAltBlob || null, isView: !!n.isView, viewOf: n.viewOf || null,
         defaultView: { ...n.defaultView } })),
-      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot }, icon: k.icon, rot: k.rot, variant: k.variant || null })),
+      links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { ...k.hotspot }, icon: k.icon, rot: k.rot, variant: k.variant || null, toggle: !!k.toggle, hideIn: [...(k.hideIn || [])], pos: k.pos ? JSON.parse(JSON.stringify(k.pos)) : {} })),
       maps: (t.maps || []).map((m) => ({ id: m.id, file: m.file, blob: m.blob || null, points: (m.points || []).map((p) => ({ ...p })) })) })),
   };
 }
@@ -6504,7 +6504,9 @@ function parseTours(d) {
     // pointing straight up already reads as "through here".
     const links = (Array.isArray(t.links) ? t.links : []).map((k) => ({ from: k.from, to: k.to, label: (k.label || '').toString(), hotspot: normLL(k.hotspot),
       icon: TOUR_HS_ICON_ORDER.includes(k.icon) ? k.icon : TOUR_HS_ICON_DEFAULT, rot: normDeg(+k?.rot || 0),
-      variant: normVariantTag(k?.variant) }))
+      variant: normVariantTag(k?.variant), toggle: !!k?.toggle,
+      hideIn: Array.isArray(k?.hideIn) ? k.hideIn.map(String).filter((id) => nodeIds.has(id)) : [],
+      pos: (k?.pos && typeof k.pos === 'object') ? Object.fromEntries(Object.entries(k.pos).map(([id, v]) => [id, normLL(v)]).filter(([id, v]) => v && nodeIds.has(id))) : {} }))
       .filter((k) => nodeIds.has(k.from) && nodeIds.has(k.to) && k.hotspot);   // drop links to deleted nodes
     // Optional isometric / floor-plan image(s) for this tour — MULTIPLE per tour
     // (2026-09-18, on request: the client gets a switch button to flip between them, e.g.
@@ -6554,7 +6556,9 @@ function buildToursData() {
           ...(n.defaultView.facingDir ? { facingDir: n.defaultView.facingDir } : {}) } })),
       links: t.links.map((k) => ({ from: k.from, to: k.to, label: k.label, hotspot: { lonDeg: +k.hotspot.lon.toFixed(2), latDeg: +k.hotspot.lat.toFixed(2) },
         icon: k.icon || TOUR_HS_ICON_DEFAULT, rot: Math.round(normDeg(k.rot)),
-        ...(k.variant ? { variant: k.variant } : {}) })),
+        ...(k.variant ? { variant: k.variant } : {}), ...(k.toggle ? { toggle: true } : {}),
+        ...(k.hideIn && k.hideIn.length ? { hideIn: [...k.hideIn] } : {}),
+        ...(k.pos && Object.keys(k.pos).length ? { pos: Object.fromEntries(Object.entries(k.pos).map(([id, v]) => [id, { lonDeg: +v.lon.toFixed(2), latDeg: +v.lat.toFixed(2) }])) } : {}) })),
       ...((t.maps || []).some((m) => m.file) ? { maps: t.maps.filter((m) => m.file).map((m) => ({ id: m.id, file: m.file,
         points: (m.points || []).map((p) => ({ nodeId: p.nodeId, x: +(+p.x).toFixed(4), y: +(+p.y).toFixed(4), rot: Math.round(normDeg(p.rot)) })) })) } : {}) })) };
 }
@@ -6611,6 +6615,7 @@ async function addTourNodeFromFile(file) {
   // (a 15-byte file on disk that silently fails to decode).
   let out; try { out = await resizeImageToBlob(file, cap, 'image/jpeg', 0.85); } catch { setAxStatus('Could not read that image as a panorama.'); return; }
   const id = 'n' + (nodeSeqFor(t) + 1);
+  forgetTourNodeTex(t.id, id);                          // an id reused after a delete must not show the old image
   const base = (file.name || 'node').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const node = { id, name: base || ('Node ' + (t.nodes.length + 1)), pano: `sample/tour-${t.id}-${id}.web.jpg`, panoBlob: out.blob, _ver: '', _url: null,
     defaultView: { lon: 0, lat: 0, fov: 75, facingDir: null } };
@@ -6674,7 +6679,7 @@ async function addTourViewFromFile(file) {
   const owner = tour.nodes.find((n) => n.id === state.tourViewTarget); if (!owner) return;
   const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
   let out; try { out = await resizeImageToBlob(file, cap, 'image/jpeg', 0.85); } catch { setAxStatus('Could not read that image as a panorama.'); return; }
-  const id = 'n' + (nodeSeqFor(tour) + 1);
+  const id = 'n' + (nodeSeqFor(tour) + 1); forgetTourNodeTex(tour.id, id);
   const base = (file.name || 'view').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
   tour.nodes.push({ id, name: base || 'View', pano: `sample/tour-${tour.id}-${id}.web.jpg`, panoBlob: out.blob, _ver: '', _url: null,
     panoAlt: null, panoAltBlob: null, _urlAlt: null, isView: true, viewOf: owner.id,
@@ -6687,6 +6692,77 @@ async function addTourViewFromFile(file) {
   state.tourHsSel = tour.links.length - 1;
   rebuildTourHotspotDOM(); refreshTourList(); onToursChanged(); renderTourVariantBar();
   setAxStatus(`View “${esc(base || 'View')}” added to ${esc(owner.name)}. Drag its hotspot into place, then open the view (▶) to set its start angle and add a hotspot back.`);
+}
+// A TOGGLE: two panoramas of the same physical spot (curtains open/closed, lights on/off)
+// with one hotspot each way, both tagged `toggle:true`. One dialog does the whole thing —
+// unlike the plain view above, the admin doesn't set up the return hotspot by hand.
+// The view's defaultView is stamped with the CURRENT camera (lon/lat/fov) so opening it
+// directly from the node list (▶) still lands somewhere sensible, but tourGoTo never
+// actually reads it for a toggle jump — see `holdView` there — because the whole point is
+// that the two panoramas are the same framing and the camera must not move at all.
+async function addTourTogglePair(file, nameIn, nameBack) {
+  const tour = curTourView(), tv = state.tourView;
+  if (!tour || !tv || !file) return;
+  const owner = tour.nodes.find((n) => n.id === tv.nodeId); if (!owner) return;
+  const cap = Math.min(PANO_TEX_CAP, gpuMaxTexSize());
+  let out; try { out = await resizeImageToBlob(file, cap, 'image/jpeg', 0.85); } catch { setAxStatus('Could not read that image as a panorama.'); return; }
+  const id = 'n' + (nodeSeqFor(tour) + 1); forgetTourNodeTex(tour.id, id);
+  const lonDeg = state.view.lon * 180 / Math.PI, latDeg = state.view.lat * 180 / Math.PI;
+  tour.nodes.push({ id, name: nameIn || 'View', pano: `sample/tour-${tour.id}-${id}.web.jpg`, panoBlob: out.blob, _ver: '', _url: null,
+    panoAlt: null, panoAltBlob: null, _urlAlt: null, isView: true, viewOf: owner.id,
+    defaultView: { lon: lonDeg, lat: latDeg, fov: state.view.fov, facingDir: owner.defaultView.facingDir } });
+  const fwd = new THREE.Vector3(); three.camera.getWorldDirection(fwd);
+  const hotspot = lonLatFromDir(fwd);
+  tour.links.push({ from: owner.id, to: id, label: nameIn, hotspot, icon: TOUR_HS_ICON_DEFAULT, rot: 0, variant: null, toggle: true });
+  tour.links.push({ from: id, to: owner.id, label: nameBack, hotspot, icon: TOUR_HS_ICON_DEFAULT, rot: 0, variant: null, toggle: true });
+  state.tourHsSel = tour.links.length - 2;
+  rebuildTourHotspotDOM(); refreshTourList(); onToursChanged(); renderTourVariantBar();
+  setAxStatus(`Toggle added to ${esc(owner.name)}: “${esc(nameIn)}” ↔ “${esc(nameBack)}”. Drag either hotspot into place if needed.`);
+}
+function openTogglePairDialog() {
+  const tv = state.tourView, tour = curTourView();
+  const room = tour?.nodes.find((n) => n.id === tv?.nodeId);
+  if (!room) return;
+  document.getElementById('togglePairDlg')?.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'togglePairDlg'; wrap.className = 'toggle-dlg-backdrop';
+  wrap.innerHTML = `
+    <div class="toggle-dlg" role="dialog" aria-modal="true" aria-labelledby="toggleDlgTitle">
+      <h3 id="toggleDlgTitle">Add a toggle</h3>
+      <p class="toggle-dlg-hint">Two panoramas of the same spot, with one click switching between them — e.g. curtains closed and open.</p>
+      <div class="toggle-dlg-row"><span class="toggle-dlg-step">1</span>
+        <div><b>First panorama</b><div class="toggle-dlg-sub">This room: ${esc(room.name)}</div></div></div>
+      <label class="toggle-dlg-row"><span class="toggle-dlg-step">2</span>
+        <div style="flex:1"><b>Second panorama</b>
+          <input type="file" accept="${PANO_ACCEPT}" class="toggle-dlg-file"></div></label>
+      <label class="toggle-dlg-field">Hotspot name in the first panorama
+        <input type="text" class="toggle-dlg-in" placeholder="e.g. Open curtain" maxlength="60"></label>
+      <label class="toggle-dlg-field">Hotspot name in the second panorama
+        <input type="text" class="toggle-dlg-back" placeholder="e.g. Close curtain" maxlength="60"></label>
+      <div class="toggle-dlg-err" hidden></div>
+      <div class="toggle-dlg-btns">
+        <button type="button" class="btn btn-ghost toggle-dlg-cancel">Cancel</button>
+        <button type="button" class="btn btn-primary toggle-dlg-ok">Create toggle</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const $$ = (c) => wrap.querySelector(c);
+  const close = () => wrap.remove();
+  $$('.toggle-dlg-cancel').addEventListener('click', close);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  document.addEventListener('keydown', function onEsc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } });
+  $$('.toggle-dlg-in').focus();
+  $$('.toggle-dlg-ok').addEventListener('click', async () => {
+    const file = $$('.toggle-dlg-file').files?.[0];
+    const nameIn = $$('.toggle-dlg-in').value.trim(), nameBack = $$('.toggle-dlg-back').value.trim();
+    const err = $$('.toggle-dlg-err');
+    const missing = [!file && 'the second panorama', !nameIn && 'the first hotspot name', !nameBack && 'the second hotspot name'].filter(Boolean);
+    if (missing.length) { err.hidden = false; err.textContent = 'Still needed: ' + missing.join(', ') + '.'; return; }
+    err.hidden = true;
+    $$('.toggle-dlg-ok').disabled = true; $$('.toggle-dlg-ok').textContent = 'Adding…';
+    try { await addTourTogglePair(file, nameIn, nameBack); close(); }
+    catch (e) { err.hidden = false; err.textContent = e?.message || 'Could not add that panorama.'; $$('.toggle-dlg-ok').disabled = false; $$('.toggle-dlg-ok').textContent = 'Create toggle'; }
+  });
 }
 function deleteTourNode(tourId, nodeId) {
   const t = state.tours.find((x) => x.id === tourId); if (!t) return;
@@ -6701,6 +6777,10 @@ function deleteTourNode(tourId, nodeId) {
     if (n._url) { try { URL.revokeObjectURL(n._url); } catch {} }
     if (n._urlAlt) { try { URL.revokeObjectURL(n._urlAlt); } catch {} }
   });
+  // Drop their cached textures too. Node ids are reused (nodeSeqFor = highest id + 1), so a
+  // room deleted and then re-uploaded gets the SAME id — and the texture cache, keyed by
+  // tour/node/variant, used to hand back the deleted room's picture for the new upload.
+  gone.forEach((id) => forgetTourNodeTex(t.id, id));
   t.nodes = t.nodes.filter((x) => !gone.has(x.id));
   t.links = t.links.filter((k) => !gone.has(k.from) && !gone.has(k.to));   // drop links touching any of them
   // ...and their dots on every isometric, or a minimap would keep drawing a dot that jumps
@@ -7402,6 +7482,30 @@ function refreshTourList() {
           box.appendChild(r2);
         });
 
+        // Hotspots borrowed from this spot's toggle twin (e.g. the Kitchen's exits drawn in its
+        // Window View). Each gets a "Show here" switch — hidden ones vanish for visitors in
+        // THIS view only; the owning node keeps showing them. Label/target/delete stay on the
+        // owner's list; here the admin can only show/hide (and drag into place in the viewer).
+        const shared = sharedTourLinkIdx(t, state.tourView.nodeId);
+        if (shared.length) {
+          const sh = document.createElement('div'); sh.className = 'ax-tour-hs-h ax-tour-shared-h';
+          sh.textContent = 'Shared from the other state'; box.appendChild(sh);
+          shared.forEach((i) => {
+            const k = t.links[i], tgt = t.nodes.find((n) => n.id === k.to), own = t.nodes.find((n) => n.id === k.from);
+            const r = document.createElement('label'); r.className = 'ax-tour-sharedrow';
+            r.title = `From ${own ? own.name : k.from}. Untick to hide it in this view only.`;
+            const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !isHiddenIn(k, state.tourView.nodeId);
+            cb.addEventListener('change', () => {
+              const here = state.tourView.nodeId, set = new Set(k.hideIn || []);
+              if (cb.checked) set.delete(here); else set.add(here);
+              k.hideIn = [...set];
+              onToursChanged(); rebuildTourHotspotDOM();
+            });
+            const nm = document.createElement('span'); nm.textContent = (k.label || (tgt ? tgt.name : k.to));
+            const st = document.createElement('span'); st.className = 'ax-tour-sharedstate'; st.textContent = 'Show here';
+            r.append(cb, nm, st); box.appendChild(r);
+          });
+        }
         const others = t.nodes.filter((n) => n.id !== state.tourView.nodeId);
         const addRow = document.createElement('div'); addRow.className = 'ax-tour-hsadd';
         if (others.length) {
@@ -7415,15 +7519,14 @@ function refreshTourList() {
           const p = document.createElement('p'); p.className = 'ax-tour-hint'; p.textContent = 'Upload at least one more node to link to.';
           addRow.appendChild(p);
         }
-        // The second kind of hotspot: a VIEW of this room (curtains closed, the window
-        // close-up) instead of a way into another room. Uploads the panorama, creates it as a
-        // hidden view owned by the room open right now, and drops a hotspot to it at the
-        // centre of the current view. The way back is left to the admin, deliberately — they
-        // add and name a return hotspot ("Curtains Open") from inside the view.
+        // The second kind of hotspot: a TOGGLE. A dialog asks for the second panorama and a
+        // name for each direction ("Open curtain" / "Close curtain"), then creates the view
+        // and both hotspots in one step. One click flips between them and the camera holds
+        // still. A room can have several.
         const av = document.createElement('button'); av.type = 'button'; av.className = 'btn btn-ghost ax-tour-addview';
         av.textContent = '＋ Add hotspot with view';
-        av.title = 'Upload a panorama and add a hotspot that opens it. The view is NOT listed in the menu or on the isometric — e.g. curtains closed, or a window view';
-        av.addEventListener('click', (e) => { e.stopPropagation(); state.tourViewTarget = state.tourView.nodeId; pickFile(PANO_ACCEPT, addTourViewFromFile); });
+        av.title = 'Add a toggle: a second panorama of this same spot, with a hotspot each way (e.g. Open curtain / Close curtain). One click flips between them; the camera stays still';
+        av.addEventListener('click', (e) => { e.stopPropagation(); openTogglePairDialog(); });
         addRow.appendChild(av);
         box.appendChild(addRow);
 
@@ -7498,6 +7601,14 @@ function refreshTourList() {
 const TOUR_CACHE_MAX = 5;                                  // nodes kept in VRAM (~895 MB at 8K)
 const tourTex = new Map();                                 // nodeKey -> THREE.Texture (insertion order = LRU)
 const tourInflight = new Map();
+// Forget every cached/in-flight texture of one node (both variants). See deleteTourNode.
+function forgetTourNodeTex(tourId, nodeId) {
+  ['a', 'b'].forEach((v) => {
+    const k = `${tourId}/${nodeId}/${v}`;
+    const tex = tourTex.get(k); if (tex) { try { tex.dispose(); } catch {} tourTex.delete(k); }
+    tourInflight.delete(k);
+  });
+}
 let tourHsDom = [];                                        // [{ el, dir, idx }] projected each frame
 let tourFadeMesh = null;
 let tourHsDrag = null;
@@ -7831,7 +7942,7 @@ async function tourCrossfade(tex) {
   if (three.pano.material.map !== tex) { three.pano.material.map = tex; three.pano.material.needsUpdate = true; }
   three.scene.remove(tourFadeMesh); tourFadeMesh.material.dispose(); tourFadeMesh = null;
 }
-async function tourGoTo(nodeId, { instant = false } = {}) {
+async function tourGoTo(nodeId, { instant = false, holdView = false } = {}) {
   const tv = state.tourView, tour = curTourView();
   if (!tv || !tour || tv.busy) return;
   const node = tour.nodes.find((n) => n.id === nodeId);
@@ -7854,35 +7965,42 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
     }
 
     tv.nodeId = node.id;
-    // Compass calibration is a per-ROOM constant (each pano has its own arbitrary "lon 0",
-    // unrelated to the main aerial pano's own northDeg) — set from the direction picked
-    // alongside this node's start view (see setTourNodeDefaultView), independent of the
-    // live camera yaw below, and reapplied on every arrival (walking a tour or jumping in
-    // fresh), not just on an instant entry. Uncalibrated rooms fall back to 0, matching the
-    // project's documented "uncalibrated ⇒ 0" default rather than leaking in whatever
-    // northDeg happened to be set for the aerial view or a previous room.
-    const dirDeg = COMPASS_DIR_DEG[node.defaultView.facingDir];
-    state.northDeg = (dirDeg != null) ? (-(node.defaultView.lon || 0) - dirDeg) : 0;
-    // Every arrival snaps to the room's own saved start view (2026-09-11, explicit
-    // request) — hotspot clicks, the room-strip thumbnails, and the admin's node list all
-    // funnel through here with instant=false, so this used to only ever apply on a fresh
-    // instant entry ("heading continuity": the visitor's facing direction carried over
-    // unchanged when walking, so stepping through a doorway never spun the camera under
-    // them). That carry-over is intentionally gone — every room, however you arrive, faces
-    // the direction its admin picked. `state.view.lon` is a CAMERA yaw (see the
-    // two-lon-conventions note above `computeHome`), which is the convention defaultView
-    // stores.
-    // IMPORTANT: this runs BEFORE the texture swap/crossfade below, not after. Snapping
-    // the camera only once the fade had already finished (the original 2026-09-11 order)
-    // meant the entire crossfade played out at the visitor's OLD look direction and then
-    // hard-cut to the new one right at the end — reported the same day as "shows a camera
-    // angle and then cuts... not smooth." Setting the view first means the crossfade (or
-    // hard swap) plays out at one STABLE angle throughout — a single clean cut followed by
-    // a smooth fade, not a smooth fade followed by a jarring cut.
-    state.view.lon = (node.defaultView.lon || 0) * Math.PI / 180;
-    state.view.lat = (node.defaultView.lat || 0) * Math.PI / 180;
-    state.view.fov = node.defaultView.fov || 75;
-    clampView();
+    // `holdView` (toggle links only, e.g. "Open curtain" ↔ "Close curtain"): the two
+    // panoramas are the same physical framing, so the camera must not move a pixel — the
+    // whole point is that it reads as happening in place, not as a room change. Skips both
+    // the compass recalibration and the start-view snap below; state.view/northDeg are left
+    // exactly as the visitor had them a moment ago.
+    if (!holdView) {
+      // Compass calibration is a per-ROOM constant (each pano has its own arbitrary "lon 0",
+      // unrelated to the main aerial pano's own northDeg) — set from the direction picked
+      // alongside this node's start view (see setTourNodeDefaultView), independent of the
+      // live camera yaw below, and reapplied on every arrival (walking a tour or jumping in
+      // fresh), not just on an instant entry. Uncalibrated rooms fall back to 0, matching the
+      // project's documented "uncalibrated ⇒ 0" default rather than leaking in whatever
+      // northDeg happened to be set for the aerial view or a previous room.
+      const dirDeg = COMPASS_DIR_DEG[node.defaultView.facingDir];
+      state.northDeg = (dirDeg != null) ? (-(node.defaultView.lon || 0) - dirDeg) : 0;
+      // Every arrival snaps to the room's own saved start view (2026-09-11, explicit
+      // request) — hotspot clicks, the room-strip thumbnails, and the admin's node list all
+      // funnel through here with instant=false, so this used to only ever apply on a fresh
+      // instant entry ("heading continuity": the visitor's facing direction carried over
+      // unchanged when walking, so stepping through a doorway never spun the camera under
+      // them). That carry-over is intentionally gone — every room, however you arrive, faces
+      // the direction its admin picked. `state.view.lon` is a CAMERA yaw (see the
+      // two-lon-conventions note above `computeHome`), which is the convention defaultView
+      // stores.
+      // IMPORTANT: this runs BEFORE the texture swap/crossfade below, not after. Snapping
+      // the camera only once the fade had already finished (the original 2026-09-11 order)
+      // meant the entire crossfade played out at the visitor's OLD look direction and then
+      // hard-cut to the new one right at the end — reported the same day as "shows a camera
+      // angle and then cuts... not smooth." Setting the view first means the crossfade (or
+      // hard swap) plays out at one STABLE angle throughout — a single clean cut followed by
+      // a smooth fade, not a smooth fade followed by a jarring cut.
+      state.view.lon = (node.defaultView.lon || 0) * Math.PI / 180;
+      state.view.lat = (node.defaultView.lat || 0) * Math.PI / 180;
+      state.view.fov = node.defaultView.fov || 75;
+      clampView();
+    }
 
     // Entry: swap under the solid veil, then lift it — a fade from dark into the room. A move:
     // lift the (possibly shown) dim veil and run the usual crossfade.
@@ -7909,6 +8027,33 @@ async function tourGoTo(nodeId, { instant = false } = {}) {
 // every frame, so a hotspot stays glued to its doorway as the visitor looks around.
 // Stored lon/lat use the `lonLatFromDir`/`dirFromLonLat` convention (NOT the camera-yaw
 // one) — placement round-trips through the same reflection, so it stays self-consistent.
+// Every node reachable from `nodeId` through toggle links (both directions, transitively) —
+// the states of one spot, e.g. curtains open + curtains closed. Includes `nodeId` itself.
+function toggleGroupOf(tour, nodeId) {
+  const group = new Set([nodeId]);
+  for (let grew = true; grew;) {
+    grew = false;
+    tour.links.forEach((k) => {
+      if (!k.toggle) return;
+      if (group.has(k.from) && !group.has(k.to)) { group.add(k.to); grew = true; }
+      else if (group.has(k.to) && !group.has(k.from)) { group.add(k.from); grew = true; }
+    });
+  }
+  return group;
+}
+// Links a node borrows from its toggle twins: their regular (non-toggle) exits, minus any
+// target the node already links to itself, one per target. Returns tour.links indices.
+function sharedTourLinkIdx(tour, nodeId) {
+  const group = toggleGroupOf(tour, nodeId);
+  const taken = new Set(tour.links.filter((k) => k.from === nodeId).map((k) => k.to));
+  const out = [];
+  tour.links.forEach((k, idx) => {
+    if (k.from === nodeId || !group.has(k.from) || k.toggle || k.to === nodeId || taken.has(k.to)) return;
+    taken.add(k.to); out.push(idx);
+  });
+  return out;
+}
+const isHiddenIn = (k, nodeId) => (k.hideIn || []).includes(nodeId);
 function rebuildTourHotspotDOM() {
   if (!els.tourLayer) return;
   const tv = state.tourView, tour = curTourView();
@@ -7919,8 +8064,18 @@ function rebuildTourHotspotDOM() {
   // regardless, or a link tagged to the variant they aren't previewing would be
   // unselectable and look deleted.
   const liveVariant = curTourVariant();
+  // Toggle twins (curtains open / closed) are ONE place in two states, so they show the same
+  // exits: a hotspot placed in either is drawn in both. Without this, flipping the curtains
+  // dropped "Kitchen" / "Window view" because the twin only owned its way back. A node's own
+  // link to a target wins over a twin's link to the same target.
+  // A shared hotspot the admin switched off for this view ("Show here", hotspot panel) is
+  // gone for visitors and drawn faded in the admin so it can still be found and restored.
+  const sharedIdx = new Set(sharedTourLinkIdx(tour, tv.nodeId));
   tour.links.forEach((k, idx) => {
-    if (k.from !== tv.nodeId) return;
+    const shared = k.from !== tv.nodeId;
+    if (shared && !sharedIdx.has(idx)) return;
+    const hiddenHere = shared && isHiddenIn(k, tv.nodeId);
+    if (hiddenHere && !state.admin) return;
     if (!state.admin && k.variant && k.variant !== liveVariant) return;
     const target = tour.nodes.find((n) => n.id === k.to); if (!target) return;
     const ico = tourHsIcon(k);
@@ -7934,17 +8089,24 @@ function rebuildTourHotspotDOM() {
     el.innerHTML = `<span class="tour-hs-ico"><span class="tour-hs-ico-in">${ico.svg}</span></span><span class="tour-hs-lbl"></span>`;
     if (ico.rotatable) el.querySelector('.tour-hs-ico').style.setProperty('--rot', `${normDeg(k.rot)}deg`);
     el.querySelector('.tour-hs-lbl').textContent = k.label || target.name;
-    el.title = state.admin ? `Link → ${target.name} (drag to reposition)` : `Go to ${target.name}`;
+    const owner = tour.nodes.find((n) => n.id === k.from);
+    el.title = state.admin ? (shared ? `Link → ${target.name} — shared from ${owner?.name || 'the other state'}; drag it into place for this view (label/delete on ${owner?.name || 'that node'})` : `Link → ${target.name} (drag to reposition)`) : `Go to ${target.name}`;
+    if (shared) el.classList.add('is-shared');
+    if (hiddenHere) el.classList.add('is-hidden-here');
+    // A shared hotspot belongs to the twin, and the hotspot list only shows a node's own
+    // links — so here it can only be dragged into place (stored per panorama in `pos`), not
+    // re-labelled or deleted; do that on the owning node.
     if (state.admin && state.adminTab === 'tour') {
-      el.addEventListener('pointerdown', (e) => startTourHsDrag(e, idx));
+      el.addEventListener('pointerdown', (e) => startTourHsDrag(e, idx, shared));
     }
     el.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (state.admin && state.adminTab === 'tour') { if (!tourHsDrag?.moved) { state.tourHsSel = idx; refreshTourList(); rebuildTourHotspotDOM(); } return; }
-      tourGoTo(k.to);
+      if (state.admin && state.adminTab === 'tour') { if (!shared && !tourHsDrag?.moved) { state.tourHsSel = idx; refreshTourList(); rebuildTourHotspotDOM(); } return; }
+      tourGoTo(k.to, { holdView: !!k.toggle });
     });
     els.tourLayer.appendChild(el);
-    tourHsDom.push({ el, dir: dirFromLonLat(k.hotspot.lon, k.hotspot.lat), idx });
+    const at = (shared && k.pos && k.pos[tv.nodeId]) || k.hotspot;   // a twin may be aimed differently
+    tourHsDom.push({ el, dir: dirFromLonLat(at.lon, at.lat), idx });
   });
   renderTourHotspots();
 }
@@ -7958,10 +8120,10 @@ function renderTourHotspots() {
     h.el.style.left = `${p.x}px`; h.el.style.top = `${p.y}px`;
   });
 }
-function startTourHsDrag(e, idx) {
+function startTourHsDrag(e, idx, shared = false) {
   if (!(state.admin && state.adminTab === 'tour')) return;
   e.preventDefault(); e.stopPropagation();                 // stops #pano's pointer capture
-  tourHsDrag = { idx, moved: false }; state.tourHsSel = idx;
+  tourHsDrag = { idx, moved: false, shared }; if (!shared) state.tourHsSel = idx;
   window.addEventListener('pointermove', onTourHsDragMove);
   window.addEventListener('pointerup', endTourHsDrag, { once: true });
 }
@@ -7970,7 +8132,11 @@ function onTourHsDragMove(e) {
   const tour = curTourView(); if (!tour) return;
   const k = tour.links[tourHsDrag.idx]; if (!k) return;
   three.raycaster.setFromCamera(ndcOf(e), three.camera);
-  k.hotspot = lonLatFromDir(three.raycaster.ray.direction);
+  const at = lonLatFromDir(three.raycaster.ray.direction);
+  // A shared hotspot is the twin's, so dragging it here only sets where it sits in THIS
+  // panorama (`pos[nodeId]`) — the owner's own position is left alone.
+  if (tourHsDrag.shared) (k.pos || (k.pos = {}))[state.tourView.nodeId] = at;
+  else k.hotspot = at;
   tourHsDrag.moved = true;
   rebuildTourHotspotDOM();
 }
@@ -9356,6 +9522,10 @@ function renderAdminMenuTree() {
                     <span style="font-size:11px;">📄</span>
                     <span>Content Item</span>
                   </button>
+                  <button type="button" class="tree-add-type-btn" data-parent-id="${esc(node.id)}" data-kind="virtualtour" style="display:flex; align-items:center; gap:6px; padding:3px 6px; font-size:10.5px; font-weight:500; color:#e2e8f0; background:rgba(255,255,255,0.04); border:none; border-radius:3px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
+                    <span style="font-size:11px;">🧭</span>
+                    <span>Virtual Tour</span>
+                  </button>
                   <button type="button" class="tree-add-type-btn" data-parent-id="${esc(node.id)}" data-kind="contact" style="display:flex; align-items:center; gap:6px; padding:3px 6px; font-size:10.5px; font-weight:500; color:#e2e8f0; background:rgba(255,255,255,0.04); border:none; border-radius:3px; text-align:left; cursor:pointer; width:100%; white-space:nowrap;">
                     <span style="font-size:11px;">📞</span>
                     <span>Contact Card</span>
@@ -9933,7 +10103,9 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root', presetKin
   const currentParentId = info ? (info.parent ? info.parent.id : 'root') : defaultParentId;
 
   // If a presetKind is given (from the sub-menu), skip step 1 and go straight to step 2
-  const resolvedKind = node ? node.kind : (presetKind || 'parent');
+  // 'virtualtour' = the Virtual Tour shortcut: a Content Item preset to the 360° Tour type.
+  const tourShortcut = !node && presetKind === 'virtualtour';
+  const resolvedKind = node ? node.kind : (tourShortcut ? 'child' : (presetKind || 'parent'));
   const startStep = nodeId ? 2 : (presetKind ? 2 : 1);
 
   // Initialize Wizard State
@@ -9943,7 +10115,7 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root', presetKin
     editingNodeId: nodeId,
     presetParentId: defaultParentId,
     kind: resolvedKind,
-    contentType: node?.contentType || 'video',
+    contentType: node?.contentType || (tourShortcut ? 'panotour' : 'video'),
     sourceType: (node?.content?.fileName || node?.content?.fileBlob) ? 'upload' : 'url',
     selectedPlacement: currentParentId,
     title: node ? node.title : '',
@@ -10149,17 +10321,23 @@ const NO_CONFIG_CONTENT_TYPES = {
 
 // Populates the wizard's tour dropdown from the project's authored tours, and says
 // plainly when there are none yet (the most likely reason a menu item would do nothing).
+// "＋ Create a new tour" (2026-09-26, on request): lets the admin add ANOTHER tour straight
+// from ＋ Add Item (e.g. a second flat type beside "319 1-BHK") instead of first detouring
+// to the Tour tab. It makes an empty tour named after the menu item's title and selects it;
+// its panoramas are still uploaded in the Tour tab, which the hint points to.
+const WIZARD_NEW_TOUR = '__new_tour__';
+function createWizardTour() {
+  const title = (($('wizardContentTitleInput') || {}).value || '').trim();
+  const t = { id: newTourId(), name: title || ('Tour ' + (state.tours.length + 1)), startNode: null, nodes: [], links: [], maps: [] };
+  state.tours.push(t);
+  refreshTourList(); onToursChanged();
+  return t.id;
+}
 function renderWizardTourPicker() {
   const sel = $('wizardTourSelect'), hint = $('wizardTourHint');
   if (!sel) return;
   const tours = state.tours || [];
   sel.innerHTML = '';
-  if (!tours.length) {
-    sel.innerHTML = '<option value="">— no tours in this project yet —</option>';
-    sel.disabled = true;
-    if (hint) hint.innerHTML = 'Build one first in the admin sidebar’s <strong>Tour</strong> tab: add a tour, upload a panorama per room, then link them with hotspots.';
-    return;
-  }
   sel.disabled = false;
   tours.forEach((t) => {
     const o = document.createElement('option');
@@ -10167,13 +10345,23 @@ function renderWizardTourPicker() {
     o.textContent = `${t.name} — ${t.nodes.length} node${t.nodes.length === 1 ? '' : 's'}`;
     sel.appendChild(o);
   });
+  const mk = document.createElement('option'); mk.value = WIZARD_NEW_TOUR; mk.textContent = '＋ Create a new tour';
+  sel.appendChild(mk);
   if (wizardState.tourId && tours.some((t) => t.id === wizardState.tourId)) sel.value = wizardState.tourId;
-  else wizardState.tourId = sel.value;
-  sel.onchange = () => { wizardState.tourId = sel.value; renderWizardTourPicker(); };
+  else if (tours.length) wizardState.tourId = sel.value = tours[0].id;
+  else { sel.value = WIZARD_NEW_TOUR; wizardState.tourId = ''; }
+  sel.onchange = () => {
+    wizardState.tourId = sel.value === WIZARD_NEW_TOUR ? createWizardTour() : sel.value;
+    renderWizardTourPicker();
+  };
+  if (!tours.length) {
+    if (hint) hint.innerHTML = 'No tours yet — pick <strong>＋ Create a new tour</strong>, then upload its panoramas in the admin sidebar’s <strong>Tour</strong> tab.';
+    return;
+  }
   const t = tours.find((x) => x.id === sel.value);
   if (hint) {
     if (!t) hint.textContent = '';
-    else if (!t.nodes.length) hint.innerHTML = '⚠️ This tour has no panoramas yet — it will not open.';
+    else if (!t.nodes.length) hint.innerHTML = '⚠️ This tour has no panoramas yet — it will not open. Add them in the admin sidebar’s <strong>Tour</strong> tab (＋ Add node), then <strong>Save</strong>.';
     else if (!t.links.length) hint.innerHTML = `⚠️ No hotspots linked yet: visitors can still jump between the ${tourRooms(t).length} rooms from the strip, but cannot walk between them.`;
     else hint.textContent = `${tourRooms(t).length} rooms · ${t.links.length} hotspot link${t.links.length === 1 ? '' : 's'}.`;   // views aren't rooms
   }
@@ -10363,7 +10551,9 @@ function initCustomMenuAdminAndClient() {
           return;
         }
       }
-      wizardState.kind = choice;
+      // "Virtual Tour" is a shortcut, not a new kind: a Content Item preset to 360° Tour.
+      if (choice === 'virtualtour') { wizardState.kind = 'child'; wizardState.contentType = 'panotour'; }
+      else wizardState.kind = choice;
       wizardState.step = 2;
       updateWizardStepUI();
     });
@@ -10525,7 +10715,10 @@ function initCustomMenuAdminAndClient() {
         // A 360° tour stores a tourId reference, not a URL/file — the panos live in
         // tour.json and are shipped by Export like any other project image.
         if (wizardState.contentType === 'panotour') {
-          nodeData.content.tourId = ($('wizardTourSelect')?.value || wizardState.tourId || existingContent.tourId || '');
+          // Still on "＋ Create a new tour" at save time (the default when none exist): make it now.
+          const pick = $('wizardTourSelect')?.value;
+          nodeData.content.tourId = pick === WIZARD_NEW_TOUR ? createWizardTour()
+            : (pick || wizardState.tourId || existingContent.tourId || '');
         }
       } else if (kind === 'contact') {
         const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;

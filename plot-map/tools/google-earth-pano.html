@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Google Earth Pano (POC)</title>
+<!--
+  PROOF OF CONCEPT (2026-09-26): render a 360° equirectangular panorama from Google's
+  Photorealistic 3D Tiles (the Google Earth 3D mesh) at a chosen point and height.
+
+  How: load the tiles into three.js with 3d-tiles-renderer, recentre the world on the chosen
+  lat/lon (ReorientationPlugin), find the ground by ray-casting down, put a CubeCamera there,
+  wait until every tile around it has streamed in at full detail, then reproject the cube to
+  an equirectangular JPG. No screenshots and no stitching — six exact 90° renders.
+
+  NOT wired into the app. Local/tunnel only. Google's terms restrict exporting their imagery;
+  see the discussion before using the output anywhere real. `?selftest=1` swaps the Google
+  tiles for coloured markers so the capture maths can be checked without an API key.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "3d-tiles-renderer": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.3/build/index.js",
+    "3d-tiles-renderer/plugins": "https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.5.3/build/index.plugins.js",
+    "pbf": "https://cdn.jsdelivr.net/npm/pbf@4.0.1/+esm",
+    "pmtiles": "https://cdn.jsdelivr.net/npm/pmtiles@4.3.2/+esm",
+    "@mapbox/vector-tile": "https://cdn.jsdelivr.net/npm/@mapbox/vector-tile@2.0.3/+esm"
+  }
+}
+</script>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --dim:#8b949e; --gold:#e3b341; --bad:#f85149; --ok:#3fb950; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 13px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  label { display:flex; flex-direction:column; gap:5px; font-size:12.5px; color:var(--dim); font-weight:600; }
+  label.wide { grid-column: 1 / -1; }
+  input, select { font:inherit; color:var(--text); background:#0b0f14; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  input:focus, select:focus { outline:none; border-color:var(--gold); }
+  .hint { font-weight:400; font-size:11.5px; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:14px; flex-wrap:wrap; }
+  button { font:inherit; font-weight:700; border-radius:8px; padding:9px 16px; cursor:pointer; border:1px solid var(--line); background:#21262d; color:var(--text); }
+  button.primary { background:var(--gold); color:#1b1400; border-color:var(--gold); }
+  button:disabled { opacity:.5; cursor:default; }
+  #status { margin-top:14px; font-size:13px; color:var(--dim); min-height:20px; }
+  #status.bad { color:var(--bad); } #status.ok { color:var(--ok); }
+  .bar { height:6px; background:#21262d; border-radius:3px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; width:0; background:var(--gold); transition:width .2s; }
+  #preview { margin-top:16px; width:100%; aspect-ratio: 2 / 1; background:#000; border:1px solid var(--line); border-radius:8px; display:block; }
+  #credits { margin-top:6px; font-size:11.5px; color:var(--dim); }
+  #out { margin-top:16px; }
+  #out img { width:100%; border:1px solid var(--line); border-radius:8px; display:block; }
+  #stage { position:fixed; left:-10000px; top:0; width:512px; height:512px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Google Earth → 360° panorama <span style="color:var(--gold); font-size:12px;">proof of concept</span></h1>
+  <p class="sub">Renders Google's 3D world from one point in the sky and saves it as an equirectangular panorama. Nothing is uploaded anywhere — the image only downloads to this computer.</p>
+
+  <div class="grid">
+    <label class="wide">Google Earth / Google Maps link, or “lat, lon”
+      <input id="loc" value="https://earth.google.com/web/search/Anandam+Eleganza/@21.2766268,81.5901104,306.57a,781.3d,35y,0h,0t,0r" />
+      <span class="hint">Coordinates are read from the “@lat,lon” part of the link.</span>
+    </label>
+    <label>Height above ground (m)
+      <input id="height" type="number" min="20" max="2000" step="10" value="250" />
+      <span class="hint">Like a drone. 150–400 m looks best; lower gets blurry.</span>
+    </label>
+    <label>Centre of the panorama faces (° from north)
+      <input id="heading" type="number" min="0" max="359" step="1" value="0" />
+      <span class="hint">0 = north, 90 = east.</span>
+    </label>
+    <label>Output size
+      <select id="size">
+        <option value="4096">4K (4096 × 2048)</option>
+        <option value="8192" selected>8K (8192 × 4096)</option>
+      </select>
+    </label>
+    <label>Detail
+      <select id="detail">
+        <option value="8">Normal (fastest)</option>
+        <option value="4" selected>High</option>
+        <option value="2">Maximum (slow — thousands of tiles)</option>
+      </select>
+    </label>
+    <label class="wide">Google Maps Platform API key (Map Tiles API enabled)
+      <input id="key" type="password" autocomplete="off" placeholder="AIza…" />
+      <span class="hint">Kept only in this browser (localStorage). Never saved to the project or sent anywhere except Google.</span>
+    </label>
+  </div>
+
+  <div class="row">
+    <button class="primary" id="go">Render panorama</button>
+    <button id="dl" disabled>Download JPG</button>
+  </div>
+  <div id="status"></div>
+  <div class="bar"><div id="bar"></div></div>
+  <canvas id="preview" width="1024" height="512"></canvas>
+  <div id="credits"></div>
+  <div id="out"></div>
+</main>
+<canvas id="stage" width="512" height="512"></canvas>
+
+<script type="module">
+import * as THREE from 'three';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+const $ = (id) => document.getElementById(id);
+const SELFTEST = new URLSearchParams(location.search).has('selftest');
+const statusEl = $('status');
+const say = (msg, cls = '') => { statusEl.textContent = msg; statusEl.className = cls; };
+const progress = (f) => { $('bar').style.width = `${Math.round(Math.max(0, Math.min(1, f)) * 100)}%`; };
+const sleepFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+const DEG = Math.PI / 180;
+
+try { $('key').value = localStorage.getItem('b91-gmaps-key') || ''; } catch {}
+
+function parseLocation(text) {
+  const t = (text || '').trim();
+  let m = t.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/);          // Earth / Maps links
+  if (!m) m = t.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);   // "lat, lon"
+  if (!m) m = t.match(/[?&]q=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const lat = +m[1], lon = +m[2];
+  return (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) ? { lat, lon } : null;
+}
+
+// ─── Scene ─────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ canvas: $('stage'), antialias: true, logarithmicDepthBuffer: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+const scene = new THREE.Scene();
+// No sky exists in the 3D data, so paint one: a gradient dome that ignores depth.
+const sky = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, depthTest: false,
+  uniforms: { up: { value: new THREE.Vector3(0, 1, 0) } },
+  vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position = p.xyww; }',
+  fragmentShader: 'uniform vec3 up; varying vec3 vDir; void main(){ float h = dot(normalize(vDir), up); vec3 top = vec3(0.36,0.58,0.86), hor = vec3(0.80,0.87,0.94), low = vec3(0.62,0.66,0.70); vec3 c = h > 0.0 ? mix(hor, top, pow(h, 0.55)) : mix(hor, low, pow(-h, 0.5)); gl_FragColor = vec4(pow(c, vec3(2.2)),1.0); }'
+}));
+sky.renderOrder = -1; sky.frustumCulled = false; sky.scale.setScalar(1e5);
+scene.add(sky);
+scene.add(new THREE.AmbientLight(0xffffff, 2.2));
+// Aerial haze: distant ground is only ever coarse tiles, so fade it into the horizon colour
+// like a real drone shot, instead of showing blurry low-detail land out to the horizon.
+scene.fog = new THREE.Fog(new THREE.Color(0.80, 0.87, 0.94).convertSRGBToLinear(), 12000, 45000);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(1, 2, 1); scene.add(sun);
+
+let tiles = null, tilesKey = null, capturedBlob = null, basis = null;
+
+async function makeTiles(apiKey, lat, lon) {
+  const { TilesRenderer } = await import('3d-tiles-renderer');
+  const { GoogleCloudAuthPlugin, ReorientationPlugin, GLTFExtensionsPlugin, TileCompressionPlugin } = await import('3d-tiles-renderer/plugins');
+  const t = new TilesRenderer();
+  t.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: apiKey, autoRefreshToken: true }));
+  const draco = new DRACOLoader().setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+  t.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
+  t.registerPlugin(new TileCompressionPlugin());
+  // The chosen point becomes the world origin, so float precision is fine at metre scale.
+  t.registerPlugin(new ReorientationPlugin({ lat: lat * DEG, lon: lon * DEG, height: 0, recenter: true }));
+  if (t.lruCache) {                      // hold far more than an interactive viewer would
+    t.lruCache.minSize = 6000; t.lruCache.maxSize = 12000;
+    if ('maxBytesSize' in t.lruCache) { t.lruCache.minBytesSize = 1.2e9; t.lruCache.maxBytesSize = 2.0e9; }
+  }
+  t.addEventListener('load-error', (e) => console.warn('tile load error', e));
+  scene.add(t.group);
+  window.__b91Tiles = t;
+  return t;
+}
+
+// World-space east/north/up at the chosen point, measured rather than assumed: the
+// reorientation's axis convention is an implementation detail of the library.
+function measureBasis(t, lat, lon) {
+  const E = t.ellipsoid, m = t.group.matrixWorld;
+  const at = (la, lo, h) => E.getCartographicToPosition(la * DEG, lo * DEG, h, new THREE.Vector3()).applyMatrix4(m);
+  const o = at(lat, lon, 0);
+  const up = at(lat, lon, 100).sub(o).normalize();
+  const north = at(lat + 0.001, lon, 0).sub(o); north.addScaledVector(up, -north.dot(up)).normalize();
+  const east = new THREE.Vector3().crossVectors(north, up).normalize();
+  return { origin: o, up, north, east };
+}
+
+// Stream tiles for the given cameras until nothing is queued/downloading/parsing for a
+// while. Every camera is registered, so detail is resolved for all six directions.
+async function streamTiles(t, cams, res, label, from, to, maxMs = 240000) {
+  cams.forEach((c) => { t.setCamera(c); t.setResolution(c, res, res); });
+  const t0 = performance.now(); let calm = 0;
+  while (performance.now() - t0 < maxMs) {
+    cams.forEach((c) => c.updateMatrixWorld(true));
+    t.update();
+    renderer.setRenderTarget(null); renderer.render(scene, cams[0]);   // keeps GPU uploads moving
+    const s = t.stats || {}, busy = (s.queued || 0) + (s.downloading || 0) + (s.parsing || 0);
+    if (window.__b91Debug && (++window.__b91Debug.frames % 30 === 0)) {
+      let maxDepth = 0; t.visibleTiles?.forEach((tile) => { maxDepth = Math.max(maxDepth, tile.__depth ?? tile.internal?.depth ?? 0); });
+      window.__b91Debug.log.push(`${label.slice(0, 12)} busy=${busy} visible=${t.visibleTiles?.size} active=${t.activeTiles?.size} maxDepth=${maxDepth} errTarget=${t.errorTarget} lp=${t.loadProgress?.toFixed?.(2)}`);
+    }
+    const lp = typeof t.loadProgress === 'number' ? t.loadProgress : (busy ? 0.5 : 1);
+    progress(from + (to - from) * lp);
+    say(`${label} — ${busy} tile${busy === 1 ? '' : 's'} still loading…`);
+    calm = busy === 0 && t.root ? calm + 1 : 0;
+    if (calm > 45) break;
+    await sleepFrame();
+  }
+  cams.forEach((c) => t.deleteCamera(c));
+  return performance.now() - t0 < maxMs;
+}
+
+// Cube → equirectangular. u runs clockwise from (heading − 180°) to (heading + 180°), so
+// the image centre faces `heading` and right-of-centre is clockwise (east of north).
+const eqMat = new THREE.ShaderMaterial({
+  uniforms: { cube: { value: null }, E: { value: new THREE.Vector3() }, N: { value: new THREE.Vector3() }, U: { value: new THREE.Vector3() }, heading: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: `uniform samplerCube cube; uniform vec3 E, N, U; uniform float heading; varying vec2 vUv;
+    void main(){ float yaw = heading + (vUv.x - 0.5) * 6.28318530718; float lat = (vUv.y - 0.5) * 3.14159265359;
+      vec3 d = cos(lat) * (sin(yaw) * E + cos(yaw) * N) + sin(lat) * U;
+      gl_FragColor = textureCube(cube, d); }`
+});
+const eqScene = new THREE.Scene(); eqScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), eqMat));
+const eqCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+async function toEquirect(cubeRT, W, b, headingDeg) {
+  const H = W / 2;
+  eqMat.uniforms.cube.value = cubeRT.texture;
+  eqMat.uniforms.E.value.copy(b.east); eqMat.uniforms.N.value.copy(b.north); eqMat.uniforms.U.value.copy(b.up);
+  eqMat.uniforms.heading.value = headingDeg * DEG;
+  const rt = new THREE.WebGLRenderTarget(W, H, { colorSpace: THREE.SRGBColorSpace });
+  renderer.setRenderTarget(rt); renderer.render(eqScene, eqCam); renderer.setRenderTarget(null);
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(W, H);
+  const strip = 256, buf = new Uint8Array(W * strip * 4);
+  for (let y0 = 0; y0 < H; y0 += strip) {                 // read in strips: an 8K frame at once is 128 MB
+    const h = Math.min(strip, H - y0);
+    renderer.readRenderTargetPixels(rt, 0, y0, W, h, buf);
+    for (let r = 0; r < h; r++) img.data.set(buf.subarray(r * W * 4, (r + 1) * W * 4), (H - 1 - (y0 + r)) * W * 4);   // GL rows are bottom-up
+    await sleepFrame();
+  }
+  ctx.putImageData(img, 0, 0); rt.dispose();
+  return cv;
+}
+
+function addSelfTestMarkers(b, centre) {
+  const g = new THREE.Group();
+  const put = (dir, color, dist = 400) => { const m = new THREE.Mesh(new THREE.SphereGeometry(60, 24, 12), new THREE.MeshBasicMaterial({ color })); m.position.copy(dir).multiplyScalar(dist).add(centre); g.add(m); };
+  put(b.north, 0xff0000); put(b.east, 0x00ff00); put(b.north.clone().negate(), 0x0000ff); put(b.east.clone().negate(), 0xffff00);
+  put(b.up, 0xff00ff); put(b.up.clone().negate(), 0x00ffff);
+  scene.add(g); return g;
+}
+
+async function render() {
+  $('go').disabled = true; $('dl').disabled = true; $('out').innerHTML = ''; capturedBlob = null; progress(0);
+  try {
+    const loc = parseLocation($('loc').value);
+    if (!loc) throw new Error('Could not read coordinates — paste a Google Earth/Maps link with “@lat,lon” in it, or type “lat, lon”.');
+    const aboveGround = Math.max(5, +$('height').value || 250), heading = ((+$('heading').value || 0) % 360 + 360) % 360;
+    const W = +$('size').value, face = W / 4;
+    if (face > renderer.capabilities.maxCubemapSize) throw new Error(`This GPU can only do ${renderer.capabilities.maxCubemapSize}px cube faces — choose a smaller output.`);
+    let groundY = 0;
+    if (SELFTEST) {
+      basis = { origin: new THREE.Vector3(), up: new THREE.Vector3(0, 1, 0), north: new THREE.Vector3(0, 0, -1), east: new THREE.Vector3(1, 0, 0) };
+    } else {
+      const key = $('key').value.trim();
+      if (!key) throw new Error('Enter a Google Maps Platform API key with the Map Tiles API enabled.');
+      try { localStorage.setItem('b91-gmaps-key', key); } catch {}
+      const tk = `${key}|${loc.lat}|${loc.lon}`;
+      if (!tiles || tilesKey !== tk) {
+        if (tiles) { scene.remove(tiles.group); tiles.dispose(); }
+        say('Connecting to Google 3D Tiles…'); tiles = await makeTiles(key, loc.lat, loc.lon); tilesKey = tk;
+      }
+      tiles.errorTarget = +$('detail').value;
+      for (let i = 0; i < 600 && !tiles.root; i++) { tiles.update(); await sleepFrame(); }
+      if (!tiles.root) throw new Error('Google did not return the 3D tileset. Check the key has the Map Tiles API enabled and billing on.');
+      tiles.group.updateMatrixWorld(true);
+      basis = measureBasis(tiles, loc.lat, loc.lon);
+      // 1) Find the ground: look straight down from high up, load, then ray-cast.
+      const probe = new THREE.PerspectiveCamera(60, 1, 1, 2e5);
+      probe.position.copy(basis.up).multiplyScalar(1500); probe.up.copy(basis.north); probe.lookAt(0, 0, 0);
+      await streamTiles(tiles, [probe], 512, 'Finding the ground', 0, 0.2, 90000);
+      const ray = new THREE.Raycaster(basis.up.clone().multiplyScalar(5000), basis.up.clone().negate());
+      ray.firstHitOnly = true;
+      const hit = ray.intersectObject(tiles.group, true)[0];
+      if (!hit) throw new Error('No 3D ground found at this point — Google may have no 3D coverage here.');
+      groundY = 5000 - hit.distance;
+    }
+    // 2) The capture point, and a cube camera there.
+    const P = basis.up.clone().multiplyScalar(groundY + aboveGround);
+    if (SELFTEST) addSelfTestMarkers(basis, P);
+    const cubeRT = new THREE.WebGLCubeRenderTarget(face, { generateMipmaps: false, colorSpace: THREE.SRGBColorSpace });
+    const cubeCam = new THREE.CubeCamera(1, 5e6, cubeRT);
+    cubeCam.position.copy(P); scene.add(cubeCam);
+    cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); cubeCam.updateMatrixWorld(true);
+    sky.position.copy(P);
+    if (!SELFTEST) {
+      // Stream with six ORDINARY 90° cameras, not cubeCam.children: CubeCamera uses fov = −90
+      // (to flip its faces), which the tile loader reads as "nothing in view" — it then only
+      // ever kept the 8 coarsest tiles and the panorama came out as a blurred colour field.
+      const dirs = [basis.east, basis.east.clone().negate(), basis.north, basis.north.clone().negate(), basis.up, basis.up.clone().negate()];
+      const streamCams = dirs.map((d) => {
+        // Far = 40 km: beyond that the ground is hazed out anyway (scene.fog below), and streaming
+        // full detail to the true horizon (~80 km at this height) asked Google for 10,000+ tiles.
+        const c = new THREE.PerspectiveCamera(92, 1, 1, 4e4);           // a hair over 90° so the face seams are covered
+        c.position.copy(P); c.up.copy(Math.abs(d.dot(basis.up)) > 0.9 ? basis.north : basis.up); c.lookAt(P.clone().add(d));
+        c.updateMatrixWorld(true); return c;
+      });
+      const done = await streamTiles(tiles, streamCams, face, 'Loading full detail in every direction', 0.2, 0.9);
+      if (!done) say('Some tiles were still loading after 4 minutes — rendering what is there.');
+    }
+    // 3) Render the six faces, then reproject.
+    say('Rendering…');
+    cubeCam.update(renderer, scene);
+    const cv = await toEquirect(cubeRT, W, basis, heading);
+    scene.remove(cubeCam); cubeRT.dispose();
+    $('preview').getContext('2d').drawImage(cv, 0, 0, $('preview').width, $('preview').height);
+    capturedBlob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', 0.9));
+    const credits = SELFTEST ? 'self-test markers' : (tiles.getAttributions() || []).map((a) => a.value).filter((v) => typeof v === 'string' && !/^https?:|^data:/.test(v)).join(' · ');
+    $('credits').textContent = credits ? `Imagery: ${credits}` : '';
+    const url = URL.createObjectURL(capturedBlob);
+    $('out').innerHTML = `<img alt="Rendered panorama" src="${url}">`;
+    $('dl').disabled = false; progress(1);
+    say(`Done — ${W}×${W / 2}, ${(capturedBlob.size / 1048576).toFixed(1)} MB, camera ${Math.round(aboveGround)} m above the ground (ground at ${Math.round(groundY)} m on the ellipsoid).`, 'ok');
+    window.__b91Result = { W, groundY, aboveGround, heading, bytes: capturedBlob.size };
+  } catch (e) {
+    console.error(e); say(e.message || String(e), 'bad'); window.__b91Result = { error: e.message || String(e) };
+  } finally { $('go').disabled = false; }
+}
+
+$('go').addEventListener('click', render);
+$('dl').addEventListener('click', () => {
+  if (!capturedBlob) return;
+  const loc = parseLocation($('loc').value) || { lat: 0, lon: 0 };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(capturedBlob);
+  a.download = `google3d-pano_${loc.lat.toFixed(5)}_${loc.lon.toFixed(5)}_${Math.round(+$('height').value)}m.jpg`;
+  a.click();
+});
+if (SELFTEST) { say('Self-test mode: coloured markers instead of Google tiles (no key needed).'); window.__b91Render = render; }
+</script>
+</body>
+</html>

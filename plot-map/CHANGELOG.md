@@ -5,6 +5,87 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-26 (Proof of concept: Google Earth 3D → 360° panorama)
+
+New standalone tool `tools/google-earth-pano.html` (not linked from the app). Loads Google
+Photorealistic 3D Tiles (Map Tiles API) with `3d-tiles-renderer@0.5.3` + three r170 from
+jsDelivr, recentres the world on the chosen lat/lon (`ReorientationPlugin`), ray-casts down
+for the ground, streams tiles for a CubeCamera at ground + height until nothing is loading,
+and reprojects the cube to an equirectangular JPG (4K/8K) for download. Inputs: Earth/Maps
+link or "lat, lon", height above ground, facing heading, size, detail, API key (browser
+localStorage only). Painted gradient sky (the 3D data has none).
+Verified headless with `?selftest=1` (coloured markers, no key): N/E/S/W/up/down all land at
+the expected pixels, and heading 90° centres east. The Google tile path itself is NOT
+verified yet — no API key on this machine. Licence: Google's terms restrict exporting
+their imagery; this is for evaluating quality only.
+Testing note: headless Chrome "hangs" earlier today were debug-port collisions with
+leftover test browsers (random 9100-9900 ports); use an OS-assigned free port.
+
+---
+
+## 2026-09-26 (Fix: re-uploaded room showed the deleted room's picture)
+
+Node ids are `highest + 1` (`nodeSeqFor`), so deleting a room and uploading a new one reuses
+its id; the texture cache (`tourTex`, keyed `tour/node/variant`) then returned the deleted
+room's image for the new upload. `forgetTourNodeTex` now evicts both variants on delete
+(`deleteTourNode`) and whenever an id is allocated (room, view and toggle uploads).
+`node --check` only. Files: `app.js`.
+
+---
+
+## 2026-09-26 (Add Item → 360° Tour can create a new tour)
+
+Also added a **🧭 Virtual Tour** card to step 1 of ＋ Add Item (and to a folder's inline
+＋ menu) — a shortcut to Content Item preset to the 360° Tour type (`presetKind`/choice
+`'virtualtour'` → `kind:'child', contentType:'panotour'`), since the tour option one step in
+was being missed. Files: `index.html`, `app.js`.
+
+The Add Item wizard's 360° Tour picker only listed existing tours, so adding a second flat
+type meant a detour to the Tour tab first. The picker now ends with **＋ Create a new tour**
+(`WIZARD_NEW_TOUR` / `createWizardTour`): it adds an empty tour named after the item's title
+and selects it; if the item is saved while that option is still selected (the default when a
+project has no tours) the tour is created at save time, never stored as a placeholder id.
+Panoramas are still uploaded in the Tour tab (the hint says so). Note: the built-in VIRTUAL
+TOUR row lists EVERY tour once there are 2+, so one-menu-item-per-flat means one 360° Tour
+item per tour. NOT browser-verified (headless Chrome unusable on the loaded machine);
+`node --check` only. Files: `app.js`.
+
+---
+
+## 2026-09-26 (Shared hotspots: hide per view, drag per view)
+
+A twin view that isn't the same framing (e.g. the Kitchen's Window View) drew the Kitchen's
+exits at the Kitchen's positions, so "Living Room" landed on a wall. The admin can now fix
+that per view: the Tour tab hotspot panel lists "Shared from the other state" with a
+**Show here** switch per hotspot (`link.hideIn: [nodeId]` — hidden for visitors in that view
+only, drawn faded/struck-through in the admin), and a shared hotspot can be dragged in the
+viewer to a view-specific spot (`link.pos[nodeId]`) without moving the owner's. Both keys
+round-trip through `parseTours`/`buildToursData` and the admin session snapshot (which
+previously also dropped `toggle`). New helper `sharedTourLinkIdx`. NOT browser-verified:
+headless Chrome would not navigate on the loaded machine; only `node --check` passed.
+Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-26 (Toggle twins share their room's hotspots; toggle code actually landed)
+
+The 2026-09-25 entry below described the toggle-pair dialog, but that code was never in the
+committed tree (only the docs were). It is implemented for real now: `openTogglePairDialog`,
+`addTourTogglePair`, `tourGoTo(..., {holdView})`, and `toggle` round-tripped in
+`parseTours` / `buildToursData`, plus the `.toggle-dlg-*` styles.
+
+New: flipping a toggle no longer drops the room's other hotspots. Nodes joined by `toggle:true`
+links are one spot in two states (`toggleGroupOf`), and `rebuildTourHotspotDOM` draws a twin's
+regular (non-toggle) links in every member of the group — e.g. "Kitchen" and "Window view"
+stay when curtains go open/closed. A node's own link to a target wins over a twin's; toggle
+links themselves are never shared. In the admin's Tour tab shared hotspots are dimmed and
+read-only (`is-shared`; edit them on the node that owns them).
+
+Verified headless on a throwaway copy: dialog validation, both directions created, twin shows
+the shared hotspot, camera heading unchanged across flips. Files: `app.js`, `styles.css`.
+
+---
+
 ## 2026-09-25 (Tour toggle pairs: one setup creates both directions)
 
 `Add hotspot with view` now creates a two-way toggle for alternate panoramas of the same
