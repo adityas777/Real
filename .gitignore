@@ -13,14 +13,9 @@ __pycache__/
 plot-map/cloudflared.exe
 plot-map/tools/
 
-# Source video originals - too large for GitHub (100 MB limit); kept locally only
-plot-map/projects/*/.originals/
-plot-map/projects/*/_originals/
-
-# anadmanv2 media lives on S3/CloudFront, not in git (its menu video alone is 220 MB, past
-# GitHub's 100 MB per-file limit). The project is deployed from the working copy.
-plot-map/projects/anadmanv2/
-
-# eleganzav2's main film is 207 MB — past GitHub's 100 MB per-file limit, so it can't be pushed.
-# It stays in the working copy, which is what ☁ Publish uploads from.
-plot-map/projects/eleganzav2/anandam eleganza film v4.1.mp4
+# Project data is NOT source code and never goes into git (2026-09-27, on request). Every project's
+# working files live in S3 (ZEROX-PROJECTS-FINAL/<id>/) and plot-map/projects/ is only this
+# machine's working copy, filled and uploaded by the admin — see plot-map/ADMIN-DATA-SYNC.md.
+# This one rule also covers what used to need its own line: big media, _originals/, the
+# per-machine .b91-sync.json record, half-downloaded *.part files.
+plot-map/projects/
