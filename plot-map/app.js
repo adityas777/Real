@@ -276,12 +276,12 @@ const state = {
   areaFilterId: null,
   overlayOpacity: 0.5,
   showLabels: (() => { try { return localStorage.getItem('b91-show-labels') === '1'; } catch { return false; } })(), // plot-number annotations: optional, default off (remembered per browser)
-  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(),
-  // "Don't resize landmarks" (2026-09-25, for the Eleganza team to try): landmark banners keep ONE
-  // size instead of growing and shrinking as the view moves. That is the entire feature. Their
-  // POSITION is deliberately untouched — each one stays on the spot and angle the admin placed it
-  // on. Off by default, remembered per browser.
-  steadyLandmarks: (() => { try { return localStorage.getItem('b91-steady-landmarks') === '1'; } catch { return false; } })(), // landmark banners: default ON so client view shows them on load
+  showLandmarks: (() => { try { return localStorage.getItem('b91-show-landmarks') !== '0'; } catch { return true; } })(), // landmark banners: default ON so client view shows them on load
+  // 📌 landmark mode (2026-09-25, for the Eleganza team to try): each banner is drawn exactly where
+  // the admin placed it (no clamping into view, no staggering around neighbours, no edge hiding),
+  // at one base size on every screen, scaled only by the zoom — see landmarkZoomScale and
+  // renderLandmarks. Off by default, remembered per browser.
+  steadyLandmarks: (() => { try { return localStorage.getItem('b91-steady-landmarks') === '1'; } catch { return false; } })(),
   landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   amenities: [], amSel: null, amCardOpen: null,  // in-layout amenities (icon pins + render); selected id; open card id
   tours: [], tourSel: null, tourNodeSel: null,   // authored virtual tours (tour.json); admin: selected tour id + node id
@@ -655,50 +655,269 @@ function setBootProgress(pct) {
   if (els.bootProgressFill) els.bootProgressFill.style.width = bootPct.toFixed(0) + '%';
   if (els.bootProgressPct) els.bootProgressPct.textContent = bootPct.toFixed(0) + '%';
 }
-// ─── Fetching a project's assets from S3 before the admin can edit it ───────────────────────
-// Projects are mirrored to S3 (assets_s3.py). A machine that has never had this project — a new
-// laptop, the co-worker's, or simply a project someone else created — holds none of its panoramas,
-// plans or renders, and the editor would otherwise open onto a string of missing files.
-//
-// So the admin asks the server to pull whatever is missing FIRST, and watches it happen on the
-// boot curtain that is already on screen: same bar, a caption saying what it is doing. When
-// nothing is missing (the normal case on your own machine) the server reports zero files and this
-// returns almost immediately, showing nothing at all — no loader for a step that isn't happening.
-//
-// Client pages never do this: a visitor's copy is the published one, which carries its own files.
-// Failure is never fatal — no S3 configured, no network, an old server without the endpoint — the
-// boot simply carries on with whatever is on disk, exactly as it did before.
-async function fetchProjectAssets(pid) {
+// ─── Project working files: the cloud copy ⇄ this computer (admin) ──────────────────────────
+// Design, rules and edge cases: ADMIN-DATA-SYNC.md — keep it in step with this section.
+// A project's working files live in S3 (assets_s3.py); projects/<id>/ on this machine is the
+// local working copy. Agreed 2026-09-26:
+// - OPENING a project in the admin first asks the server what differs (GET /api/assets/plan).
+//   Files the cloud has that this computer lacks, or has an older copy of, must be downloaded —
+//   the admin is told how much, agrees, and waits while it happens (blocking: the editor never
+//   opens on a half-present project). Nothing to download → nothing is shown at all.
+// - A file this computer CHANGED that also differs from the cloud is the admin's call: the cloud
+//   copy (this computer's is overwritten) or this computer's (kept, and uploaded by the next Save).
+//   Unsaved edits in this BROWSER (the working session / draft, newer than this browser's last
+//   Save) count as local changes too: downloading underneath them would otherwise be silently
+//   undone by the session restore that runs right after, which prefers the newest by savedAt.
+// - SAVE queues an upload (queueUpload → the upload widget). Uploads never happen otherwise.
+// Client pages never do any of this — a visitor's copy is the published one. Failure to reach
+// the cloud is never fatal: the admin works on this computer's files and is told so.
+const ASSETS_PREV_KEY = 'b91-admin-prev-project';           // sessionStorage: where "Back" returns to
+const savedMarkKey = (pid) => `b91-admin-saved-${pid}`;     // localStorage: when this browser last saved pid
+const bytesText = (n) => formatBytes(n) || '0 MB';
+const PF_KIND = { local: 'changed on this computer', both: 'changed here and in the cloud', unknown: 'differs from the cloud copy' };
+async function assetsApi(path, { method = 'GET' } = {}) {
+  const r = await fetch(path, { method, cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+function markSavedHere(pid) { try { localStorage.setItem(savedMarkKey(pid), String(Date.now())); } catch {} }
+// When this browser holds edits to `pid` that were never saved: the newest working-session or
+// draft timestamp, if it is later than this browser's last Save of it (0 = none).
+async function unsavedBrowserEdits(pid) {
+  let last = 0;
+  try { const s = await idbGet(); if (s && s.projectId === pid) last = Math.max(last, Date.parse(s.savedAt) || 0); } catch {}
+  try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); if (d && d.projectId === pid) last = Math.max(last, Date.parse(d.savedAt) || 0); } catch {}
+  if (!last) return 0;
+  let mark = 0; try { mark = +localStorage.getItem(savedMarkKey(pid)) || 0; } catch {}
+  return last > mark + 2000 ? last : 0;
+}
+// After a download, the files on disk are the truth: drop this browser's copy of the project so
+// the boot's session restore can't put an older state back over them.
+async function discardBrowserWork(pid) {
+  try { const s = await idbGet(); if (s && s.projectId === pid) await idbDel(); } catch {}
+  try { const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); if (d && d.projectId === pid) localStorage.removeItem(DRAFT_KEY); } catch {}
+  markSavedHere(pid);
+}
+async function prepareProjectFiles(pid) {
   if (!state.admin || !pid || BUNDLE) return;
-  const started = Date.now();
+  setBootLabel('Checking this project’s files…');
   try {
-    const kick = await fetch(`/api/assets/pull?project=${encodeURIComponent(pid)}`, { cache: 'no-store' });
-    if (!kick.ok) return;
+    let plan;
     for (;;) {
-      const res = await fetch(`/api/assets/status?project=${encodeURIComponent(pid)}`, { cache: 'no-store' });
-      if (!res.ok) return;
-      const job = (await res.json()).job || {};
-      if (!job.running) {
-        if (job.error) showNotice(`Couldn't fetch this project's files from the cloud (${esc(job.error)}). Working with what's on this machine.`);
-        break;
+      try { plan = await assetsApi(`/api/assets/plan?project=${encodeURIComponent(pid)}`); }
+      catch { return; }                                    // no server.py / an older one: nothing to sync
+      if (!plan.ok) {
+        if (plan.configured) showNotice(`Couldn’t reach the cloud copy of this project (${esc(plan.error || 'no answer')}). You’re working with the files on this computer — Save uploads them once the connection is back.`);
+        return;
       }
-      const total = job.bytesTotal || 0, done = job.bytesDone || 0;
-      if (job.filesTotal > 0) {
-        const mb = (n) => (n / 1048576).toFixed(n > 10485760 ? 0 : 1);
-        setBootLabel(total
-          ? `Fetching this project's files… ${mb(done)} of ${mb(total)} MB`
-          : `Fetching this project's files… ${job.filesDone || 0} of ${job.filesTotal}`);
-        // The curtain's own bar is driven by the pano/plan download later in boot; while this step
-        // owns the screen it shows this instead, capped at 90% so the bar never sits full while
-        // the rest of boot still has work to do.
-        if (total) setBootProgress(Math.min(90, Math.round((done / total) * 90)));
-      }
-      await new Promise((r) => setTimeout(r, 500));
+      if (!plan.busy) break;
+      await waitForProjectTransfer(pid);                   // the last Save is still uploading
     }
-  } catch {}
-  finally {
-    if (Date.now() - started > 400) setBootLabel('Loading…');
+    if (!plan.download.length && !plan.conflicts.length) return;
+    const browserEdits = await unsavedBrowserEdits(pid);
+    const use = await openProjectFilesDialog(pid, plan, browserEdits);
+    if (use === 's3' || !browserEdits) await discardBrowserWork(pid);
+  } finally {
+    setBootLabel('Loading…');
+    showBootBar(bootPct);
   }
+}
+async function waitForProjectTransfer(pid) {
+  try {
+    const { jobs = [] } = await assetsApi('/api/assets/jobs');
+    const j = jobs.find((x) => x.project === pid && (x.state === 'uploading' || x.state === 'queued'));
+    setBootLabel(j && j.state === 'uploading' && j.bytesTotal
+      ? `Finishing the upload of your last save… ${bytesText(j.bytesDone)} of ${bytesText(j.bytesTotal)}`
+      : (j ? 'Finishing the upload of your last save…' : 'Waiting for another download of this project…'));
+    if (j && j.bytesTotal) showBootBar(100 * j.bytesDone / j.bytesTotal);
+  } catch {}
+  await new Promise((r) => setTimeout(r, 1000));
+}
+// The boot bar, set directly (setBootProgress never goes backwards, and this step's progress is
+// its own — the pano download that follows starts from 0 again).
+function showBootBar(pct) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  if (els.bootProgressFill) els.bootProgressFill.style.width = p.toFixed(0) + '%';
+  if (els.bootProgressPct) els.bootProgressPct.textContent = p.toFixed(0) + '%';
+}
+// The blocking prompt. Resolves with the copy chosen ('s3' | 'local') once every needed file is
+// on disk; leaving (Back / another project) navigates away instead, so it never resolves.
+function openProjectFilesDialog(pid, plan, browserEdits) {
+  const needsChoice = plan.conflicts.length > 0 || (!!browserEdits && plan.download.length > 0);
+  const when = (ms) => new Date(ms).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const nLocal = plan.conflicts.length + (browserEdits ? 1 : 0);
+  const rows = plan.conflicts.slice(0, 6).map((c) => `<li><span>${esc(c.path)}</span><em>${esc(PF_KIND[c.kind] || PF_KIND.unknown)}</em></li>`).join('')
+    + (plan.conflicts.length > 6 ? `<li class="pf-more">…and ${plan.conflicts.length - 6} more</li>` : '')
+    + (browserEdits ? `<li><span>Unsaved changes in this browser</span><em>last edit ${esc(when(browserEdits))}</em></li>` : '');
+  let prev = ''; try { prev = sessionStorage.getItem(ASSETS_PREV_KEY) || ''; } catch {}
+  if (prev === pid || sanitizeProjectId(prev) !== prev) prev = '';
+  const wrap = document.createElement('div');
+  wrap.className = 'pf-dlg-backdrop';
+  wrap.innerHTML = `
+    <div class="pf-dlg" role="dialog" aria-modal="true" aria-labelledby="pfDlgTitle">
+      <h3 id="pfDlgTitle">${plan.download.length ? 'Download this project’s files' : 'Which copy should this project use?'}</h3>
+      ${plan.download.length ? `<p class="pf-dlg-lead"><b>${esc(pid)}</b> needs ${plan.download.length} file${plan.download.length === 1 ? '' : 's'} (${bytesText(plan.bytes)}) from the cloud before you can edit it. They stay in this computer’s working folder, so next time only what changed is downloaded.</p>` : ''}
+      ${needsChoice ? `<div class="pf-dlg-conflicts">
+        <p class="pf-dlg-lead">${nLocal === 1 ? 'This is' : `These ${nLocal} are`} different on this computer:</p>
+        <ul class="pf-dlg-list">${rows}</ul>
+        <label class="pf-dlg-opt"><input type="radio" name="pfUse" value="s3"><span><b>Use the cloud copy</b> — this computer’s versions are replaced.</span></label>
+        <label class="pf-dlg-opt"><input type="radio" name="pfUse" value="local"><span><b>Keep this computer’s copy</b> — used until you Save, which uploads it to the cloud.</span></label>
+      </div>` : ''}
+      <div class="pf-dlg-progress" hidden>
+        <div class="pf-dlg-bar"><div class="pf-dlg-fill"></div></div>
+        <div class="pf-dlg-status"></div>
+      </div>
+      <div class="pf-dlg-err" hidden></div>
+      <div class="pf-dlg-btns">
+        <span class="pf-dlg-leave">${prev ? `<button type="button" class="btn btn-ghost pf-dlg-back">← Back to ${esc(prev)}</button>`
+          : '<select class="pf-dlg-other" aria-label="Open another project"><option value="">Open another project…</option></select>'}</span>
+        <button type="button" class="btn btn-primary pf-dlg-go">Download and open</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const $$ = (s) => wrap.querySelector(s);
+  const go = $$('.pf-dlg-go'), err = $$('.pf-dlg-err');
+  const choice = () => (needsChoice ? (wrap.querySelector('input[name="pfUse"]:checked') || {}).value : 's3');
+  const need = (use) => plan.download.length + (use === 's3' ? plan.conflicts.length : 0);
+  const label = () => { const u = choice(); go.textContent = u && !need(u) ? 'Open project' : 'Download and open'; };
+  wrap.querySelectorAll('input[name="pfUse"]').forEach((r) => r.addEventListener('change', label));
+  label();
+  const leave = (id) => { try { sessionStorage.removeItem(ASSETS_PREV_KEY); } catch {} location.href = projUrl(id); };
+  $$('.pf-dlg-back')?.addEventListener('click', () => leave(prev));
+  const other = $$('.pf-dlg-other');
+  if (other) {
+    assetsApi('/api/projects').then((j) => {
+      [...(j.projects || []), ...(j.cloud || [])].filter((p) => p !== pid && sanitizeProjectId(p) === p)
+        .forEach((p) => { const o = document.createElement('option'); o.value = p; o.textContent = (j.cloud || []).includes(p) ? `${p} ☁` : p; other.appendChild(o); });
+    }).catch(() => {});
+    other.addEventListener('change', () => { if (other.value) leave(other.value); });
+  }
+  (wrap.querySelector('input[name="pfUse"]') || go).focus();
+  return new Promise((resolve) => {
+    const finish = (use) => { wrap.remove(); resolve(use); };
+    const fail = (msg) => {
+      err.hidden = false; err.textContent = `The download stopped: ${msg} Files already downloaded are kept — Try again picks up the rest.`;
+      go.disabled = false; go.textContent = 'Try again'; $$('.pf-dlg-leave').hidden = false;
+    };
+    go.addEventListener('click', async () => {
+      const use = choice();
+      if (!use) { err.hidden = false; err.textContent = 'Choose which copy to use first.'; return; }
+      err.hidden = true;
+      if (!need(use)) { finish(use); return; }
+      go.disabled = true; go.textContent = 'Downloading…';
+      $$('.pf-dlg-leave').hidden = true;
+      wrap.querySelectorAll('input[name="pfUse"]').forEach((r) => { r.disabled = true; });
+      $$('.pf-dlg-progress').hidden = false;
+      try {
+        const start = await assetsApi(`/api/assets/pull?project=${encodeURIComponent(pid)}&use=${use}`, { method: 'POST' });
+        if (!start.ok) { fail(`${start.error || 'the server refused.'}`); return; }
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 400));
+          const { job = {} } = await assetsApi(`/api/assets/pull-status?project=${encodeURIComponent(pid)}`);
+          const pct = job.bytesTotal ? 100 * job.bytesDone / job.bytesTotal : (job.filesTotal ? 100 * job.filesDone / job.filesTotal : 0);
+          $$('.pf-dlg-fill').style.width = `${pct.toFixed(1)}%`;
+          showBootBar(pct);
+          $$('.pf-dlg-status').innerHTML = job.filesTotal
+            ? `${Math.min(job.filesTotal, (job.filesDone || 0) + (job.state === 'running' ? 1 : 0))} of ${job.filesTotal} files · ${bytesText(job.bytesDone)} of ${bytesText(job.bytesTotal)}${job.current ? `<span>${esc(job.current)}</span>` : ''}`
+            : 'Starting…';
+          if (job.state === 'done') { finish(use); return; }
+          if (job.state === 'error') { fail(`${job.error || 'unknown error'}.`); return; }
+        }
+      } catch (e) {
+        fail(`${e.message || e} — is the server still running?`);
+      }
+    });
+  });
+}
+
+// ─── Cloud uploads widget (admin) ─────────────────────────────────────────────────────────────
+// Every Save queues an upload job on the server (assets_s3 enqueue_push); jobs for one project run
+// one after another, each sending only what is still different when it starts, so a second Save
+// while a big video is going up is never lost — it is the next job. This corner card lists what
+// is uploading, waiting, finished (briefly) or failed (until dismissed, with Retry). Jobs run on
+// the server, so they carry on if this tab reloads or switches project; the card picks them up
+// again at boot (initProjectBar → pollUploads).
+const uploads = { jobs: [], timer: 0, el: null, hidden: new Set(), doneAt: new Map(), warned: false };
+const UPLOAD_DONE_SHOWN_MS = 12000;
+async function queueUpload(pid) {
+  let j;
+  try { j = await assetsApi(`/api/assets/push?project=${encodeURIComponent(pid)}&label=Save`, { method: 'POST' }); }
+  catch { return; }                                        // no server.py: the save already fell back
+  if (!j.ok) {
+    if (j.configured === false) {
+      if (!uploads.warned) showNotice('Saved on this computer. Cloud upload isn’t set up on this server (publish.config.json), so saves stay on this computer.');
+      uploads.warned = true;
+    } else showNotice(`Saved on this computer, but the upload to the cloud couldn’t start (${esc(j.error || 'no answer')}).`);
+    return;
+  }
+  pollUploads();
+}
+async function pollUploads() {
+  clearTimeout(uploads.timer);
+  try { const j = await assetsApi('/api/assets/jobs'); if (j.ok) uploads.jobs = j.jobs || []; } catch { return; }
+  const now = Date.now();
+  uploads.jobs.forEach((x) => { if ((x.state === 'done' || x.state === 'error') && !uploads.doneAt.has(x.id)) uploads.doneAt.set(x.id, now); });
+  renderUploadDock();
+  const active = uploads.jobs.some((x) => x.state === 'queued' || x.state === 'uploading');
+  const fading = uploads.jobs.some((x) => x.state === 'done' && !uploads.hidden.has(x.id) && now - uploads.doneAt.get(x.id) < UPLOAD_DONE_SHOWN_MS);
+  if (active || fading) uploads.timer = setTimeout(pollUploads, active ? 1000 : 2000);
+}
+function uploadShown(x, now, latest) {
+  if (uploads.hidden.has(x.id)) return false;
+  if (x.state === 'queued' || x.state === 'uploading') return true;
+  // A failure stays until dismissed — unless a later upload of the same project has replaced it
+  // (a Retry, or the next Save, which sends everything still missing anyway).
+  if (x.state === 'error') return x.id === latest[x.project];
+  // Finished ones linger briefly — but only ones this page watched finish, not old history.
+  return x.state === 'done' && now - (uploads.doneAt.get(x.id) || 0) < UPLOAD_DONE_SHOWN_MS && uploads.seenActive?.has(x.id);
+}
+function renderUploadDock() {
+  if (!uploads.el) {
+    uploads.el = document.createElement('div');
+    uploads.el.className = 'upload-dock'; uploads.el.hidden = true;
+    uploads.el.setAttribute('role', 'status'); uploads.el.setAttribute('aria-live', 'polite');
+    uploads.el.addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-act]'); if (!b) return;
+      const id = +b.dataset.id;
+      if (b.dataset.act === 'dismiss') { uploads.hidden.add(id); renderUploadDock(); }
+      else if (b.dataset.act === 'hide') { uploads.jobs.forEach((x) => { if (x.state === 'done' || x.state === 'error') uploads.hidden.add(x.id); }); renderUploadDock(); }
+      else if (b.dataset.act === 'retry') {
+        b.disabled = true; uploads.hidden.add(id);
+        try { const j = await assetsApi(`/api/assets/retry?id=${id}`, { method: 'POST' }); if (!j.ok) showNotice(`Couldn’t retry the upload (${esc(j.error || 'no answer')}).`); } catch {}
+        pollUploads();
+      }
+    });
+    document.body.appendChild(uploads.el);
+  }
+  uploads.seenActive = uploads.seenActive || new Set();
+  uploads.jobs.forEach((x) => { if (x.state === 'queued' || x.state === 'uploading') uploads.seenActive.add(x.id); });
+  const now = Date.now(), latest = {};
+  uploads.jobs.forEach((x) => { latest[x.project] = Math.max(latest[x.project] || 0, x.id); });
+  const shown = uploads.jobs.filter((x) => uploadShown(x, now, latest)).reverse();   // oldest first, like a queue
+  uploads.el.hidden = !shown.length;
+  if (!shown.length) { uploads.el.innerHTML = ''; return; }
+  const t = (s) => new Date(s * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const busy = shown.filter((x) => x.state === 'queued' || x.state === 'uploading').length;
+  uploads.el.innerHTML = `<div class="ud-head"><span>☁ ${busy ? `Uploading to the cloud · ${busy}` : 'Cloud uploads'}</span>`
+    + `${busy ? '' : '<button type="button" class="ud-x" data-act="hide" aria-label="Hide">×</button>'}</div>`
+    + shown.map((x) => {
+      let status = '', bar = '';
+      if (x.state === 'queued') status = 'Waiting for the upload before it…';
+      else if (x.state === 'uploading' && !x.filesTotal) status = 'Checking what changed…';
+      else if (x.state === 'uploading') {
+        const pct = x.bytesTotal ? 100 * x.bytesDone / x.bytesTotal : 100 * x.filesDone / x.filesTotal;
+        status = `${Math.min(x.filesTotal, x.filesDone + 1)} of ${x.filesTotal} files · ${bytesText(x.bytesDone)} of ${bytesText(x.bytesTotal)}`
+          + (x.current ? `<span class="ud-file">${esc(x.current)}</span>` : '');
+        bar = `<div class="ud-bar"><div style="width:${pct.toFixed(1)}%"></div></div>`;
+      } else if (x.state === 'done') {
+        status = x.uploaded ? `✓ Uploaded ${x.uploaded} file${x.uploaded === 1 ? '' : 's'} · ${bytesText(x.bytesTotal)}` : '✓ Already up to date';
+        if (x.keptNewer) status += `<span class="ud-file">${x.keptNewer} file${x.keptNewer === 1 ? ' is' : 's are'} newer in the cloud — reopen the project to get ${x.keptNewer === 1 ? 'it' : 'them'}.</span>`;
+      } else status = `Upload failed: ${esc(x.error || 'unknown error')}`;
+      const acts = x.state === 'error' ? `<button type="button" class="ud-retry" data-act="retry" data-id="${x.id}">Retry</button><button type="button" class="ud-x" data-act="dismiss" data-id="${x.id}" aria-label="Dismiss">×</button>`
+        : (x.state === 'done' ? `<button type="button" class="ud-x" data-act="dismiss" data-id="${x.id}" aria-label="Dismiss">×</button>` : '');
+      return `<div class="ud-job is-${x.state}"><div class="ud-top"><b>${esc(x.project)}</b><span>${esc(x.label || 'Save')} at ${t(x.createdAt)}</span>${acts}</div>`
+        + `<div class="ud-status">${status}</div>${bar}</div>`;
+    }).join('');
 }
 function setBootLabel(text) {
   if (els.bootLabel) els.bootLabel.textContent = text;
@@ -1108,14 +1327,24 @@ async function initProjectBar() {
   let projects = [];
   // /api/projects only exists under server.py. If it's missing, we're on a plain static
   // server → saves can't write to disk (they'll download). Warn up-front so it's not a surprise.
-  try { const r = await fetch('/api/projects'); state.serverSave = r.ok; if (r.ok) projects = (await r.json()).projects || []; }
+  let cloud = [];
+  try { const r = await fetch('/api/projects'); state.serverSave = r.ok; if (r.ok) { const j = await r.json(); projects = j.projects || []; cloud = j.cloud || []; } }
   catch { state.serverSave = false; }
   if (!state.serverSave) showNotice('Save server not detected — Save will <strong>download</strong> files instead of writing to the project folder. Run <code>python server.py 8731</code> (not <code>http.server</code>) and reload.');
   projects = projects.filter((p) => sanitizeProjectId(p) === p);          // only loadable ids (drops legacy "My Demo" folders)
   if (!projects.includes(BOOT_PROJECT)) projects.unshift(BOOT_PROJECT);   // always show the current one
-  els.projSelect.innerHTML = projects.map((p) => `<option value="${esc(p)}"${p === BOOT_PROJECT ? ' selected' : ''}>${esc(p)}</option>`).join('');
+  cloud = cloud.filter((p) => sanitizeProjectId(p) === p && !projects.includes(p));
+  // Projects only in the cloud so far: opening one downloads its files first (prepareProjectFiles).
+  els.projSelect.innerHTML = projects.map((p) => `<option value="${esc(p)}"${p === BOOT_PROJECT ? ' selected' : ''}>${esc(p)}</option>`).join('')
+    + (cloud.length ? `<optgroup label="In the cloud — not on this computer yet">${cloud.map((p) => `<option value="${esc(p)}">${esc(p)} ☁</option>`).join('')}</optgroup>` : '');
   els.proj.hidden = false;
-  els.projSelect.addEventListener('change', () => { const id = sanitizeProjectId(els.projSelect.value); if (id && id !== BOOT_PROJECT) location.href = projUrl(id); });
+  els.projSelect.addEventListener('change', () => {
+    const id = sanitizeProjectId(els.projSelect.value);
+    if (!id || id === BOOT_PROJECT) return;
+    try { sessionStorage.setItem(ASSETS_PREV_KEY, BOOT_PROJECT); } catch {}   // the download prompt's "Back"
+    location.href = projUrl(id);
+  });
+  pollUploads();                                        // uploads still running from before a reload
   if (els.projTools) {
     els.projTools.hidden = false;
     els.projSave?.addEventListener('click', headerSave);
@@ -1197,7 +1426,7 @@ async function commitProjName() {
   if (!validateProjName()) return;
   const v = sanitizeProjectId(els.projNameInput.value);
   if (projAction === 'new') { location.href = projUrl(v); return; }        // empty project → build & save there
-  if (projAction === 'saveas') { state.projectId = v; els.projNameHint.textContent = 'Duplicating…'; await exportSite(); location.href = projUrl(v); return; }
+  if (projAction === 'saveas') { state.projectId = v; els.projNameHint.textContent = 'Duplicating…'; await exportSite({ upload: true }); location.href = projUrl(v); return; }
   if (projAction === 'rename') return renameProject(BOOT_PROJECT, v);
   if (projAction === 'delete') return deleteProject(BOOT_PROJECT);
 }
@@ -4195,7 +4424,7 @@ function collectCustomMenuFiles() {
 }
 
 // one-click export of the whole site to the server-side project directory
-async function exportSite() {
+async function exportSite({ upload = false } = {}) {
   const hasGeom = state.geom.length > 0;
   const hasLandmarks = state.landmarks.length > 0;
   const hasAmenities = state.amenities.length > 0;
@@ -4247,7 +4476,13 @@ async function exportSite() {
     files.push(...await fetchReferencedImages(have));
   }
   const ok = await saveToProject(files, tagFiles(files));
-  if (ok) saveSession(true);
+  if (ok) {
+    await saveSession(true);
+    markSavedHere(BOOT_PROJECT);                        // this browser's session now matches the disk
+    // Only an explicit Save (the button, Save as, Publish) uploads — landmark/amenity edits
+    // auto-save to disk every few hundred ms, and those stay on this computer until then.
+    if (upload) queueUpload(state.projectId);
+  }
   if (sheetReplaced && sheetReplaced.changed) {
     const n = sheetReplaced.changed, m = sheetReplaced.plots;
     showNotice(`The Google Sheet replaced ${n} value${n === 1 ? '' : 's'} on ${m} plot${m === 1 ? '' : 's'} before saving — for plots the sheet lists, its values win. Make those changes in the sheet instead.`);
@@ -4259,7 +4494,7 @@ async function headerSave() {
   const btn = els.projSave; if (!btn || btn.disabled) return;
   const orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Saving…';
   let ok = false;
-  try { ok = await exportSite(); } catch {}
+  try { ok = await exportSite({ upload: true }); } catch {}
   btn.innerHTML = ok ? '✓ Saved' : '⚠ Downloaded — no server';
   setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, ok ? 1600 : 2600);
 }
@@ -4490,7 +4725,7 @@ async function publishNow() {
     const chk = await postPublish('/api/publish', { check: true });
     if (!chk.r.ok) throw new Error(chk.j.error || `Publish failed (HTTP ${chk.r.status}).`);
     showPublishProgress('Saving the project first…', 0);
-    if (!await exportSite()) {
+    if (!await exportSite({ upload: true })) {
       throw new Error('The project couldn’t be saved to the server, so there’s nothing up to date to publish. Check the save message in the sidebar and try again.');
     }
     showPublishProgress('Starting the upload…', 0);
@@ -12044,8 +12279,9 @@ async function onOfflineRemove() {
     // Is this project saved on this device? The menu's offline row reads it, so it's awaited
     // (a few ms) just before the menu first renders.
     const offlineRecordReady = loadOfflineRecord();
-    // Admin on a machine that lacks this project's files: pull them down first, on the curtain.
-    await fetchProjectAssets(BOOT_PROJECT);
+    // Admin: bring this computer's working copy in step with the cloud copy first (see
+    // prepareProjectFiles) — a download the admin agrees to, or nothing at all when in step.
+    await prepareProjectFiles(BOOT_PROJECT);
     await loadGeometry();
     setBootProgress(3);
     // alignment precedence — client: committed file only. admin: freshest of the full

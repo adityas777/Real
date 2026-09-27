@@ -5,6 +5,126 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-27 (Project data out of git — S3 is its only shared home)
+
+On request: "update gitignore so none of the projects data gets to git. projects are supposed to
+saved to cloud only. delete any projects on git".
+
+- `.gitignore`: `plot-map/projects/` ignored as a whole. The per-project lines it replaces (the
+  `.originals`/`_originals` folders, `anadmanv2/`, eleganzav2's 207 MB film, `.b91-sync.json`,
+  `*.part`) are gone — the one rule covers them.
+- `git rm -r --cached plot-map/projects`: its 127 tracked files (609 MB, 16 folders) removed from
+  the index. **Nothing deleted from disk** — every folder is still in this working copy.
+- Checked before removing: every tracked file was in S3 with identical content (7 projects differed
+  only in line endings). Not in S3: the `Backup` folder (not a valid project id, so it never syncs)
+  and eleganzav2's two `.backup-renumber-*` folders (dot-folders never sync) — they remain on this
+  machine and in git history.
+- Still in git HISTORY (earlier commits). Purging it would mean rewriting history and
+  force-pushing — not done.
+- Heads-up for other clones: pulling this commit deletes the previously tracked project files from
+  that working copy; the next admin open downloads them from S3.
+
+Docs: `ADMIN-DATA-SYNC.md` (layers table, invariant 9, edge cases, history), `CLAUDE.md` (data
+contract + save section), repo-root `CLAUDE.md`, `README.md`.
+
+---
+
+## 2026-09-27 (Design doc: ADMIN-DATA-SYNC.md — admin data, cloud ⇄ this computer)
+
+On request: one place that explains how the admin's project data moves between S3 and a machine,
+so future changes can pick it up and keep it maintained. **`ADMIN-DATA-SYNC.md`** covers the model,
+every place admin data lives (S3 folder + manifest, local working copy + `.b91-sync.json`, browser
+session/draft, the saved-here mark, git), the open / edit / save / upload / no-cloud flows (with a
+flowchart), the per-file decision table, the invariants not to break, what never syncs,
+download/upload internals, the `/api/assets/*` API, a code map, configuration, edge cases, how to
+verify, and the history (2026-09-25 first version → 2026-09-26 rework).
+
+Wired in so it stays current: listed at the top of `CLAUDE.md` (design docs) and in its
+Documentation-discipline checklist; CLAUDE.md's long S3 bullets cut to a summary + link (one home
+for the details); the `keep-docs-current` skill now names it (and runs for server changes too);
+pointers from the repo-root `CLAUDE.md`, `README.md`, and the code (`assets_s3.py` docstring,
+the app.js section header, the server.py route block). The offline rule checks moved from a
+scratch script into the repo as **`tests/test_assets_s3.py`** (fake S3, temp folder, no network;
+19 checks, all passing; exits non-zero on failure).
+
+Corrected on the way: `.b91-publish.json` lives in S3, not beside the local files — dropped from
+`.gitignore` and from `assets_s3.py`'s "never synced" note; the doc records that sync needs the
+full ☁ Publish config (it shares `load_config`, which also requires `distributionId`,
+`publicBaseUrl` and a password). Files: `ADMIN-DATA-SYNC.md` (new), `tests/test_assets_s3.py`
+(new), `CLAUDE.md`, `../CLAUDE.md`, `README.md`, `.claude/skills/keep-docs-current/SKILL.md`,
+`assets_s3.py`, `app.js`, `server.py`, `../.gitignore`.
+
+---
+
+## 2026-09-26 (Project working files in S3, reworked: ask before downloading, queue uploads per Save)
+
+The owner's plan for the 2026-09-25 S3 mirror (reviewed the same day; five problems found):
+"everytime admin panel is opened, the s3 files for a project are downloaded in a persistent
+working folder locally… no duplicate download… give prompt to admin when they switch the projects…
+blocking load till all files are downloaded… in case the files between local and s3 are
+different… users gets a prompt to decide which copy to use", plus "a smart multiple upload widget
+which can allow multiple uploads — everytime save is clicked".
+
+**What was wrong before:** opening a project replaced any local file whose SIZE differed from
+S3's — unsaved local work was overwritten by older cloud copies; every missing file asked S3
+before answering (0.5–1.6 s per optional file the app probes, e.g. `loading.web.jpg`); a Save
+made while an upload ran was skipped with nothing retrying it (and `/api/save` started the upload
+BEFORE the Save's big files reached `/api/upload`); files whose names start with a dot were
+uploaded but could never be downloaded, so they read as "missing" on every other machine forever.
+
+**assets_s3.py (rewritten)**
+- `plan(pid)`: compares local files, the S3 manifest and a new LOCAL sync record
+  (`projects/<id>/.b91-sync.json`, git-ignored — what this machine and S3 last agreed on).
+  → `download` (missing here / changed in S3 while untouched here) and `conflicts` (changed here
+  and different in S3: `local`, `both`, or `unknown` = never synced). Files in step are recorded
+  so they aren't re-hashed.
+- `start_pull(pid, use)`: background download; `use=s3` also overwrites conflicts, `use=local`
+  keeps them. Media first, JSON last; `.part` then replace; record updated per file.
+- `enqueue_push(pid)`: one job per Save, a queue per project, one transfer at a time per project.
+  A job uploads files changed here since the last sync — never a file untouched here that S3
+  holds newer (`keptNewer`). Byte progress via boto3 callbacks; the manifest is merged (re-read
+  first; nothing ever dropped) after each big file and at the end. `jobs()`, `retry(id)`.
+- Text files hash with CRLF folded to LF (git autocrlf must not look like an edit); older
+  manifests are upgraded file by file. Dot-paths, `_originals`, `*.part` never sync. S3 client
+  with short connect timeouts. `cloud_projects()` lists S3-only project ids.
+
+**server.py** — `GET /api/assets/plan`, `POST /api/assets/pull?use=`, `GET /api/assets/pull-status`,
+`POST /api/assets/push`, `GET /api/assets/jobs`, `POST /api/assets/retry?id=` replace
+`/api/assets/pull` + `/status`; `/api/save` no longer uploads; the on-demand S3 fetch for a missing
+file is removed (plain 404 again, measured 12 ms); `/api/projects` adds `cloud`.
+
+**app.js** — `fetchProjectAssets` → `prepareProjectFiles` + `openProjectFilesDialog` (blocking
+prompt over the boot curtain; required copy choice when there are conflicts; unsaved edits in
+this browser count as one — `unsavedBrowserEdits`/`markSavedHere`/`discardBrowserWork`; "← Back
+to <prev>" or "Open another project…"). `exportSite({upload})` — only 💾 Save, Save as and Publish
+upload; the 400 ms landmark/amenity auto-saves stay local. Upload widget `queueUpload`/
+`pollUploads`/`renderUploadDock`. The switcher lists cloud-only projects and remembers the
+project you came from.
+
+**styles.css** — `.pf-dlg-*` (z-index above the boot curtain), `.upload-dock`/`.ud-*`
+(bottom-right, left of the zoom column). **.gitignore** — the per-machine records and `*.part`.
+
+**Also:** `projects/try1/amenities.json` restored (the 2026-09-25 commit had saved an S3 test
+payload, `{"amenities":[],"_s3test":…}`, over it; the S3 copy was replaced by the next Save).
+
+Verified: 19 offline rule checks against a fake S3 (scratch script); in the Browser pane — try1
+conflict prompt, keep local, Save → widget "✓ Uploaded 6 files", reopen with no prompt; laxmi
+45 files / 105.7 MB downloaded in 12.8 s then 59 in sync; "← Back" from cloud-only `lknj`;
+missing-file 404 in 12 ms. Not tried: a second real machine; a download cut off by a real
+network drop. Files: `assets_s3.py`, `server.py`, `app.js`, `styles.css`, `.gitignore`,
+`projects/try1/amenities.json`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-26 (Docs corrected: the 📌 landmark entry described a version that was replaced)
+
+The 2026-09-25 📌 entry said labels sit above their own pin (`LM_PIN_LIFT`) and still avoid
+overlaps; the code draws each banner exactly where the admin placed it and skips the overlap pass.
+Entry rewritten to match the code (the pin-anchored version is kept as "built, measured,
+replaced"); the `state.steadyLandmarks` and `index.html` comments fixed the same way. Docs only.
+
+---
+
 ## 2026-09-26 (Proof of concept: Google Earth 3D → 360° panorama)
 
 New standalone tool `tools/google-earth-pano.html` (not linked from the app). Loads Google
@@ -431,6 +551,10 @@ git-ignored), `s3-root/index.html` + `s3-root/_404.html` (new), `server.py`, `de
 
 ## 2026-09-25 (Projects mirrored to S3: Save pushes, opening pulls, with a loading step)
 
+*(Superseded 2026-09-26 — see "Project working files in S3, reworked": downloads now ask first
+and can resolve conflicts, uploads are a queue fed only by Save, and the per-request S3 fetch
+for missing files is gone.)*
+
 Requested: the admin should work like Publish does for the client — "whenever the admin clicks save
 any new assets that is added by the admin is pushed to s3... so when the admin comes and selects
 any of the project all the assets of that particular project is directly fetched from s3 so that
@@ -480,43 +604,46 @@ Verified end to end on this machine:
 
 ---
 
-## 2026-09-25 (📌 Landmark markers: anchored to their pin, upright, zoom-responsive)
+## 2026-09-25 (📌 Landmark markers: drawn where the admin placed them, upright, zoom-responsive)
+
+*(Entry corrected 2026-09-26: it first described the pin-anchored version below, which the owner
+then replaced; the bullets now match the code.)*
 
 The feature the owner's boss asked for, settled after several passes against the 3DVista tour the
 project is measured by (demo.build91.in/AnandamEleganza). `📌` button in the client control column
-(`#steadyLandmarkToggle`), OFF by default, remembered as `b91-steady-landmarks`. While ON:
+(`#steadyLandmarkToggle`), OFF by default, remembered as `b91-steady-landmarks`. While ON
+(`state.steadyLandmarks`, `renderLandmarks`/`landmarkZoomScale` in app.js):
 
-- **Anchored to its own pin.** The label sits `LM_PIN_LIFT` (26px, scaled with the label) above its
-  pin, instead of at the separate point in the sky the admin placed it at. Those are two different
-  world directions, so as the view turned the gap between them opened and closed — which is what
-  was reported as banners "getting elongated and contracted" at the edges. Measured across the
-  reporter's own screenshots, the labels never changed size at all (128px, 134px, 140px, identical
-  in both views); it was the distance to the pin that moved. Pin and label are now one short,
-  upright marker. Measured after: 0px of movement relative to its pin, on all 8 markers, while
-  panning.
-- **Size follows the zoom**: `clamp(0.85 * tan(70/2) / tan(fov/2), 0.45, 1.5)` of natural size.
+- **Drawn exactly where the admin placed it.** Each banner sits at the projection of its authored
+  lon/lat, untouched — the vertical pass that clamps banners into the visible band and staggers
+  neighbours (recomputed every frame) is skipped entirely, as is the "hide a banner that would be
+  half-cut at the screen edge" rule. Accepted cost, by the owner's choice: two landmarks close
+  together may overlap, and a banner authored above the visible sky is out of shot.
+- **Size follows the zoom**: `clamp(0.85 * tan(70/2) / tan(fov/2), 0.45, 1.5)` of natural size
+  (`LM_FIXED_SIZE`/`LM_FIXED_MIN`/`LM_FIXED_MAX`), on every device.
+- **One base size on every screen.** The phone stylesheet normally shrinks banner text by device
+  (9px landscape phone, 11.5px portrait, 13.5px desktop); `.landmarks.lm-flat` pins the desktop
+  sizes everywhere, so only the zoom scales them.
 - **Never tilts.** Flat DOM overlays only — every banner's computed transform carries zero rotation
-  and zero skew, and the reporter's own screenshots measure 0.00 degrees across 20 banners.
-- **Still avoids overlaps**: the existing vertical pass runs on top of the pin anchoring, so two
-  labels close together stagger instead of colliding. Skipping it was tried and rejected.
+  and zero skew.
 - **Flat shadow** (`.landmarks.lm-flat`): the default banner's `0 12px 30px rgba(0,0,0,.7)` is the
   only depth cue against plain sky and reads as a plaque leaning back. Scoped to the toggle, so the
   signed-off default design is untouched.
+- **Inside the LANDMARKS section** the control column stays on screen carrying only the 📌 button
+  (`.zoom-controls.lm-only`, `isLandmarksSectionActive`) — the view where its effect shows.
 
-Rejected along the way, recorded so they are not retried: labels as real 3D objects
-(`vendor/CSS3DRenderer.js`, now deleted) reproduced the reference's tilt but CSS perspective
-stretched anything off-centre — an edge label measured 4.3x the centre one — and the size could not
-be derived from the renderer's maths, being out by more than 10x twice; holding one fixed pixel
-size ignored the zoom the owner liked; keeping the admin's sky position kept the drifting gap.
+Built, measured and then replaced — recorded so it is not rebuilt by accident:
+- **Label anchored above its own pin** (`LM_PIN_LIFT`, 26px): pin and label as one short upright
+  marker, overlap pass kept. Measured 0px of movement relative to the pin on all 8 eleganzav2
+  markers while panning — it did remove the "elongating" gap between a banner and its pin that was
+  reported. The owner chose the admin's own placement over it.
+- **Labels as real 3D objects** (`vendor/CSS3DRenderer.js`, never committed): reproduced the
+  reference's tilt, but CSS perspective stretched anything off-centre — an edge label measured
+  4.3x the centre one — and the size could not be derived from the renderer's maths.
+- **One fixed pixel size**: ignored the zoom the owner liked.
 
-Verified headless on eleganzav2: 0px pin-relative movement while panning (8 markers), sizes
-constant per zoom level, 0 rotation/skew anywhere, and a screenshot showing short vertical leaders
-with labels staggered where they would otherwise overlap.
-
-Also fixed here: with the toggle on, labels are up to 1.5x normal size, and the flat layer's
-"hide anything that would be half-cut at the screen edge" rule was then hiding nearly all of them
-on a narrow phone — the layer emptied the moment the toggle went on. That rule is skipped in
-📌 mode.
+The measurements above were taken on the pin-anchored version; the shipped behaviour was not
+separately measured.
 
 ---
 

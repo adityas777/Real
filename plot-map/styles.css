@@ -4184,3 +4184,87 @@ body.is-admin .tour-hs.is-shared { opacity: .55; }
 /* Admin view of a shared hotspot switched off for this view: still findable, clearly off. */
 body.is-admin .tour-hs.is-shared.is-hidden-here { opacity: .22; }
 body.is-admin .tour-hs.is-hidden-here .tour-hs-lbl { text-decoration: line-through; }
+
+/* ─── Project working files (admin, 2026-09-26) ────────────────────────────────────────────────
+   The blocking "download this project's files" prompt (openProjectFilesDialog, app.js). It sits
+   over the boot curtain, which is z-index 999999 and above every other modal — hence the number. */
+.pf-dlg-backdrop {
+  position: fixed; inset: 0; z-index: 1000000;
+  display: grid; place-items: center; padding: 16px;
+  background: rgba(4, 5, 8, .72); backdrop-filter: blur(3px);
+}
+.pf-dlg {
+  width: 100%; max-width: 460px; max-height: calc(100vh - 32px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.pf-dlg h3 { margin: 0; font-size: 16px; }
+.pf-dlg-lead { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-dim); }
+.pf-dlg-lead b { color: var(--text); }
+.pf-dlg-conflicts { display: flex; flex-direction: column; gap: 8px; }
+.pf-dlg-list {
+  list-style: none; margin: 0; padding: 8px 10px; font-size: 12.5px;
+  background: rgba(0, 0, 0, .25); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.pf-dlg-list li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+.pf-dlg-list li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-dlg-list li em { flex: none; font-style: normal; color: var(--gold-soft); font-size: 11.5px; }
+.pf-dlg-list li.pf-more { color: var(--text-mute); }
+.pf-dlg-opt {
+  display: flex; align-items: flex-start; gap: 10px; cursor: pointer;
+  padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  font-size: 13px; line-height: 1.45; color: var(--text-dim);
+}
+.pf-dlg-opt b { color: var(--text); }
+.pf-dlg-opt input { margin-top: 3px; accent-color: var(--gold); }
+.pf-dlg-opt:has(input:checked) { border-color: var(--gold); background: var(--gold-dim); }
+.pf-dlg-progress { display: flex; flex-direction: column; gap: 6px; }
+.pf-dlg-progress[hidden] { display: none; }
+.pf-dlg-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.pf-dlg-fill { height: 100%; width: 0; background: var(--gold); transition: width .3s ease; }
+.pf-dlg-status { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.pf-dlg-status span { display: block; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-dlg-err {
+  font-size: 12.5px; line-height: 1.45; color: #ffb4ae; background: rgba(224, 106, 98, .12);
+  border: 1px solid rgba(224, 106, 98, .35); border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.pf-dlg-err[hidden] { display: none; }
+.pf-dlg-btns { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.pf-dlg-leave[hidden] { display: none; }
+.pf-dlg-btns .btn { font-size: 12.5px; }
+.pf-dlg-go { margin-left: auto; }
+.pf-dlg-other {
+  font: inherit; font-size: 12.5px; color: var(--text-dim); max-width: 220px;
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 7px 8px;
+}
+
+/* The cloud-uploads card (renderUploadDock, app.js): bottom-right of the admin page, just left of
+   the zoom-control column (the admin sidebar owns the bottom-left), above the pano, below modals.
+   One row per upload job — waiting, uploading (with a bar), done (briefly), failed (until
+   dismissed, with Retry). */
+.upload-dock {
+  position: fixed; right: 72px; bottom: 16px; z-index: 55;
+  width: min(320px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 10px 12px; font-size: 12.5px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.upload-dock[hidden] { display: none; }
+.ud-head { display: flex; align-items: center; justify-content: space-between; font-weight: 700; font-size: 12px; color: var(--text); }
+.ud-job { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.ud-top { display: flex; align-items: center; gap: 8px; }
+.ud-top span { flex: 1; min-width: 0; color: var(--text-mute); font-size: 11.5px; }
+.ud-status { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ud-file { display: block; color: var(--text-mute); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ud-job.is-done .ud-status { color: #8fd19e; }
+.ud-job.is-error .ud-status { color: #ffb4ae; }
+.ud-bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.ud-bar > div { height: 100%; background: var(--gold); transition: width .3s ease; }
+.ud-x, .ud-retry {
+  font: inherit; cursor: pointer; border-radius: 6px; line-height: 1;
+  background: transparent; color: var(--text-dim); border: 1px solid var(--line);
+}
+.ud-x { width: 22px; height: 22px; font-size: 14px; padding: 0; }
+.ud-retry { padding: 4px 8px; font-size: 11.5px; color: var(--gold-soft); border-color: rgba(212, 175, 55, .45); }
+.ud-x:hover, .ud-retry:hover { color: var(--text); border-color: var(--text-mute); }

@@ -12,8 +12,9 @@ until the docs reflect it.
 
 ## When to run
 
-- **Every turn where you changed** `app.js`, `index.html`, `styles.css`, or the
-  `sample/` file contract — run this before you write your closing summary.
+- **Every turn where you changed** `app.js`, `index.html`, `styles.css`, the server
+  (`server.py`, `assets_s3.py`, `publish_s3.py`), or the `sample/` file contract — run this
+  before you write your closing summary.
 - When the user asks to document / summarize / write a handoff.
 - Skip only for pure read-only investigation or throwaway experiments you reverted.
 
@@ -42,7 +43,19 @@ Work through these; update only what your change actually touched.
 4. **Inline comments in the code**: keep a short "why" next to non-obvious logic you
    added or changed (handedness, projection, cache-busting, texture caps, etc.).
 
-5. **Optional — `~/.claude` memory** (`plot-map-prototype.md`): if you have memory
+5. **The design doc for the area you touched** — these are the source of truth for their
+   area, and CLAUDE.md only summarises and links them:
+   - **`ADMIN-DATA-SYNC.md`** — admin data moving between S3 and this computer:
+     `assets_s3.py`, `/api/assets/*`, `/api/projects`, the admin Save/upload path
+     (`exportSite`'s `upload`, `queueUpload`, the upload widget), `prepareProjectFiles` /
+     the download prompt, the admin working session/draft. Keep its rule table (§4),
+     invariants (§5), API (§9) and code map (§10) matching the code, and add a case to
+     `tests/test_assets_s3.py` for any new rule (run it: `python tests/test_assets_s3.py`).
+   - **`MOBILE-OFFLINE.md`** — a visitor's offline copy (`sw.js`, the Offline section of
+     `app.js`, the offline file list).
+   - **`VIRTUAL-TOUR.md`** — tours (tick its phases as work lands).
+
+6. **Optional — `~/.claude` memory** (`plot-map-prototype.md`): if you have memory
    access this session, mirror the key new facts there too. But treat it as a *cache*,
    not the source of truth — CLAUDE.md/README are canonical because they travel with
    the repo.

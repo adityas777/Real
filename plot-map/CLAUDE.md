@@ -11,6 +11,13 @@
 > [ROADMAP.md](ROADMAP.md) (plot-map features F1–F3) ·
 > [VIRTUAL-TOUR.md](VIRTUAL-TOUR.md) (multi-node panoramic tour + WebXR — planning only,
 > nothing built yet; **read it before starting any tour work**).
+>
+> **Design docs (the source of truth for their area — update them in the same change):**
+> [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md) (**admin data management: cloud ⇄ this computer** —
+> where project data lives, open/save/download/upload flows, conflict rules, invariants, API;
+> **read it before touching `assets_s3.py`, `/api/assets/*`, the admin Save path or the
+> working session**) · [MOBILE-OFFLINE.md](MOBILE-OFFLINE.md) (a visitor's offline copy on a
+> phone/tablet).
 
 ## What this is
 
@@ -140,15 +147,18 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
   **different** project id clones it — `fetchReferencedImages` copies on-disk images
   (pano/plan/logo/renders that have no in-memory blob) from the source project so the new
   dir is complete; same-project saves skip that (files already there).
-- **Source-asset mirror (`assets_s3.py`, 2026-09-25):** every successful server save starts
-  an incremental background mirror of the raw `projects/<id>/` working files to
-  `ZEROX-PROJECTS-FINAL/<id>/` in the configured S3 bucket. A per-project
-  `.b91-assets.json` manifest avoids re-uploading unchanged files; original-master folders
-  remain local and remote deletion is deliberately disabled. Admin boot calls
-  `GET /api/assets/pull` and polls `GET /api/assets/status` before loading project data, so
-  a new machine restores missing files with progress on the existing boot curtain. A later
-  request for any still-missing project asset also fetches that one object on demand and
-  keeps it locally. Mirror failures never turn a completed local save into a failed save.
+- **Project data is not in git** (2026-09-27): `plot-map/projects/` is git-ignored as a whole.
+- **Admin data: cloud ⇄ this computer (`assets_s3.py`) — full design in
+  [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md); read it before changing any of this.** In short:
+  S3 (`ZEROX-PROJECTS-FINAL/<id>/`) is the home of a project's working files and
+  `projects/<id>/` is this machine's working copy. **Opening** a project in the admin compares
+  them first (`prepareProjectFiles` → `/api/assets/plan`) and, only after the admin agrees,
+  downloads what's missing or out of date (blocking prompt); a file changed HERE that also
+  differs in S3 is the admin's choice (cloud copy or this computer's). **Save** (💾 Save, Save as,
+  Publish — `exportSite({upload:true})`) queues one upload job per Save, shown in the corner
+  upload widget; nothing else uploads (the 400 ms landmark/amenity auto-saves stay local).
+  A missing file is a plain instant 404 — the server never fetches from S3 on demand. Nothing is
+  ever deleted from S3. `/api/projects` also returns `cloud` (S3-only ids) for the switcher.
 - **Header project menu** (`initProjectBar`, in the topbar — **admin only**; the client
   view is view-only and shows no project bar): a `<select>` switcher
   (navigates via `projUrl`), a **💾 Save** button
@@ -473,8 +483,9 @@ Top-down, by section header:
   `exportSite()` → `POST /api/publish` → `watchPublishJob` polls progress; `publishWatch` token
   drops stale polls), `unpublishNow` (first click arms via `unpublishArmTimer`, second fires),
   `copyPublishLink`. `publishPassword` is memory-only — never stored.
-  Cloud working-copy support lives in `fetchProjectAssets` (admin boot progress) and
-  `assets_s3.py` (`sync_project`/`pull_project`/`fetch_file`, background job status).
+  **Project working files ⇄ S3** (section after the boot progress bar): `prepareProjectFiles`,
+  `openProjectFilesDialog`, the upload widget (`queueUpload`/`pollUploads`/`renderUploadDock`)
+  and friends; server side `assets_s3.py`. Full code map: [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md) §10.
 - **`wireAdmin`** — wires every admin control incl. tabs + the Project ID field.
 - **Trace editor** (PNG/DXF → polygons): `trace` state (incl. `trace.prefix`, page-only),
   `nextPlotId` (prefix + lowest free number from 1), `applyTracePrefix`/`updateTraceNextNumber`
@@ -528,6 +539,13 @@ Top-down, by section header:
   `parseLandmarks`/`buildLandmarksData`/`loadLandmarksFile`/`setLandmarks`/`saveLandmarksAs`.
   A landmark may carry an optional **render image**; a `.has-render` banner shows the
   shared info card on **hover (desktop) / tap (mobile)** → thumbnail → lightbox.
+  **📌 landmark mode** (2026-09-25, client toggle `#steadyLandmarkToggle`, `state.steadyLandmarks`,
+  `b91-steady-landmarks`, off by default): banners drawn exactly at their authored lon/lat —
+  `renderLandmarks` skips the edge-hide rule AND the vertical clamp/stagger pass — at one base
+  size on every screen (`.landmarks.lm-flat`, also a flatter shadow), scaled only by zoom
+  (`landmarkZoomScale`: `LM_FIXED_SIZE/MIN/MAX`). Inside the LANDMARKS section the control column
+  shows only this button (`.zoom-controls.lm-only`, `isLandmarksSectionActive`). A pin-anchored
+  variant (`LM_PIN_LIFT`) was built and measured, then replaced by the owner — see CHANGELOG.
 - **Amenities** (in-layout icon pins — like landmarks but no status, name IS the label,
   clickable, with a render image → lightbox): `AM_ICONS`/`AM_ICON_ORDER`,
   `amMarkerHTML` (a `.am-marker` = 0-size anchor at the
@@ -1054,8 +1072,11 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   dot; both now loop over every map in the array, not just one.
 - **Images** — the pano (`panoImage.file`) and drape/plan PNG; auto-resized on import to
   texture-safe `.web.jpg`/`.web.png`. No pano ⇒ a generated `fallbackPanoTexture()` (plain
-  sky) so the app still runs. The repo `.gitignore` ignores `*.png/*.jpg/*.jpeg`, so
-  runtime images are **force-added** (`git add -f`).
+  sky) so the app still runs.
+- **None of this is in git** (2026-09-27): `plot-map/projects/` is git-ignored as a whole — a
+  project's files live in S3 and on the machines that opened it ([ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md)).
+  A fresh clone has no projects until the admin opens one and downloads it. Never force-add
+  project files.
 - **Publishing = server-side save.** Admin sets a **Project ID**, then **Export site
   files…** POSTs everything to `server.py`, which writes `projects/<id>/` (plots.svg/csv,
   alignment.json, landmarks.json, amenities.json + all render/plan/pano/logo images). The
@@ -2047,6 +2068,11 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   copy is independent of the local folder — Rename/Delete don't take it down (Unpublish first);
   a file a project references but that is missing on disk simply isn't published (the demo
   shows it as missing, same as locally).
+- **Admin data: cloud ⇄ this computer** (2026-09-26 rework, [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md)).
+  Verified: `tests/test_assets_s3.py` (19 rule checks, fake S3, no network) and in the Browser
+  pane — conflict prompt + keep local + Save → "✓ Uploaded", reopen with no prompt, laxmi 45 files
+  / 105.7 MB downloaded in 12.8 s then in sync, "← Back" from a cloud-only project, instant 404s.
+  **Not yet tried:** a second real machine; a download cut off by a real network drop.
 - Suggested next (after the tour viewer): **ROADMAP Feature 3** (enquiry/lead capture) — see
   [ROADMAP.md](ROADMAP.md). Also outstanding: a client-side **"Load site folder…"** picker —
   not built.
@@ -2062,5 +2088,11 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
    moved/renamed anything or changed how to run/verify.
 3. **[README.md](README.md)** — update the user-facing feature description.
 4. **Inline comments** — keep the "why" next to non-obvious code.
-5. Do it **before ending the turn**, not "later." Treat undocumented changes as
+5. **The area's design doc**, when you touched its area — [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md)
+   for anything about admin data moving between S3 and this computer (`assets_s3.py`,
+   `/api/assets/*`, `/api/projects`, the admin Save/upload path, `prepareProjectFiles`, the
+   working session/draft), [MOBILE-OFFLINE.md](MOBILE-OFFLINE.md) for visitor offline copies,
+   [VIRTUAL-TOUR.md](VIRTUAL-TOUR.md) for tours. A new sync rule also gets a case in
+   `tests/test_assets_s3.py`.
+6. Do it **before ending the turn**, not "later." Treat undocumented changes as
    incomplete.

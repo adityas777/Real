@@ -687,7 +687,15 @@ class Handler(SimpleHTTPRequestHandler):
                     if os.path.isdir(d) and (os.path.isfile(os.path.join(d, "plots.svg"))
                                              or os.path.isfile(os.path.join(d, "tour.json"))):
                         projects.append(name)
-            return self._send_json(200, {"projects": projects})
+            # Projects kept in S3 (assets_s3.py) that this machine has never opened — the admin
+            # switcher lists them too; opening one downloads its files first.
+            cloud = []
+            try:
+                import assets_s3
+                cloud = sorted(p for p in assets_s3.cloud_projects() if p not in projects)
+            except Exception:
+                pass
+            return self._send_json(200, {"projects": projects, "cloud": cloud})
         if route == "/manifest.webmanifest":
             return self.do_manifest()
         if route.startswith("/api/pwa-icon-"):
@@ -698,28 +706,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.do_bundle()
         if route == "/api/export-bundle-check":
             return self.do_bundle_check()
-        if route == "/api/assets/pull":
-            # Pre-fetch a project's files from S3 (the small JSON the editor needs immediately, plus
-            # whatever else is missing). Runs in the background; poll /api/assets/status.
-            from urllib.parse import parse_qs, urlparse
-            pid = safe_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
-            if not pid:
-                return self._send_json(400, {"ok": False, "error": "invalid project id"})
-            try:
-                import assets_s3
-                return self._send_json(200, assets_s3.pull_in_background(pid))
-            except Exception as e:
-                return self._send_json(200, {"ok": False, "error": str(e)})
-        if route == "/api/assets/status":
-            from urllib.parse import parse_qs, urlparse
-            pid = safe_project((parse_qs(urlparse(self.path).query).get("project") or [""])[0])
-            if not pid:
-                return self._send_json(400, {"ok": False, "error": "invalid project id"})
-            try:
-                import assets_s3
-                return self._send_json(200, assets_s3.status(pid))
-            except Exception as e:
-                return self._send_json(200, {"ok": False, "error": str(e)})
+        if route.startswith("/api/assets/"):
+            return self.do_assets_get(route)
         if route == "/api/publish/status":
             return self.do_publish_status()
         if route == "/api/publish/progress":
@@ -760,28 +748,12 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 return super().do_GET()
 
+        # A missing file is a plain 404, at once. Project files come down from S3 only through the
+        # admin's download step (assets_s3 plan/pull, 2026-09-26); asking S3 on every miss cost
+        # 0.5–1.6 s per optional file the app probes for (loading image, logo, audio).
         if not os.path.isfile(path):
-            # A project asset this machine does not have: fetch it from S3 once, keep it, serve it
-            # (assets_s3.fetch_file). Requested 2026-09-25 — "when the admin comes and selects any
-            # of the project all the assets of that particular project is directly fetched from
-            # s3 so that the admin dont have to get all the assets in their local system".
-            # On demand rather than up front, so opening a project does not wait on a 200 MB video
-            # nobody has clicked yet; the second request for the same file is local-disk speed.
-            # Anything that is genuinely missing still 404s exactly as before.
-            got = None
-            try:
-                rel = os.path.relpath(path, PROJECTS_DIR).replace(os.sep, "/")
-                if not rel.startswith("..") and "/" in rel:
-                    pid, sub = rel.split("/", 1)
-                    if safe_project(pid):
-                        import assets_s3
-                        got = assets_s3.fetch_file(pid, sub)
-            except Exception:
-                got = None
-            if not got:
-                self.send_error(404, "File not found")
-                return
-            path = got
+            self.send_error(404, "File not found")
+            return
 
         mime     = mimetypes.guess_type(path)[0] or "application/octet-stream"
         if path.lower().endswith(".png"):
@@ -1050,6 +1022,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.do_publish()
         if route == "/api/unpublish":
             return self.do_unpublish()
+        if route.startswith("/api/assets/"):
+            return self.do_assets_post(route)
         if route != "/api/save":
             return self._send_json(404, {"ok": False, "error": "not found"})
         try:
@@ -1097,23 +1071,13 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception:
                 skipped.append(name)
 
-        # Mirror the project's files to S3 (assets_s3.py), in the background. Requested 2026-09-25:
-        # "whenever the admin clicks save any new assets that is added by the admin is pushed to
-        # s3". Fire-and-forget on purpose — the save has already succeeded on disk by this point, so
-        # an upload that is slow (a fresh 200 MB video) or impossible (no network, no AWS login)
-        # must not make Save look like it failed. Only what changed is sent; the outcome is readable
-        # at /api/assets/status.
-        mirrored = None
-        try:
-            import assets_s3
-            mirrored = assets_s3.sync_in_background(project)
-        except Exception as e:                      # not configured, no boto3, bad id — never fatal
-            mirrored = {"ok": False, "error": str(e)}
-
+        # No upload from here: a Save sends its big files to /api/upload AFTER this request, so an
+        # upload started now would miss them. The admin page queues the upload itself once the
+        # whole save has landed (POST /api/assets/push).
         return self._send_json(200, {
             "ok": True, "project": project,
             "dir": os.path.relpath(dest, ROOT).replace(os.sep, "/"),
-            "written": written, "skipped": skipped, "s3": mirrored,
+            "written": written, "skipped": skipped,
         })
 
     def do_rename(self):
@@ -1156,6 +1120,60 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:
             return self._send_json(500, {"ok": False, "error": str(e)})
         return self._send_json(200, {"ok": True, "project": pid, "trash": os.path.relpath(dest, ROOT).replace(os.sep, "/")})
+
+    # ── Working files in S3 (assets_s3.py): the admin's download step and upload queue ───────
+    # Design and rules: ADMIN-DATA-SYNC.md (keep its API table, section 9, in step with these).
+    #   GET  /api/assets/plan?project=         what opening the project needs (download/conflicts)
+    #   POST /api/assets/pull?project=&use=    start that download; use = s3 | local (conflicts)
+    #   GET  /api/assets/pull-status?project=  its progress
+    #   POST /api/assets/push?project=         queue an upload (the admin's Save calls this)
+    #   GET  /api/assets/jobs                  every recent upload, for the upload widget
+    #   POST /api/assets/retry?id=             queue a failed upload again
+    # "Not configured" (no publish.config.json) is a normal answer, {ok:false, configured:false}:
+    # the admin then simply works on this machine's files.
+    def _query(self, key):
+        from urllib.parse import urlparse, parse_qs
+        return (parse_qs(urlparse(self.path).query).get(key) or [""])[0]
+
+    def _assets_call(self, fn):
+        try:
+            import assets_s3
+            return self._send_json(200, fn(assets_s3))
+        except publish_s3.PublishError as e:
+            configured = os.path.isfile(publish_s3.CONFIG_PATH)
+            return self._send_json(200, {"ok": False, "configured": configured, "error": str(e)})
+        except Exception as e:
+            return self._send_json(200, {"ok": False, "configured": True, "error": publish_s3.aws_message(e)})
+
+    def do_assets_get(self, route):
+        if route == "/api/assets/jobs":
+            return self._assets_call(lambda a: {"ok": True, "jobs": a.jobs()})
+        pid = self._query_project()
+        if not pid:
+            return self._send_json(400, {"ok": False, "error": "invalid project id"})
+        if route == "/api/assets/plan":
+            return self._assets_call(lambda a: a.plan(pid))
+        if route == "/api/assets/pull-status":
+            return self._assets_call(lambda a: {"ok": True, "job": a.pull_status(pid)})
+        return self._send_json(404, {"ok": False, "error": "not found"})
+
+    def do_assets_post(self, route):
+        if route == "/api/assets/retry":
+            try:
+                job_id = int(self._query("id"))
+            except ValueError:
+                return self._send_json(400, {"ok": False, "error": "invalid job id"})
+            return self._assets_call(lambda a: {"ok": True, "job": a.retry(job_id)})
+        pid = self._query_project()
+        if not pid:
+            return self._send_json(400, {"ok": False, "error": "invalid project id"})
+        if route == "/api/assets/pull":
+            use = self._query("use")
+            return self._assets_call(lambda a: a.start_pull(pid, use))
+        if route == "/api/assets/push":
+            label = self._query("label")[:80]
+            return self._assets_call(lambda a: {"ok": True, "job": a.enqueue_push(pid, label)})
+        return self._send_json(404, {"ok": False, "error": "not found"})
 
     # ── ☁ Publish to web (publish_s3.py does the AWS work) ─────────────────────────
     def _query_project(self):

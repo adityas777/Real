@@ -82,12 +82,30 @@ Every site lives in its own directory under `projects/<id>/`. The client chooses
 to show with the **`?project=<id>`** URL parameter (default **`sample`**); admin adds a
 **project switcher** in the top header bar. Everything you Export/Save in admin is written
 straight into the active project's directory by `server.py` — no manual folder copying or
-downloads. The same save also mirrors new or changed project assets to the configured S3
-working-copy folder in the background. When an admin opens that project on another machine,
-missing files are restored automatically before editing begins; large assets that were not
-needed at boot are fetched and kept the first time they are requested. The local save remains
-the source of truth if cloud access is unavailable. The admin **⋯** menu creates, duplicates,
-renames and deletes projects.
+downloads. Each project's working files are also kept in the cloud (S3), so a project isn't tied
+to one computer:
+
+- **💾 Save uploads** your changes to the cloud. A small card in the bottom-right corner shows
+  each upload — waiting, uploading with a progress bar, done, or failed with a **Retry** button.
+  Save as often as you like: each Save queues its own upload, and they run one after another.
+  Landmark and amenity edits are written to this computer as you make them, but only reach the
+  cloud when you press Save.
+- **Opening a project** checks it against the cloud first. If this computer is missing files, or
+  has older copies, you're told how much needs downloading; press **Download and open** and wait
+  for it to finish (it's a one-time wait — next time only what changed comes down). If a file
+  you changed on this computer is also different in the cloud, you choose: **use the cloud copy**
+  (yours is replaced) or **keep this computer's copy** (the next Save uploads it). **← Back**
+  returns to the project you came from without downloading anything.
+- Projects that exist only in the cloud appear in the project switcher under *In the cloud — not
+  on this computer yet*.
+- No cloud connection? You keep working on this computer's files, and Save uploads them later.
+
+Project files are **not kept in git** — the cloud is their home. On a new computer, open the
+admin and pick a project; it downloads.
+
+How it all works, rule by rule: [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md).
+
+The admin **⋯** menu creates, duplicates, renames and deletes projects.
 
 ---
 
