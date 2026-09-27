@@ -1,0 +1,4 @@
+three@0.160.0 examples/jsm (4 modules + Draco decoder), npm integrity sha512-DLU8lc0zNIPkM7rH5/e1Ks1Z8tWCGRq6g8mPowdDJpw1CFBJMU7UoJjC6PefXW7z//SSl0b2+GCw14LB+uDhng==
+Vendored by tools/vendor_3d_tiles.py — do not edit by hand; re-run the script.
+Bare `three` imports are rewritten to relative paths so the app's own
+vendor/three.module.min.js (three@0.160.0) is the only three.js instance.

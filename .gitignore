@@ -11,7 +11,10 @@ plot-map/publish.config.json
 # Build artefacts and downloaded tools — not source
 __pycache__/
 plot-map/cloudflared.exe
-plot-map/tools/
+plot-map/tools/*
+# …except the script that regenerates vendor/3d-tiles-renderer-*/ and friends (GoogleEarthView.md §9).
+# (`tools/*` rather than `tools/`: git can't re-include a file inside an ignored directory.)
+!plot-map/tools/vendor_3d_tiles.py
 
 # Project data is NOT source code and never goes into git (2026-09-27, on request). Every project's
 # working files live in S3 (ZEROX-PROJECTS-FINAL/<id>/) and plot-map/projects/ is only this

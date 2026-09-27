@@ -414,3 +414,20 @@ visible.
   waiting offline layer started only by Update.
 - **Still to test on real devices:** the iPhone sequence (section 1's "Done when") and an Android
   phone and tablet (install, airplane mode, lock the screen mid-download).
+
+## Google Earth projects (2026-09-27)
+
+A project whose aerial view is Google's live 3D view ([GoogleEarthView.md](GoogleEarthView.md)):
+
+- **Google's imagery is never in the saved copy.** Their terms forbid storing it, and `sw.js`
+  ignores other sites' requests. Offline, the aerial view shows the plots over the site plan
+  with a short note.
+- **Its offline list does carry the Google layer's own code** (`vendor/3d-tiles-renderer-*`,
+  `vendor/three-r160-addons/`, `vendor/google-maps-logo/`, about 700 KB). A saved copy answers
+  every same-site request itself, even when the phone is online, so without that code the
+  Google view would fail on any phone that saved the site. With it, an online phone shows
+  Google's view from its saved copy.
+- **Pano projects are unchanged:** they don't get that code, and a Google project doesn't get
+  the pano it keeps only for switching back.
+- The rules are `publish_s3.shell_file_wanted` and `_project_files` (publish), and
+  `server.offline_files` (local). Checked by `tests/test_google_earth.py`.

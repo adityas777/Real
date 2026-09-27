@@ -297,6 +297,47 @@ up (WYSIWYG) rather than re-deriving its own framing:
   set via **🖼 Background pano…** — the client loads this as the 360° background instead
   of the built-in `CONFIG.renderUrl` default (missing ⇒ falls back to the default).
 
+### Google Earth instead of a drone pano
+
+For a project with no drone shoot, the aerial view can show **Google's live 3D satellite view
+of the real site** instead of a panorama. The plots are still traced from the developer's own
+plan and overlaid as usual. The design, rules and decisions are in
+[GoogleEarthView.md](GoogleEarthView.md).
+
+**Set it up (Align tab → Aerial background → Google Earth → 🌍 Google Earth setup…).** The
+setup panel floats over the view, so every change shows live.
+
+1. **Google key:** each project has its own, from the client.
+   - Paste it in, press **Test**, then **Use this key**. Test asks Google once and names any
+     problem in plain words.
+   - **Setup steps to send the client** has ready-made instructions with this project's
+     exact website addresses.
+   - Ask for a new browser key limited to the **Map Tiles API**. Never reuse a server key
+     such as `GOOGLE_PLACES_API_KEY`.
+2. **Site:** paste a Google Maps or Google Earth link to the site, or type `lat, lng`, then
+   press **Go**. The plan's centre is placed there.
+3. **Drone:** set the height (50–1000 m) and how far away, in which direction, e.g. "200 m
+   south of the site". Visitors look from there, and the camera turns to face the site.
+4. **Line up the plan:**
+   - **Top-down view** looks straight down, north up; the drone is marked.
+   - **Two-point align:** click a spot on the plan, then the same spot on the satellite view;
+     do it twice, and scale, rotation and position are solved at once.
+   - **Measure:** click two points to check a known length, in metres and feet.
+   - Move layout, Scale and Rotate work here too.
+5. Frame the start view, then press **💾 Save**. Only `alignment.json` changes.
+
+**What visitors get**
+- Google's view behind the plots, with **Google's logo and imagery credits** at the bottom.
+  They're required, so don't cover them.
+- The compass points to true north.
+- Nothing Google sends is ever saved.
+- If Google can't be reached, or the key is refused or over quota, the view falls back to
+  **plots over the site plan** with a short note. Offline copies and standalone bundles always
+  show that plan-only view; the bundle export warns you, and bundles never carry the key.
+
+**Switching back** to Panorama photo keeps both setups, so you can switch again without
+losing anything. Visitors only ever see the chosen one.
+
 ---
 
 ## Admin: import & trace plots (PNG / DXF) — `Import / Trace plots…`

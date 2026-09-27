@@ -1,0 +1,4 @@
+3d-tiles-renderer@0.3.46 (64 of its modules), npm integrity sha512-ChnVhk6Ve/GMRXxqr8hNhQKYDJ5iN+wAi1NxGtoiDHPE4zGcxbTqpPImHF9zeCN2AcNGp0mVbTG+UW6OJyPsKA==
+Vendored by tools/vendor_3d_tiles.py — do not edit by hand; re-run the script.
+Bare `three` imports are rewritten to relative paths so the app's own
+vendor/three.module.min.js (three@0.160.0) is the only three.js instance.

@@ -161,7 +161,23 @@ def build_embedded_files_json(src_dir):
         if os.path.isfile(p):
             with open(p, "r", encoding="utf-8") as fh:
                 files[name] = fh.read()
+    if "alignment.json" in files:
+        files["alignment.json"] = without_google_key(files["alignment.json"])
     return json.dumps(files).replace("</", "<\\/")
+
+def without_google_key(raw):
+    """alignment.json text minus the project's Google key. A bundle never shows Google's view
+    (no guaranteed connection, and a file:// page sends no website address, so a key limited to
+    websites fails anyway) — so the key has no business travelling in one (GoogleEarthView.md §8)."""
+    try:
+        doc = json.loads(raw)
+    except Exception:
+        return raw
+    g = (doc.get("background") or {}).get("google") if isinstance(doc, dict) else None
+    if isinstance(g, dict) and g.get("apiKey"):
+        g["apiKey"] = ""
+        return json.dumps(doc, indent=2)
+    return raw
 
 def _sha1_file(path):
     import hashlib
@@ -244,7 +260,10 @@ def build_embedded_images_json(src_dir, alignment_dict):
     import base64
     import mimetypes
     names = set()
+    google = ((alignment_dict or {}).get("background") or {}).get("kind") == "google"
     for key in ("panoImage", "groundImage"):
+        if key == "panoImage" and google:
+            continue                               # Google mode never shows the pano (a bundle shows plan only)
         f = ((alignment_dict or {}).get(key) or {}).get("file")
         if f:
             names.add(os.path.basename(f))
@@ -364,11 +383,12 @@ def offline_files(pid):
     published, _ = publish_s3._project_files(project_dir)
     for fn, full in published:
         files["projects/%s/%s" % (pid, fn)] = _file_sig(full)
+    google = publish_s3.uses_google_background(project_dir)   # the Google-only vendor code, for those projects only
     for d in deploy_s3.SHELL_DIRS:
         base = os.path.join(ROOT, d)
         if os.path.isdir(base):
             for rel, full in publish_s3._walk(base, d + "/"):
-                if rel not in deploy_s3.SKIP_FILES:
+                if rel not in deploy_s3.SKIP_FILES and publish_s3.shell_file_wanted(rel, google):
                     files[rel] = _file_sig(full)
     for name in deploy_s3.SHELL_FILES:
         if name in publish_s3.OFFLINE_EXCLUDE or name == "manifest.webmanifest":
@@ -942,6 +962,10 @@ class Handler(SimpleHTTPRequestHandler):
         project_dir = os.path.join(PROJECTS_DIR, pid)
         flagged = (scan_menu_for_online_content(read_alignment(project_dir))
                    + scan_amenities_for_online_content(read_amenities(project_dir)))
+        if publish_s3.uses_google_background(project_dir):
+            # A bundle can't show Google's live view — its aerial view shows the site plan instead.
+            flagged.insert(0, {"id": "google", "title": "Aerial view — Google Earth background",
+                               "contentType": "shows the site plan instead in a saved copy", "url": "", "source": "background"})
         return self._send_json(200, {"ok": True, "flagged": flagged})
 
     def do_bundle(self):
@@ -993,7 +1017,10 @@ class Handler(SimpleHTTPRequestHandler):
                     if name.startswith("."):
                         continue
                     fp = os.path.join(src, name)
-                    if os.path.isfile(fp):
+                    if name == "alignment.json" and os.path.isfile(fp):
+                        with open(fp, "r", encoding="utf-8") as fh:
+                            z.writestr(f"{pid}/data/{name}", without_google_key(fh.read()))
+                    elif os.path.isfile(fp):
                         z.write(fp, f"{pid}/data/{name}")
         except Exception as e:
             return self._send_json(500, {"ok": False, "error": str(e)})

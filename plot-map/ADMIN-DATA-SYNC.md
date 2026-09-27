@@ -280,6 +280,13 @@ project, starts `pollUploads`).
 
 ## 12. Edge cases & known limits
 
+- **Google Earth projects** ([GoogleEarthView.md](GoogleEarthView.md)) add no files to sync. The
+  background is a block of settings in `alignment.json`, and the imagery is never saved (Google's
+  terms). That block includes the project's own **Google key**, so the key travels wherever
+  `alignment.json` does: the private S3 working copy and every admin machine that opens the
+  project. That is fine for a browser key, which visitors see anyway, but it's why a client
+  must be given a dedicated, website-restricted key and never a server one.
+
 - **Two machines edit the same file**: whichever saves last wins in S3; the other sees `both` at
   its next open (or a plain `updated` download if it hadn't touched the file).
 - **Two machines update the manifest at the same moment**: the read-then-write window is small,

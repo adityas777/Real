@@ -1,0 +1,3 @@
+Google Maps logo, from Google's attribution asset pack:
+https://developers.google.com/static/maps/documentation/images/Google_Maps_Attribution_Assets.zip
+Required on screen whenever Google's 3D tiles are shown (GoogleEarthView.md §5 G2). Unmodified.

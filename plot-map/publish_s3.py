@@ -179,6 +179,24 @@ def _read_json(path):
         return {}
 
 
+# Google Earth background (GoogleEarthView.md): ~700 KB of vendor/ only a Google-mode project
+# uses. It goes up — and into the offline file list — for those projects only. It MUST be in a
+# Google project's offline list: a phone with a saved copy answers every same-site request from
+# that copy (sw.js), so without it the Google view would fail even online. A drone-pano project
+# never carries it.
+GEO_VENDOR_PREFIXES = ("vendor/3d-tiles-renderer-", "vendor/three-r160-addons/", "vendor/google-maps-logo/")
+
+
+def uses_google_background(project_dir):
+    bg = _read_json(os.path.join(project_dir, "alignment.json")).get("background") or {}
+    return isinstance(bg, dict) and bg.get("kind") == "google"
+
+
+def shell_file_wanted(rel, google):
+    """Should this app file (a path under vendor/ or icons/) go with this project?"""
+    return google or not rel.startswith(GEO_VENDOR_PREFIXES)
+
+
 GOLD = (212, 175, 55)
 
 
@@ -378,7 +396,12 @@ def _project_files(project_dir):
         raw = Path(p).read_text(encoding="utf-8", errors="replace")
         if fn.endswith(".json"):
             try:
-                _strings(json.loads(raw), texts)
+                doc = json.loads(raw)
+                # A Google-mode project keeps its pano only so switching back is lossless; it is
+                # never shown, so it isn't published (unless something else names it).
+                if fn == "alignment.json" and isinstance(doc, dict) and (doc.get("background") or {}).get("kind") == "google":
+                    doc = {k: v for k, v in doc.items() if k != "panoImage"}
+                _strings(doc, texts)
                 continue
             except Exception:
                 pass
@@ -422,11 +445,12 @@ def _collect(pid, version, icon_builder, warnings):
     published, skipped = _project_files(project_dir)
     for fn, full in published:
         add(f"projects/{pid}/{fn}", path=full)
+    google = uses_google_background(project_dir)
     for d in deploy_s3.SHELL_DIRS:
         base = os.path.join(ROOT, d)
         if os.path.isdir(base):
             for rel, full in _walk(base, d + "/"):
-                if rel not in deploy_s3.SKIP_FILES:
+                if rel not in deploy_s3.SKIP_FILES and shell_file_wanted(rel, google):
                     add(rel, path=full)
     brand = _read_json(os.path.join(project_dir, "alignment.json")).get("brand") or {}
     for rel, data in _icon_bytes(pid, brand, icon_builder, warnings).items():

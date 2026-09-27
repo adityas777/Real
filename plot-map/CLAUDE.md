@@ -10,7 +10,12 @@
 > **Planning docs (live — keep them ticked as work lands):**
 > [ROADMAP.md](ROADMAP.md) (plot-map features F1–F3) ·
 > [VIRTUAL-TOUR.md](VIRTUAL-TOUR.md) (multi-node panoramic tour + WebXR — planning only,
-> nothing built yet; **read it before starting any tour work**).
+> nothing built yet; **read it before starting any tour work**) ·
+> [GoogleEarthView.md](GoogleEarthView.md) (per-project choice of a live Google 3D/satellite
+> aerial background instead of a drone pano — **v1 built 2026-09-27** (Phases 0–3: viewer
+> layer, admin setup panel, publish/offline/bundle rules; Phase 4 later); **read it before
+> changing the aerial background, the overlay projection, the render loop, what publish / the
+> offline list / the bundle carry, or `alignment.json`'s background**).
 >
 > **Design docs (the source of truth for their area — update them in the same change):**
 > [ADMIN-DATA-SYNC.md](ADMIN-DATA-SYNC.md) (**admin data management: cloud ⇄ this computer** —
@@ -204,6 +209,25 @@ Top-down, by section header:
 - **Pano texture:** `panoTextureFromSource`, `loadPanoTexture(url|Blob)` (downscales to
   `min(PANO_TEX_CAP, GPU max)`, anisotropy 16, wrapS repeat), `swapPano`,
   `setPanoFromFile` (admin pick → resize → live swap + export blob), `buildPanoSphere`.
+- **Aerial background: Google Earth** (section right after `updatePanoName`; full map in
+  [GoogleEarthView.md §14](GoogleEarthView.md)) — `alignment.json` `background.kind:'google'`
+  streams Google's Photorealistic 3D Tiles (vendored 3d-tiles-renderer 0.3.46, lazy `import()`)
+  into their own scene; `renderScene` (called by `renderLoop`) draws it, clears depth, then the
+  usual scene over it, so the overlay stack is unchanged. Camera stays at the origin = the
+  drone viewpoint; world frame X east, Y up, Z south (measured, `geoOrient`). In Google mode
+  `state.transform` holds the Google placement in ground units (so Move/Scale/Rotate just work)
+  and the pano's own transform is parked (`applyBackgroundConfig`); `recomputeAnchorAndK` →
+  `syncGoogleOverlayScale` takes anchor + k from the placement. `geo` = the layer's state;
+  `effectiveNorthDeg` (compass); `GEO_REASONS` (plan-only fallback wording); `#geoCredits`
+  (Google logo + credits, required). Dev: `?gtiles=` / `?gheight=` / `?gdetail=` / `?gdebug=1`.
+  **Admin setup** (section "Google Earth: admin setup", right after): the Align tab's
+  Aerial background choice (`setBackgroundKind`) and the floating `#geoPanel` — key + Test +
+  client setup steps, site (`parseGeoLocation`/`setGoogleSite`), drone (`setGoogleDrone`),
+  top-down view (`setGoogleTopDown`, a temporary `geo.viewOverride`), two-point align and
+  measure (`geoToolClick`, hooked ahead of `pick`). Numbers stay consistent via
+  `bakeGooglePlacement` (live transform → stored placement) / `reapplyGooglePlacement`
+  (back) and `activeViewpoint`. Server side: `publish_s3.uses_google_background` /
+  `shell_file_wanted`, `server.without_google_key`.
 - **Drape:** `buildGroundMesh`/`updateGroundGeometry`/`loadGroundImage`/`setGroundOpacity`.
 - **Plots:** `getLabel` (sprite), `buildPlotObject`, `initThree`, `rebuildPlots`,
   `renderLoop` (continuous rAF — needed; also calls `placePanel` + `renderLandmarks`;
@@ -990,7 +1014,18 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
 - **`alignment.json`** — `{ transform{tx,ty,scale,rotationDeg}, view{lonDeg,latDeg,fov},
   opacity, groundImage?{file,opacity}, panoImage?{file}, brand?{name,tagline,logo?{file}},
   bootImage?{file}, data?{source:'sheet'|'file', sheet:{url,gid?}},
-  area?{unit, filters:[{id,name,color,min?,max?}]} }`.
+  area?{unit, filters:[{id,name,color,min?,max?}]},
+  background?{kind:'pano'|'google', google?{site{lat,lng}, anchorPx{x,y}, bearingDeg,
+  metresPerPx, viewpoint{lat,lng,heightM}, groundAltM?, detail?, apiKey}} }`.
+  **`background`** (added 2026-09-27, [GoogleEarthView.md](GoogleEarthView.md)) — absent ⇒ a
+  pano project, and it's never written for one (byte-identical round-trip). `kind:'google'` ⇒
+  the aerial view is Google's live 3D tiles: `site` = where plan pixel `anchorPx` sits on Earth,
+  `bearingDeg` = plan rotation from true north, `metresPerPx` = plan scale, `viewpoint` = the
+  drone (the camera), `groundAltM` = Google's ground height at the site (measured once by the
+  admin, so visitors don't wait), `apiKey` = the project's own Google browser key (one per
+  project, from the client, D-5/D-12 — never in git since projects aren't). In Google mode
+  `transform` still holds the PANO placement untouched (the Google one lives here), `northDeg`
+  is not used, and `panoImage` is kept but never downloaded.
   A **`plotOverrides`** block (2026-09-18 → 09-24: admin edits that outranked the sheet) may
   still sit in older files; it is ignored and dropped on the next save — the sheet wins now,
   and those same values were always written into `plots.csv` too.
@@ -1099,6 +1134,35 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
 4. **`projects/<id>/` on the server** — the durable home, written by `server.py`.
 
 ## Conventions & gotchas (learned the hard way)
+
+- **Google Earth background (2026-09-27) — traps found building it** (details in
+  [GoogleEarthView.md](GoogleEarthView.md)):
+  - **The vendored tiles library is generated** by `tools/vendor_3d_tiles.py` (bare `three`
+    imports rewritten to our `vendor/three.module.min.js` — ONE three.js). Never hand-edit it;
+    re-run the script. It's pinned at 0.3.46 because every later release needs three r166+.
+  - **`GoogleCloudAuthPlugin.fetchData` retries ANY 4xx as an expired session**, and the retry
+    throws on Google's error body — so a refused key read as "network". The ROOT request is
+    therefore a plain `fetch` (see `watch` in `startGoogleLayer`); tiles keep the plugin's refresh.
+  - **Never place the drone against a guessed ground.** A sea-level fallback put the camera
+    under the real ground (blank sky). `geoFinishGround` waits for a real ray hit or fails to
+    plan only (`no-ground`).
+  - **Google's rules are code constraints**: imagery never saved/cached/captured by us (sw.js
+    must keep ignoring other origins), logo + credits visible whenever it shows, plots only
+    from the developer's plan. The Google key is the project's own and is visible to visitors by
+    design — its protection is the client's website/API restrictions.
+  - **Testing it in the Browser pane: a HIDDEN pane runs no `requestAnimationFrame`** — the
+    render loop (and so the tiles loader) only advances when you take a screenshot. Waits in
+    `javascript_tool` don't help; alternate screenshots and checks. For exact clicks, dispatch
+    `PointerEvent`s on `#pano` at CSS coordinates (the pane's screenshots are scaled).
+  - **A visitor's saved offline copy answers EVERY same-site request** (sw.js `fromSaved`: 404
+    for anything not saved — even online). So any code a feature loads lazily must be in the
+    offline file list, or the feature breaks on phones that saved the site. The Google tiles
+    code is included for Google projects only (`publish_s3.shell_file_wanted`); remember this
+    for the next lazily-loaded vendor file.
+  - **In Google mode, never edit `state.background.google` while `state.transform` holds live
+    edits** without `bakeGooglePlacement()` first, and `reapplyGooglePlacement()` after —
+    `state.transform` is the placement RELATIVE to the current viewpoint, so changing the
+    viewpoint or the site underneath it moves the layout on Earth.
 
 - **`resizeImageToBlob` to `image/jpeg` silently turns TRANSPARENCY into solid BLACK.** It
   draws onto a fresh (transparent) canvas and calls `toBlob(mime)`; JPEG has no alpha, so
@@ -1787,6 +1851,12 @@ for syntax. Screenshot only as a bonus (WebGL flakiness).
   similar and can be mistaken for the thing you're actually testing.
 
 ## Current status / open items
+
+- **Google Earth background (2026-09-27): v1 built** — Phases 0–3 (GoogleEarthView.md). The
+  owner checked Google's real imagery with their key (go, D-13). Everything else was checked
+  on the surveyed test ground (`spike/geo-tiles-test/`, project `geo-test` — local only, holds
+  the owner's key) and by `python tests/test_google_earth.py`. Not yet: a real publish to S3,
+  phones. Phase 4 (capped orbit/fly, landmarks by coordinates) is later.
 
 - Migrated into `Emagicor/ZeroxRealEstate` under `plot-map/`; branch
   **`add-plot-map-prototype`** is pushed. **PR was NOT opened** (`gh` CLI absent + the

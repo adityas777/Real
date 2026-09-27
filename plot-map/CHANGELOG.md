@@ -5,6 +5,172 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-27 (Google Earth background: Phases 2 + 3 — admin setup and shipping; Phase 0 go)
+
+On request, after the owner tried Google's real imagery at their site with their own key:
+"No this is all working fine. Lets move onto the other phases please". That's the Phase 0 go,
+recorded as D-13 in GoogleEarthView.md.
+
+**Phase 2: admin setup**
+- **Align tab:** an **Aerial background** choice, Panorama photo | Google Earth
+  (`setBackgroundKind`). Switching is lossless both ways.
+- **Floating 🌍 Google Earth setup panel (`#geoPanel`):**
+  - **Key:** the project's key (masked); **Test** asks Google once and gives the problem in
+    plain words; **Use this key**; setup steps to send the client, with the project's
+    published addresses.
+  - **Site:** from a Google Maps / Earth link (a place link's pin wins over its map centre)
+    or `lat, lng`.
+  - **Drone:** height, plus distance and compass direction from the site; the camera re-aims.
+  - **Tools:**
+    - **Top-down view:** a temporary viewpoint above the site, with the drone marked.
+    - **Two-point align:** a complex-number similarity solve, with the plan hidden for the
+      satellite clicks.
+    - **Measure:** metres and feet.
+  - **Readouts:** m per plan pixel, bearing, and size across.
+- **Consistency:** `bakeGooglePlacement` / `reapplyGooglePlacement` / `activeViewpoint` keep
+  the live transform, the stored placement and the current viewpoint consistent. `geoPlace`
+  now moves the world so any viewpoint sits at the camera; the tiles stay centred on
+  `geo.origin`.
+
+**Phase 3: shipping**
+- **Vendor code:** the Google-only vendor code goes with Google projects only, in publish and
+  in the offline list (`publish_s3.GEO_VENDOR_PREFIXES`, `uses_google_background`,
+  `shell_file_wanted`; `server.offline_files`). A saved offline copy answers every same-site
+  request, so without it a phone that saved the site would lose the Google view even online.
+- **Parked pano:** not published, not in the offline list, and not embedded in bundles.
+- **Bundles:** the key is stripped (`server.without_google_key`, both the inline data and
+  `data/alignment.json`). The export pre-flight warns ("Aerial view — Google Earth
+  background"), and its Edit opens the setup panel.
+- **Tests:** new `tests/test_google_earth.py`, 14 checks, temporary folders, no network.
+
+**Verified**
+- **On the local test ground** (`?gtiles=`: the owner's key made no requests; nothing saved;
+  the test draft cleared):
+  - two-point align lands the clicked plot within 3–8 cm;
+  - measure: 50.0 m / 212 m, exact;
+  - drone re-aim: pitch −50.2° as computed;
+  - switching lossless;
+  - fake-key Test gives "not valid";
+  - Maps place link parsed.
+- **Content types:** published `.js` / `.wasm` / `.svg` are right (`deploy_s3.content_type_for`).
+- **Fixed while testing:** the site box and the drone distance lagged a moved layout (they
+  read the stored site, not the live one).
+- **Not done:** a real publish to S3 (outward-facing), phones.
+
+**Files:** `app.js`, `index.html`, `styles.css`, `publish_s3.py`, `server.py`,
+`tests/test_google_earth.py`, `GoogleEarthView.md`, `CLAUDE.md`, `README.md`,
+`ADMIN-DATA-SYNC.md`, `MOBILE-OFFLINE.md`.
+
+---
+
+## 2026-09-27 (Google Earth background: Phase 0 tooling + Phase 1 viewer layer)
+
+On request, OQ-8 answered: "Lets just allow 1 key per project. admin user will manage which
+key value goes there. Lets start building as per the plan. Ph 0 followed by Ph1". Recorded as
+D-12 in GoogleEarthView.md.
+
+**Phase 0**
+- There is no Google key yet, so only the non-key parts were done.
+- **Library pinned:** 3d-tiles-renderer 0.3.46 is the last release that supports our three.js
+  r160 (0.4.0+ needs r166+).
+- **New `tools/vendor_3d_tiles.py`:**
+  - checks the npm sha512 of each package;
+  - copies only the modules needed: 64 library modules, plus GLTFLoader, DRACOLoader,
+    BufferGeometryUtils, Pass and the Draco decoder from three@0.160.0;
+  - rewrites bare `three` imports to our `vendor/three.module.min.js`, so there's one three.js;
+  - fetches Google's official logo.
+  - Output: `vendor/3d-tiles-renderer-0.3.46/`, `vendor/three-r160-addons/`,
+    `vendor/google-maps-logo/`, about 700 KB, loaded only for Google-mode projects.
+- **Readout:** `?gdebug=1` shows the numbers the check needs.
+
+**Phase 1 (app.js, section "Aerial background: Google Earth")**
+- **Data:** `alignment.json` gains an optional `background` block (`parseBackground` /
+  `backgroundData`). Absent means a pano project, round-tripped byte-identically.
+- **Placement:** in Google mode the pano's `transform` is parked and written back unchanged,
+  and `state.transform` holds the Google placement in ground units. So Move / Scale / Rotate
+  work unchanged, and Save turns them back into metres and lat/lng (`googlePlacementNow`).
+  `recomputeAnchorAndK` takes the anchor and scale from the placement
+  (`syncGoogleOverlayScale`).
+- **The layer:** `startGoogleLayer` lazily imports the vendored library.
+  - `GoogleCloudAuthPlugin` handles the key. `ReorientationPlugin` puts the ground under the
+    drone at the origin, and `geoOrient` turns the world to X east / Y up / Z south,
+    measured, not assumed.
+  - The ground height under the site is ray-cast once (`geoBeginGround` / `geoFinishGround`).
+    The admin's value is saved so visitors don't wait.
+  - The drone is placed H metres above that ground (`geoPlace`).
+- **Drawing:** `renderScene` draws the tiles scene (painted sky, 40 km draw distance with
+  haze), clears depth, then the usual scene over it.
+- **Around the view:**
+  - the compass north comes from `effectiveNorthDeg`;
+  - the loading curtain waits for a sharp view, at most 8 s (`geo.holdCurtain`);
+  - tours hide the layer and its credits;
+  - Google's logo and credits show bottom-centre, with "Plot layout: <brand>".
+- **Plan-only fallback with plain reasons (`GEO_REASONS`):** no key, key not valid, website
+  not allowed, API off, key limited to other APIs, billing, quota, offline, bundle, no
+  ground. It retries when the connection returns.
+- **Dev options** (localhost / LAN only, never published): `?gtiles=` (a same-site relative
+  path only), `?gheight=`, `?gdetail=`, `?gdebug=1`.
+
+**Test ground:** new `spike/geo-tiles-test/make_test_tiles.py` writes:
+- a surveyed one-tile 3D Tiles ground at Anandam Eleganza: a 50 m grid, coloured compass
+  bands and two painted plot rectangles;
+- a local project `projects/geo-test`, with the plan at a 30° bearing and the drone 200 m
+  south at 150 m, and no key.
+
+**Verified in the Browser pane**
+- Ground measured at 290.0 m, the test ground's true height.
+- Axes: east = +X, north = −Z.
+- Every plot corner within 4–11 mm of its painted rectangle. Checked two ways: the tileset's
+  own ECEF transform against the overlay's geometry.
+- Save round-trip exact.
+- Visitor view: curtain, credits, compass.
+- Tour takeover and restore (simulated).
+- No key gives `no-key`. A fake key gives `bad-key` in one request.
+- laxmi (pano) loads no tiles code and shows no errors.
+- The standalone bundle boots as classic scripts and shows plan-only with no tiles requests
+  (checked served over http from a temp folder, since the pane can't run `file://`).
+
+**Fixed while testing**
+- The Google plugin's retry-on-any-4xx swallowed Google's refused-key answer. The root is
+  now a plain fetch.
+- A sea-level fallback when no ground had loaded put the camera underground. It now waits,
+  or fails cleanly.
+- Credits stayed visible during tours.
+- The logo was requested in plan-only mode.
+
+**Not verified:** Google's real tiles (no key), including Draco decoding and Google's credit
+strings; phones. The bundle still carries the key (Phase 3).
+
+**Files:** `app.js`, `styles.css`, `tools/vendor_3d_tiles.py`, `vendor/…` (new),
+`spike/geo-tiles-test/` (new), `GoogleEarthView.md`, `CLAUDE.md`, `README.md`, and
+`.gitignore`. `.gitignore` now uses `plot-map/tools/*` with an exception for
+`vendor_3d_tiles.py`, because the old rule ignored the whole folder and so hid the script
+that regenerates `vendor/`.
+
+---
+
+## 2026-09-27 (Plan: Google Earth as the aerial background — planning only)
+
+On request: projects without a drone shoot should be able to use Google Earth's satellite view
+as the aerial background, with plots traced and overlaid as today; "No code, only planning via
+a new GoogleEarthView md file". New [GoogleEarthView.md](GoogleEarthView.md): recommends live
+Google Photorealistic 3D Tiles in the existing three.js scene (replacing only the pano sphere,
+camera fixed at a "drone" viewpoint, overlay projection reused with the layout placed in
+metres), Google's terms as design constraints (live only, logo + credits, no tracing from the
+imagery, restricted browser key, billing), admin workflow, data model (`alignment.json`
+`background` block), effects on publish/offline/bundle/tours, phases 0–4, open questions,
+risks. Linked from CLAUDE.md's planning docs. Docs only.
+Later the same day: the owner's answers recorded as decisions D-5–D-11 (own Google Cloud
+account; v1 look-around from one point with capped orbit/fly next — new §10a; one viewpoint;
+plan-only offline; strictly one background; owner accepts the terms; old imagery OK), plus a
+Google Cloud setup checklist in Phase 0. Open: budget/daily-cap numbers.
+Then: Google keys are per project, supplied and paid for by each client — stored as
+`background.google.apiKey` in the project's `alignment.json` (never in git, dropped from
+bundles), admin key field + Test + ready-to-send client setup steps; reusing a client's
+server key (e.g. `GOOGLE_PLACES_API_KEY`) advised against. New OQ-8 (Build91 admin-only key).
+
+---
+
 ## 2026-09-27 (Project data out of git — S3 is its only shared home)
 
 On request: "update gitignore so none of the projects data gets to git. projects are supposed to

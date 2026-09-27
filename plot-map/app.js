@@ -97,6 +97,10 @@ const els = {
   axSessionSave: $('axSessionSave'), axSessionClear: $('axSessionClear'), axSessionStatus: $('axSessionStatus'),
   axExport: $('axExport'), axModeLook: $('axModeLook'), axModeMove: $('axModeMove'), axImport: $('axImport'),
   axPano: $('axPano'), axPanoFile: $('axPanoFile'), axPanoName: $('axPanoName'),
+  axBgPano: $('axBgPano'), axBgGoogle: $('axBgGoogle'), axPanoBlock: $('axPanoBlock'), axGeoBlock: $('axGeoBlock'), axGeoSetup: $('axGeoSetup'), axGeoStatus: $('axGeoStatus'),
+  geoPanel: $('geoPanel'), geoPanelClose: $('geoPanelClose'), geoStatus: $('geoStatus'), geoKey: $('geoKey'), geoKeyShow: $('geoKeyShow'), geoKeyTest: $('geoKeyTest'), geoKeyUse: $('geoKeyUse'), geoKeyMsg: $('geoKeyMsg'),
+  geoClientSteps: $('geoClientSteps'), geoClientCopy: $('geoClientCopy'), geoSiteInput: $('geoSiteInput'), geoSiteGo: $('geoSiteGo'), geoSiteNow: $('geoSiteNow'),
+  geoHeight: $('geoHeight'), geoHeightVal: $('geoHeightVal'), geoDist: $('geoDist'), geoDir: $('geoDir'), geoTopDown: $('geoTopDown'), geoAlign2: $('geoAlign2'), geoMeasure: $('geoMeasure'), geoToolHint: $('geoToolHint'), geoReadout: $('geoReadout'),
   axPlanRow: $('axPlanRow'), axPlanOpacity: $('axPlanOpacity'), axPlanOpacityVal: $('axPlanOpacityVal'),
   // trace editor
   traceWin: $('traceWin'), traceHint: $('traceHint'), traceFile: $('traceFile'), traceDxf: $('traceDxf'),
@@ -256,6 +260,7 @@ const state = {
   groundImage: null,                    // { file, opacity } — PNG site-plan draped on the ground (shares the transform)
   planBlob: null, planName: null,       // raw imported plan PNG (kept so the working session survives a reload pre-export)
   panoImage: null,                      // { file } — admin-chosen 360° background pano (exported + referenced in alignment.json)
+  background: { kind: 'pano', google: null, panoTransform: null },  // aerial background: the pano, or Google Earth (alignment.json `background`, GoogleEarthView.md)
   northDeg: 0,   // which STORED lon is true north; drives the compass. 0 until an admin sets it (alignment.json `northDeg`)
   viewVel: { lon: 0, lat: 0 },   // current camera angular velocity (rad/ms) — decays a drag's flick into coasting inertia
   brand: { name: '', tagline: '', logo: null, logoBlob: null, logoName: null, _url: null, _ver: '' }, // client title-bar branding (in alignment.json)
@@ -595,6 +600,7 @@ function recomputeAnchorAndK() {
   let maxR = 1;
   state.geom.forEach((g) => g.pts.forEach((p) => { maxR = Math.max(maxR, Math.hypot(p.x - state.anchor.x, p.y - state.anchor.y)); }));
   state.kGround = Math.tan(35 * Math.PI / 180) / maxR;
+  if (isGoogleBackground()) syncGoogleOverlayScale();   // Google mode: anchor + scale come from the real-world placement
 }
 
 // ─── Overlay transform → ground-plane point (the alignment) ───────────────────
@@ -1001,10 +1007,890 @@ async function setPanoFromFile(file) {
   setAxStatus(`Background pano set to <code>${name}</code>${scale < 1 ? ` (resized to ${W}×${H} for the browser)` : ''}. Click <strong>Save</strong> in the top bar to commit it.`);
 }
 function updatePanoName() {
+  updateGeoAdminUI();                                // the background choice + Google status (admin)
   if (!els.axPanoName) return;
   const f = state.panoImage?.file;
   els.axPanoName.textContent = f ? `Client pano: ${f.replace(/^sample\//, '')}` : 'Using the default panorama.';
   els.axPanoName.classList.toggle('is-set', !!f);
+}
+
+// ─── Aerial background: Google Earth (live Google 3D tiles) ──────────────────
+// Design, rules and phases: GoogleEarthView.md — keep it in step with this section.
+// A project's aerial background is its drone panorama (the sphere, as always) or — with
+// alignment.json `background.kind: 'google'` — Google's Photorealistic 3D Tiles, streamed live
+// and drawn in a scene of their own BEHIND everything else. The camera still sits at the origin
+// and only turns (a fixed "drone" viewpoint), so the overlay stack — plots, drape, landmarks,
+// amenities — keeps its viewpoint-centred projection unchanged: groundPoint's plane "one unit
+// below the camera" IS the real ground when one unit = the drone's height in metres. Only the
+// numbers feeding it differ (see googleTransformFromPlacement / recomputeAnchorAndK).
+// World frame, measured not assumed (geoOrient): X east, Y up, Z south — the same frame the
+// plan drape already used (groundPoint: east, south). North is −Z, i.e. camera yaw lon = π.
+// Google's rules (GoogleEarthView.md §5): imagery is LIVE ONLY — never saved, captured, cached
+// by us or used offline; their logo and data credits stay on screen whenever it shows
+// (#geoCredits); plots come from the developer's own plan, never traced from the imagery.
+// Anything that fails — no key, key refused, quota, offline, a standalone bundle — leaves the
+// plain sky + plan overlay ("plan only") and says why (GEO_REASONS).
+const GEO_DEFAULT_HEIGHT = 200;                 // m above the site's ground when a project doesn't say
+const GEO_LIB = './vendor/3d-tiles-renderer-0.3.46/src/';   // vendored by tools/vendor_3d_tiles.py
+const GEO_ADDONS = './vendor/three-r160-addons/';
+const GEO_LOGO = 'vendor/google-maps-logo/GoogleMaps_Logo_WithDarkOutline.svg';
+const GEO_READY_MAX_MS = 8000;                  // the loading curtain waits at most this long for a sharp first view
+const GEO_MEASURE_MAX_MS = 15000;               // finding the ground under the site: settle for what has loaded after this…
+const GEO_MEASURE_GIVEUP_MS = 60000;            // …and give up (plan only) if there is still no ground at all after this
+const GEO_FAR_M = 40000, GEO_FOG_NEAR_M = 12000; // draw distance; far ground (always coarse) fades into haze
+const GEO_ERROR_TARGET = { desktop: 12, phone: 20 };   // tile detail (screen-space error, px): lower = sharper + heavier
+const GEO_HORIZON = 0xccdef0;                   // haze + the sky's horizon colour (sRGB)
+// Development only — this machine or a phone on the office LAN talking to server.py, never a
+// published page or a bundle: ?gtiles=<tileset.json> swaps Google for a test tileset
+// (spike/geo-tiles-test/; a same-site relative path only, so a crafted link can't put someone
+// else's 3D content under our page), ?gheight= / ?gdetail= try another drone height / detail
+// level, ?gdebug=1 shows the Phase 0 readout.
+const GEO_DEV = (() => {
+  const host = location.hostname;
+  const ok = !BUNDLE && !PUBLISHED && (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(host)
+    || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host));
+  const num = (k) => { const v = ok ? parseFloat(_params.get(k)) : NaN; return isFinite(v) && v > 0 ? v : null; };
+  const t = ok ? (_params.get('gtiles') || '') : '';
+  return { tiles: (t && !/^[a-z][\w+.-]*:|^\/\//i.test(t)) ? t : null, height: num('gheight'), detail: num('gdetail'), debug: ok && _params.has('gdebug') };
+})();
+const GEO_REASONS = {
+  bundle: 'A saved copy can’t show Google’s satellite view — it needs a live connection.',
+  offline: 'The satellite view needs an internet connection.',
+  network: 'Google’s satellite view could not be reached.',
+  'no-location': 'This project has no Google Earth location yet.',
+  'no-key': 'This project has no Google key yet.',
+  'bad-key': 'Google says this project’s key is not valid.',
+  'site-not-allowed': 'Google refused the key on this website — add this address to the key’s allowed websites.',
+  'api-off': 'Map Tiles API is not enabled in the Google Cloud project that owns this key.',
+  'api-blocked': 'This key is limited to other Google APIs — allow Map Tiles API on it.',
+  billing: 'Billing is not enabled for the Google Cloud project that owns this key.',
+  quota: 'This key has used up its Google quota for now.',
+  denied: 'Google refused this key.',
+  library: 'The satellite-view code failed to load.',
+  frame: 'The satellite view could not be oriented.',
+  'no-ground': 'Google returned no ground at this location.',
+};
+// status: 'off' (a pano project, or not started) · 'loading' (code + Google's root tileset) ·
+// 'measuring' (finding the ground height under the site) · 'ok' (drawing) · 'failed' (plan only).
+const geo = { status: 'off', reason: '', detail: '', tiles: null, scene: null, root: null, cam: null, probe: null,
+  holdCurtain: false, curtainWaiting: false, startedAt: 0, readyMs: null, quietFrames: 0, stepStart: 0,
+  requests: 0, bytes: 0, rootErrorP: null, creditsEl: null, creditsText: '', creditsAt: 0, debugEl: null,
+  fps: { frames: 0, since: 0, value: 0 }, planBoosted: false,
+  origin: null,          // the lat/lng the tiles are centred on (the drone when they loaded)
+  viewOverride: null, topDownView: null,   // admin top-down view: a temporary viewpoint above the site + the view to return to
+  tool: null, picksEl: null, planOpacity: null };   // admin two-point align / measure
+
+function isGoogleBackground() { return state.background.kind === 'google' && !!state.background.google; }
+// The viewpoint the camera is at right now: the project's drone, or the admin's temporary
+// top-down one. Every conversion between ground units and metres goes through this.
+function activeViewpoint() { return geo.viewOverride || state.background.google?.viewpoint || null; }
+function geoViewHeight() { return geo.viewOverride ? geo.viewOverride.heightM : (GEO_DEV.height || state.background.google?.viewpoint?.heightM || GEO_DEFAULT_HEIGHT); }
+function geoTourCovers() { return document.body.classList.contains('tour-open'); }   // a tour's room pano owns the screen
+function googleDrawing() { return geo.status === 'ok' && !geoTourCovers(); }
+// North for the compass / "face north": exact in Google mode (the world frame is real), the
+// admin-calibrated pano value otherwise — and a tour room's own calibration while one is open.
+function effectiveNorthDeg() { return (isGoogleBackground() && !geoTourCovers()) ? -180 : (state.northDeg || 0); }
+
+// Local east/north metres ⇄ lat/lng. A flat local approximation (WGS84 radii at the latitude):
+// millimetres over the few km a site spans, and it needs no library, so the overlay is placed
+// correctly even when Google never loads (plan only).
+function geoMetresPerDeg(lat) {
+  const la = lat * Math.PI / 180, s2 = Math.sin(la) ** 2, a = 6378137, e2 = 6.69437999014e-3;
+  return { lat: a * (1 - e2) / Math.pow(1 - e2 * s2, 1.5) * Math.PI / 180, lng: a / Math.sqrt(1 - e2 * s2) * Math.cos(la) * Math.PI / 180 };
+}
+function enuOffsetM(from, to) {
+  const k = geoMetresPerDeg((from.lat + to.lat) / 2);
+  return { east: (to.lng - from.lng) * k.lng, north: (to.lat - from.lat) * k.lat };
+}
+function offsetLatLng(from, east, north) {
+  let k = geoMetresPerDeg(from.lat), to = { lat: from.lat + north / k.lat, lng: from.lng + east / k.lng };
+  k = geoMetresPerDeg((from.lat + to.lat) / 2);                     // once more at the mid-latitude (matches enuOffsetM)
+  return { lat: from.lat + north / k.lat, lng: from.lng + east / k.lng };
+}
+
+// alignment.json `background` ⇄ state. Absent ⇒ a pano project, and the key is never written
+// back, so every project that doesn't use this round-trips byte-identically.
+function parseBackground(b) {
+  const g = b && b.google;
+  const num = (v) => (v != null && v !== '' && isFinite(+v)) ? +v : null;
+  const ll = (o) => (o && num(o.lat) != null && num(o.lng) != null && Math.abs(+o.lat) <= 90 && Math.abs(+o.lng) <= 180) ? { lat: +o.lat, lng: +o.lng } : null;
+  let google = null;
+  if (g && typeof g === 'object') {
+    let site = ll(g.site), vp = ll(g.viewpoint);
+    if (!vp && site) vp = { ...site };                 // no drone position yet: straight above the site
+    if (!site && vp) site = { lat: vp.lat, lng: vp.lng };
+    google = {
+      site,
+      viewpoint: vp ? { lat: vp.lat, lng: vp.lng, heightM: num(g.viewpoint?.heightM) > 0 ? +g.viewpoint.heightM : GEO_DEFAULT_HEIGHT } : null,
+      anchorPx: (g.anchorPx && num(g.anchorPx.x) != null && num(g.anchorPx.y) != null) ? { x: +g.anchorPx.x, y: +g.anchorPx.y } : null,
+      bearingDeg: num(g.bearingDeg) ?? 0,
+      metresPerPx: num(g.metresPerPx) > 0 ? +g.metresPerPx : null,
+      groundAltM: num(g.groundAltM),
+      detail: num(g.detail) > 0 ? +g.detail : null,
+      apiKey: typeof g.apiKey === 'string' ? g.apiKey.trim() : '',
+    };
+  }
+  return { kind: (b && b.kind === 'google' && google) ? 'google' : 'pano', google };
+}
+// The Google placement as it stands NOW: the loaded one with the admin's live Move / Scale /
+// Rotate folded in. In Google mode those tools keep editing state.transform exactly as they
+// do for a pano (ground units, relative to the loaded placement — googleTransformFromPlacement),
+// so nothing about them had to change; this turns the result back into metres and lat/lng.
+function googlePlacementNow() {
+  const g = state.background.google; if (!g) return null;
+  const vp = activeViewpoint();
+  if (!isGoogleBackground() || !vp) return g;
+  const H = geoViewHeight(), t = state.transform;
+  return { ...g, anchorPx: { ...state.anchor }, bearingDeg: t.rotation * 180 / Math.PI,
+    metresPerPx: state.kGround * t.scale * H, site: offsetLatLng(vp, t.tx * H, -t.ty * H) };
+}
+function googleTransformFromPlacement(g) {
+  const vp = activeViewpoint();
+  if (!g?.site || !vp) return IDENTITY();
+  const H = geoViewHeight(), d = enuOffsetM(vp, g.site);
+  return { tx: d.east / H, ty: -d.north / H, scale: 1, rotation: (g.bearingDeg || 0) * Math.PI / 180 };
+}
+function backgroundData() {
+  const bg = state.background; if (!bg.google) return null;
+  const g = googlePlacementNow(), r = (v, d) => +(+v).toFixed(d);
+  return { kind: bg.kind, google: {
+    ...(g.site ? { site: { lat: r(g.site.lat, 8), lng: r(g.site.lng, 8) } } : {}),
+    ...(g.anchorPx ? { anchorPx: { x: r(g.anchorPx.x, 2), y: r(g.anchorPx.y, 2) } } : {}),
+    bearingDeg: r(((g.bearingDeg % 360) + 360) % 360, 3),
+    ...(g.metresPerPx ? { metresPerPx: r(g.metresPerPx, 6) } : {}),
+    ...(g.viewpoint ? { viewpoint: { lat: r(g.viewpoint.lat, 8), lng: r(g.viewpoint.lng, 8), heightM: r(g.viewpoint.heightM, 1) } } : {}),
+    ...(g.groundAltM != null ? { groundAltM: r(g.groundAltM, 2) } : {}),
+    ...(g.detail != null ? { detail: g.detail } : {}),
+    apiKey: g.apiKey || '' } };
+}
+// Boot / a loaded alignment file: take the project's background. In Google mode the pano's own
+// transform is parked (written back unchanged as `transform`, so switching back is lossless) and
+// the live transform becomes the Google placement expressed in ground units.
+function applyBackgroundConfig(bg) {
+  const parsed = bg || { kind: 'pano', google: null };
+  const wasGoogle = isGoogleBackground();
+  if (wasGoogle && state.background.panoTransform) state.transform = state.background.panoTransform;
+  state.background = { kind: parsed.kind, google: parsed.google, panoTransform: null };
+  if (isGoogleBackground()) {
+    state.background.panoTransform = { ...state.transform };
+    state.transform = googleTransformFromPlacement(parsed.google);
+  }
+  recomputeAnchorAndK();
+}
+// In Google mode the anchor (the plan pixel that sits on the site) and the scale come from the
+// placement, not from the plot extents — so tracing more plots never moves the layout on Earth.
+// First use pins today's centre / auto-size, so a project switched to Google starts sensibly.
+function syncGoogleOverlayScale() {
+  const g = state.background.google;
+  if (!g.anchorPx) g.anchorPx = { ...state.anchor };
+  if (!g.metresPerPx) g.metresPerPx = state.kGround * geoViewHeight();
+  state.anchor = { ...g.anchorPx };
+  state.kGround = g.metresPerPx / geoViewHeight();
+}
+
+function releaseGeoCurtain() {
+  if (!geo.holdCurtain) return;
+  geo.holdCurtain = false;
+  if (geo.curtainWaiting) hideBootCurtain();
+}
+function geoFail(reason, detail = '') {
+  geo.status = 'failed'; geo.reason = reason; geo.detail = detail;
+  if (detail) console.warn(`Google Earth background: ${reason} — ${detail}`);
+  releaseGeoCurtain();
+  renderGeoCredits(true);
+  updatePanoName();
+  if (state.admin && (!els.geoPanel || els.geoPanel.hidden)) showNotice(`Google Earth background not showing: ${GEO_REASONS[reason] || reason}`);
+}
+// Google's JSON error body → {status, message, code}. `code` joins the status and the detail
+// reasons (e.g. "PERMISSION_DENIED API_KEY_HTTP_REFERRER_BLOCKED") — the words geoReasonFromError reads.
+async function geoErrorFromResponse(res) {
+  try {
+    const j = await res.clone().json();
+    return { status: res.status, message: j?.error?.message || '',
+      code: [j?.error?.status, ...(j?.error?.details || []).map((d) => d?.reason)].filter(Boolean).join(' ') };
+  } catch { return { status: res.status, message: res.statusText }; }
+}
+// The root tileset's own error, in plain words. Google answers a refused key with a JSON body;
+// its wording (not just the status) is what tells "website not allowed" from "API off".
+function geoReasonFromError(e) {
+  if (!e) return navigator.onLine === false ? 'offline' : 'network';
+  if (e.network) return navigator.onLine === false ? 'offline' : 'network';
+  const m = `${e.message || ''} ${e.code || ''}`.toLowerCase();
+  if (e.status === 429 || /quota|rate.limit|resource_exhausted/.test(m)) return 'quota';
+  if (/api key not valid|api_key_invalid|invalid api key/.test(m)) return 'bad-key';
+  if (/referer|referrer/.test(m)) return 'site-not-allowed';
+  if (/billing/.test(m)) return 'billing';
+  if (/has not been used|is disabled|service_disabled|not been enabled/.test(m)) return 'api-off';
+  if (/blocked/.test(m)) return 'api-blocked';
+  if (e.status === 400) return 'bad-key';
+  return 'denied';
+}
+
+async function startGoogleLayer() {
+  if (!isGoogleBackground() || geo.status !== 'off' || !three) return;
+  const g = state.background.google;
+  Object.assign(geo, { status: 'loading', reason: '', detail: '', startedAt: performance.now(), readyMs: null,
+    quietFrames: 0, requests: 0, bytes: 0, rootErrorP: null, planBoosted: false });
+  if (!bootProgressDone) { geo.holdCurtain = true; setTimeout(releaseGeoCurtain, GEO_READY_MAX_MS); }
+  ensureGeoCredits();
+  if (GEO_DEV.debug) ensureGeoDebug();
+  if (BUNDLE) return geoFail('bundle');
+  if (!g.viewpoint || !g.site) return geoFail('no-location');
+  if (!GEO_DEV.tiles && !g.apiKey) return geoFail('no-key');
+  if (navigator.onLine === false) return geoFail('offline');
+  let mods;
+  try {
+    mods = await Promise.all([
+      import(`${GEO_LIB}three/TilesRenderer.js`),
+      import(`${GEO_LIB}plugins/three/GoogleCloudAuthPlugin.js`),
+      import(`${GEO_LIB}plugins/three/ReorientationPlugin.js`),
+      import(`${GEO_LIB}plugins/three/GLTFExtensionsPlugin.js`),
+      import(`${GEO_LIB}plugins/three/TileCompressionPlugin.js`),
+      import(`${GEO_ADDONS}loaders/DRACOLoader.js`),
+    ]);
+  } catch (err) { return geoFail('library', err.message); }
+  if (geo.status !== 'loading' || !isGoogleBackground()) return;      // stopped meanwhile
+  const [{ TilesRenderer }, { GoogleCloudAuthPlugin }, { ReorientationPlugin }, { GLTFExtensionsPlugin }, { TileCompressionPlugin }, { DRACOLoader }] = mods;
+
+  const tiles = new TilesRenderer(GEO_DEV.tiles || undefined);
+  // Counts requests/bytes for the Phase 0 readout and keeps the root tileset's error body.
+  const watch = async (uri, fetchIt) => {
+    const isRoot = geo.requests === 0;
+    geo.requests++;
+    let res;
+    try { res = await fetchIt(isRoot); }
+    catch (err) { if (isRoot) geo.rootErrorP = Promise.resolve({ network: true, message: err.message }); throw err; }
+    geo.bytes += +(res.headers.get('content-length') || 0);
+    if (isRoot && !res.ok) geo.rootErrorP = geoErrorFromResponse(res);
+    return res;
+  };
+  if (GEO_DEV.tiles) {
+    tiles.registerPlugin({ name: 'B91_FETCH', fetchData: (uri, opts) => watch(uri, () => fetch(uri, opts)) });   // test tiles: no auth
+  } else {
+    const auth = new GoogleCloudAuthPlugin({ apiToken: g.apiKey, autoRefreshToken: true });
+    tiles.registerPlugin(auth);
+    // The root request goes out as a plain fetch: the plugin's own fetchData treats ANY 4xx as
+    // an expired session and retries, which swallows Google's answer to a refused key (the
+    // retry then throws on the error body). Tile requests after it keep the plugin's refresh.
+    const plain = auth.fetchData.bind(auth);
+    auth.fetchData = (uri, opts) => watch(uri, (isRoot) => (isRoot ? fetch(uri, opts) : plain(uri, opts)));
+  }
+  const draco = new DRACOLoader().setDecoderPath(`${GEO_ADDONS}libs/draco/gltf/`);
+  tiles.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco, metadata: false }));
+  tiles.registerPlugin(new TileCompressionPlugin());
+  // Recentres the world on the ground under the drone (float precision stays metre-scale).
+  const origin = activeViewpoint();
+  geo.origin = { lat: origin.lat, lng: origin.lng };
+  tiles.registerPlugin(new ReorientationPlugin({ lat: origin.lat * Math.PI / 180, lon: origin.lng * Math.PI / 180, height: 0, recenter: true }));
+  const phone = matchMedia('(pointer: coarse)').matches;
+  tiles.errorTarget = GEO_DEV.detail || g.detail || (phone ? GEO_ERROR_TARGET.phone : GEO_ERROR_TARGET.desktop);
+  if (phone && tiles.lruCache) { tiles.lruCache.minBytesSize = 0.2 * 2 ** 30; tiles.lruCache.maxBytesSize = 0.28 * 2 ** 30; }
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(GEO_HORIZON, GEO_FOG_NEAR_M, GEO_FAR_M);
+  scene.add(geoSkyDome());
+  const root = new THREE.Group(); root.add(tiles.group); scene.add(root);
+  const cam = new THREE.PerspectiveCamera(three.camera.fov, three.camera.aspect, 1, GEO_FAR_M);
+  tiles.setCamera(cam); tiles.setResolutionFromRenderer(cam, three.renderer);
+  Object.assign(geo, { tiles, scene, root, cam, stepStart: performance.now() });
+}
+function stopGoogleLayer() {
+  if (geo.tiles) { try { geo.tiles.dispose(); } catch {} }
+  Object.assign(geo, { status: 'off', reason: '', tiles: null, scene: null, root: null, cam: null, probe: null });
+  releaseGeoCurtain();
+  renderGeoCredits(true);
+  updatePanoName();
+}
+// The project's background changed while open (a loaded alignment file): start or stop Google.
+function refreshBackgroundLayer() {
+  if (isGoogleBackground() && geo.status === 'off') startGoogleLayer();
+  else if (!isGoogleBackground() && geo.status !== 'off') stopGoogleLayer();
+  requestRender(true); updatePanoName();
+}
+window.addEventListener('online', () => {          // back online: try again
+  if (geo.status === 'failed' && (geo.reason === 'offline' || geo.reason === 'network')) { stopGoogleLayer(); startGoogleLayer(); }
+});
+
+// No sky exists in Google's data, so paint one: a gradient dome that ignores depth and fog.
+// Colours are written as sRGB (a ShaderMaterial gets no output conversion of its own).
+function geoSkyDome() {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
+    vertexShader: 'varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying vec3 vDir; void main(){ float h = normalize(vDir).y; vec3 top = vec3(0.42,0.62,0.86), hor = vec3(0.80,0.87,0.94), low = vec3(0.66,0.70,0.74);'
+      + ' gl_FragColor = vec4(h > 0.0 ? mix(hor, top, pow(h, 0.55)) : mix(hor, low, pow(-h, 0.5)), 1.0); }',
+  }));
+  m.scale.setScalar(GEO_FAR_M * 0.5); m.renderOrder = -1; m.frustumCulled = false;
+  return m;
+}
+
+// Once Google's root tileset is in: turn the world so X = east, Y = up, Z = south (measured from
+// the library's own ellipsoid maths, not assumed from its axis conventions).
+function geoOrient() {
+  const { tiles, root } = geo, vp = geo.origin, E = tiles.ellipsoid, D = Math.PI / 180;
+  root.rotation.set(0, 0, 0); root.position.set(0, 0, 0); root.updateMatrixWorld(true);
+  const at = (la, lo, h = 0) => E.getCartographicToPosition(la * D, lo * D, h, new THREE.Vector3()).applyMatrix4(tiles.group.matrixWorld);
+  const o = at(vp.lat, vp.lng), east = at(vp.lat, vp.lng + 0.001).sub(o), north = at(vp.lat + 0.001, vp.lng).sub(o), up = at(vp.lat, vp.lng, 100).sub(o);
+  root.rotation.y = Math.atan2(east.z, east.x);
+  root.updateMatrixWorld(true);
+  const q = root.quaternion, n = north.applyQuaternion(q).normalize(), e = east.applyQuaternion(q).normalize(), u = up.normalize();
+  return e.x > 0.999 && n.z < -0.999 && u.y > 0.999;
+}
+// The ground height under the SITE (the overlay's plane): stored in the project once measured,
+// so a visitor never waits for this. Measured by looking straight down from above the site,
+// letting the tiles there load, and ray-casting to the ground.
+function geoBeginGround() {
+  const g = state.background.google, p = googlePlacementNow(), off = enuOffsetM(geo.origin, p.site);
+  geo.siteXZ = { x: off.east, z: -off.north };
+  if (g.groundAltM != null) return geoPlace(g.groundAltM);
+  const probe = new THREE.PerspectiveCamera(40, 1, 1, 1e5);
+  probe.position.set(geo.siteXZ.x, 800, geo.siteXZ.z); probe.up.set(0, 0, -1);
+  probe.lookAt(geo.siteXZ.x, 0, geo.siteXZ.z); probe.updateMatrixWorld(true);
+  geo.tiles.deleteCamera(geo.cam); geo.tiles.setCamera(probe); geo.tiles.setResolution(probe, 512, 512);
+  Object.assign(geo, { probe, status: 'measuring', stepStart: performance.now(), quietFrames: 0 });
+}
+function geoGroundHit() {
+  const rc = new THREE.Raycaster(new THREE.Vector3(geo.siteXZ.x, 20000, geo.siteXZ.z), new THREE.Vector3(0, -1, 0));
+  rc.firstHitOnly = true;
+  return rc.intersectObject(geo.tiles.group, true)[0] || null;
+}
+// Never guesses: placing the drone against a made-up ground (sea level, say) can put it under
+// the real one — a blank sky. No ground after GEO_MEASURE_GIVEUP_MS ⇒ plan only, with a reason.
+function geoFinishGround(hit) {
+  geo.tiles.deleteCamera(geo.probe); geo.tiles.setCamera(geo.cam); geo.probe = null;
+  if (!hit) return geoFail('no-ground');
+  const alt = hit.point.y;
+  if (state.admin) { state.background.google.groundAltM = alt; onAlignmentChanged(); }
+  geoPlace(alt);
+}
+function geoPlace(groundAlt) {
+  // The camera never moves: the world does. The current viewpoint (the drone, or the admin's
+  // top-down one) is put at the origin, H metres above the site's ground.
+  const o = enuOffsetM(geo.origin, activeViewpoint());
+  geo.root.position.set(-o.east, -(groundAlt + geoViewHeight()), o.north);
+  geo.root.updateMatrixWorld(true);
+  Object.assign(geo, { status: 'ok', stepStart: performance.now(), quietFrames: 0, groundAlt });
+  updatePanoName();
+}
+const geoBusy = () => { const s = geo.tiles.stats; return (s.downloading || 0) + (s.parsing || 0); };
+// Per frame while not yet drawing: wait for the root, orient, find the ground.
+async function geoStepLoading() {
+  const { tiles } = geo;
+  tiles.update();
+  if (geo.status === 'loading') {
+    if (tiles.rootLoadingState === -1) {          // FAILED
+      geo.status = 'failing';
+      const err = await (geo.rootErrorP || Promise.resolve(null));
+      return geoFail(geoReasonFromError(err), err?.message || '');
+    }
+    if (!tiles.root) return;
+    if (!geoOrient()) return geoFail('frame', 'east/north/up did not come out as X/−Z/Y');
+    geoBeginGround();
+  } else if (geo.status === 'measuring') {
+    geo.quietFrames = geoBusy() === 0 && tiles.visibleTiles.size ? geo.quietFrames + 1 : 0;
+    const waited = performance.now() - geo.stepStart;
+    if (geo.quietFrames > 20 || waited > GEO_MEASURE_MAX_MS) {
+      const hit = geoGroundHit();
+      if (hit || waited > GEO_MEASURE_GIVEUP_MS) geoFinishGround(hit);
+    }
+  }
+}
+// Draw one frame: Google's scene, then (depth cleared) the usual scene over it — which is how
+// every overlay stays on top of trees and buildings in Google's 3D mesh, just as it sits on
+// top of a pano photo. Everything else keeps the single ordinary render.
+function renderScene() {
+  const r = three.renderer, m = three.camera;
+  if (!googleDrawing()) {
+    three.pano.visible = true;
+    if (geo.tiles && (geo.status === 'loading' || geo.status === 'measuring')) geoStepLoading();
+    if (geo.status === 'failed' && !geo.planBoosted && three.ground && !geoTourCovers()) {
+      three.ground.mat.opacity = Math.max(three.ground.mat.opacity, 0.85); geo.planBoosted = true;   // plan only: make the plan readable
+    }
+    r.render(three.scene, m);
+    if (geo.creditsEl) renderGeoCredits();           // hides Google's credits while a tour covers the view
+    if (geo.debugEl) renderGeoDebug();
+    if (geo.tool || geo.viewOverride || geo.picksEl?.innerHTML) renderGeoPicks();
+    return;
+  }
+  const c = geo.cam;
+  if (c.fov !== m.fov || c.aspect !== m.aspect || c.zoom !== m.zoom) { c.fov = m.fov; c.aspect = m.aspect; c.zoom = m.zoom; c.updateProjectionMatrix(); }
+  c.quaternion.copy(m.quaternion); c.updateMatrixWorld();
+  geo.tiles.setResolutionFromRenderer(c, r);
+  geo.tiles.update();
+  three.pano.visible = false;
+  r.autoClear = false;
+  r.clear(); r.render(geo.scene, c); r.clearDepth(); r.render(three.scene, m);
+  r.autoClear = true;
+  if (geo.readyMs == null) {                       // first sharp view → lift the loading curtain
+    geo.quietFrames = geoBusy() === 0 && geo.tiles.visibleTiles.size ? geo.quietFrames + 1 : 0;
+    if (geo.quietFrames > 10) { geo.readyMs = Math.round(performance.now() - geo.startedAt); releaseGeoCurtain(); }
+  }
+  renderGeoCredits();
+  if (geo.debugEl) renderGeoDebug();
+  if (geo.tool || geo.viewOverride || geo.picksEl?.innerHTML) renderGeoPicks();
+}
+
+// Google's logo + the imagery credits of the tiles on screen (rule G2: aggregated, sorted,
+// one line, never covered), and a note when the view falls back to plan only.
+function ensureGeoCredits() {
+  if (geo.creditsEl || !els.pano) return;
+  const el = document.createElement('div');
+  el.className = `geo-credits${GEO_DEV.tiles ? ' is-test' : ''}`; el.hidden = true;   // test tiles aren't Google's: no logo
+  el.innerHTML = '<img class="geo-credits-logo" alt="Google Maps" width="95" height="18"><span class="geo-credits-text"></span>';   // src set once Google shows (a bundle has no logo file)
+  els.pano.appendChild(el);
+  geo.creditsEl = el;
+}
+function renderGeoCredits(force = false) {
+  const el = geo.creditsEl; if (!el) return;
+  const now = performance.now();
+  if (!force && now - geo.creditsAt < 500) return;
+  geo.creditsAt = now;
+  const showing = googleDrawing(), failed = geo.status === 'failed' && !geoTourCovers() && isGoogleBackground();
+  el.hidden = !(showing || failed);
+  el.classList.toggle('is-note', failed);
+  if (el.hidden) return;
+  const logo = el.querySelector('.geo-credits-logo');
+  if (showing && !logo.getAttribute('src')) logo.src = GEO_LOGO;
+  let text;
+  if (failed) {
+    text = state.admin ? (GEO_REASONS[geo.reason] || geo.reason)
+      : `${geo.reason === 'offline' || geo.reason === 'bundle' ? 'Satellite view needs an internet connection' : 'Satellite view is unavailable right now'} — showing the site plan.`;
+  } else {
+    const credits = geo.tiles.getAttributions().filter((a) => a.type === 'string' && a.value).map((a) => a.value).join('; ');
+    const layout = (state.brand.name || '').trim();
+    text = `${credits || (GEO_DEV.tiles ? 'Test ground (not Google)' : 'Google')}${layout ? ` · Plot layout: ${layout}` : ''}`;
+  }
+  if (text !== geo.creditsText) { geo.creditsText = text; el.querySelector('.geo-credits-text').textContent = text; }
+}
+// ?gdebug=1 (local only): the Phase 0 numbers — tiles, requests, MB, time to a sharp view, fps.
+function ensureGeoDebug() {
+  if (geo.debugEl) return;
+  geo.debugEl = document.createElement('pre');
+  geo.debugEl.className = 'geo-debug';
+  document.body.appendChild(geo.debugEl);
+  Object.assign(window, { __b91Geo: geo, __b91Three: () => three, __b91State: state });   // for checking it from the console
+}
+function renderGeoDebug() {
+  const f = geo.fps, now = performance.now();
+  f.frames++;
+  if (now - f.since < 500) return;
+  f.value = Math.round(f.frames * 1000 / (now - f.since)); f.frames = 0; f.since = now;
+  const s = geo.tiles?.stats || {}, mem = performance.memory ? ` · JS heap ${Math.round(performance.memory.usedJSHeapSize / 2 ** 20)} MB` : '';
+  geo.debugEl.textContent = [
+    `Google layer: ${geo.status}${geo.reason ? ` (${geo.reason})` : ''} · sharp after ${geo.readyMs != null ? (geo.readyMs / 1000).toFixed(1) + ' s' : '…'}`,
+    `height ${geoViewHeight()} m · ground ${geo.groundAlt != null ? geo.groundAlt.toFixed(1) : '?'} m · detail ${geo.tiles?.errorTarget}`,
+    `tiles visible ${s.visible} · active ${s.active} · downloading ${s.downloading} · parsing ${s.parsing} · failed ${s.failed}`,
+    `requests ${geo.requests} · ${(geo.bytes / 2 ** 20).toFixed(1)} MB · ${f.value} fps${mem}`,
+  ].join('\n');
+}
+
+// ─── Google Earth: admin setup (GoogleEarthView.md Phase 2) ─────────────────────────────
+// The Aerial background choice (Align tab) and the floating setup panel (#geoPanel): the
+// project's Google key (a Test, and the setup steps to send the client), the site, the drone,
+// and the tools for lining the plan up — a top-down view, two-point align, measure. All of it
+// edits state.background.google and goes out with the next Save like any alignment change.
+// Two helpers keep the numbers consistent: bakeGooglePlacement() folds the live Move / Scale /
+// Rotate (state.transform, ground units) into the stored placement (metres, lat/lng) BEFORE
+// anything else changes, and reapplyGooglePlacement() turns the stored placement back into the
+// live transform for the current viewpoint. The top-down view is a TEMPORARY viewpoint straight
+// above the site (geo.viewOverride) — the project's own drone and start view are left alone.
+const GEO_DIRS = [['north', 0], ['north-east', 45], ['east', 90], ['south-east', 135], ['south', 180], ['south-west', 225], ['west', 270], ['north-west', 315]];
+const FT_PER_M = 3.28084;
+
+function ensureGoogleConfig() {
+  if (!state.background.google) state.background.google = { site: null, viewpoint: null, anchorPx: null, bearingDeg: 0, metresPerPx: null, groundAltM: null, detail: null, apiKey: '' };
+  return state.background.google;
+}
+function bakeGooglePlacement() {
+  const g = state.background.google, now = googlePlacementNow();
+  if (g && now && now !== g) Object.assign(g, { site: now.site, anchorPx: now.anchorPx, bearingDeg: now.bearingDeg, metresPerPx: now.metresPerPx });
+}
+function reapplyGooglePlacement() {
+  state.transform = googleTransformFromPlacement(state.background.google);
+  recomputeAnchorAndK();
+  if (geo.status === 'ok') geoPlace(geo.groundAlt);
+  requestRender(true); updateAdminUI();
+}
+
+// Pano ⇄ Google. The side being left keeps everything (switching back is lossless); visitors
+// only ever see the chosen one (D-9).
+async function setBackgroundKind(kind) {
+  if (!state.admin || kind === state.background.kind) return;
+  cancelGeoTool(); if (geo.viewOverride) setGoogleTopDown(false);
+  if (kind === 'google') {
+    ensureGoogleConfig();
+    state.background.panoTransform = { ...state.transform };
+    state.background.kind = 'google';
+    state.transform = googleTransformFromPlacement(state.background.google);
+    recomputeAnchorAndK();
+    openGeoPanel();                                  // first, so "no site / no key yet" shows there, not as a notice
+    startGoogleLayer();
+  } else {
+    bakeGooglePlacement();
+    state.transform = state.background.panoTransform || IDENTITY();
+    state.background.kind = 'pano'; state.background.panoTransform = null;
+    stopGoogleLayer();
+    recomputeAnchorAndK();
+    closeGeoPanel();
+    // Google mode never downloaded the pano — bring it (or the plain sky) back.
+    const src = state.panoBlob || (state.panoImage?.file ? assetUrl(state.panoImage.file) : null);
+    try { swapPano(src ? await loadPanoTexture(src) : fallbackPanoTexture()); } catch { swapPano(fallbackPanoTexture()); }
+  }
+  requestRender(true); updateAdminUI(); updatePanoName(); onAlignmentChanged();
+}
+
+// ── The drone: distance + compass direction from the site, and height ──
+function droneFromSite() {                          // relative to the LIVE site (Move layout moves it before any Save)
+  const g = state.background.google, site = googlePlacementNow()?.site || g?.site;
+  if (!site || !g.viewpoint) return { dist: 200, bearing: 180, heightM: g?.viewpoint?.heightM || GEO_DEFAULT_HEIGHT };
+  const o = enuOffsetM(site, g.viewpoint), dist = Math.hypot(o.east, o.north);
+  return { dist, bearing: dist < 0.5 ? 180 : ((Math.atan2(o.east, o.north) * 180 / Math.PI) + 360) % 360, heightM: g.viewpoint.heightM };
+}
+function placeDrone(site, { dist, bearing, heightM }) {
+  const b = bearing * Math.PI / 180;
+  return { ...offsetLatLng(site, dist * Math.sin(b), dist * Math.cos(b)), heightM };
+}
+function viewAimedAtSite() {                         // camera yaw/pitch from the drone to the site
+  const { dist, bearing, heightM } = droneFromSite();
+  return { lon: -bearing * Math.PI / 180, lat: dist > 1 ? -Math.atan2(heightM, dist) : -Math.PI / 2 };
+}
+function setGoogleDrone(d) {
+  const g = state.background.google; if (!g?.site) return;
+  cancelGeoTool();
+  bakeGooglePlacement();
+  g.viewpoint = placeDrone(g.site, d);
+  if (geo.viewOverride) {                            // top-down: the camera stays; the start view to come back to is re-aimed
+    geo.topDownView = { ...(geo.topDownView || state.view), ...viewAimedAtSite() };
+  } else {
+    reapplyGooglePlacement();
+    Object.assign(state.view, viewAimedAtSite()); clampView();
+  }
+  onAlignmentChanged(); updateGeoAdminUI();
+}
+
+// ── The site ──
+// A Google Maps / Earth link or "lat, lng". A Maps PLACE link carries the pin as !3d…!4d…,
+// which beats the camera position after "@" (the map's centre, not necessarily the pin).
+function parseGeoLocation(text) {
+  let t = String(text || '').trim();
+  try { t = decodeURIComponent(t); } catch {}
+  const num = '(-?\\d{1,3}(?:\\.\\d+)?)';
+  const tries = [new RegExp(`!3d${num}!4d${num}`), new RegExp(`@${num},\\s*${num}`),
+    new RegExp(`[?&](?:q|ll|query|center|destination)=${num},\\s*${num}`), new RegExp(`^${num}\\s*[,\\s]\\s*${num}$`)];
+  for (const rx of tries) {
+    const m = t.match(rx);
+    if (m) { const lat = +m[1], lng = +m[2]; if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng }; }
+  }
+  return null;
+}
+function setGoogleSite(ll) {
+  const g = ensureGoogleConfig();
+  cancelGeoTool(); if (geo.viewOverride) setGoogleTopDown(false);
+  bakeGooglePlacement();
+  const d = (g.site && g.viewpoint) ? droneFromSite() : { dist: 200, bearing: 180, heightM: g.viewpoint?.heightM || GEO_DEFAULT_HEIGHT };
+  g.site = { lat: ll.lat, lng: ll.lng };
+  g.viewpoint = placeDrone(g.site, d);               // the drone keeps its place relative to the site
+  g.groundAltM = null;                               // a new place: its ground is measured afresh
+  stopGoogleLayer();
+  reapplyGooglePlacement();
+  Object.assign(state.view, viewAimedAtSite()); clampView();
+  startGoogleLayer();                                // fresh tiles, centred there
+  onAlignmentChanged(); updateGeoAdminUI();
+}
+
+// ── The key ──
+async function testGoogleKey(key) {
+  if (!key) return { ok: false, text: 'Paste a key first.' };
+  try {
+    // One request to Google's 3D tiles root, from THIS page — so it also checks that this
+    // website's address is allowed on the key.
+    const res = await fetch(`https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(key)}`, { cache: 'no-store' });
+    if (res.ok) return { ok: true, text: 'This key works for Google’s 3D tiles on this website.' };
+    return { ok: false, text: GEO_REASONS[geoReasonFromError(await geoErrorFromResponse(res))] };
+  } catch { return { ok: false, text: GEO_REASONS[navigator.onLine === false ? 'offline' : 'network'] }; }
+}
+// The steps to send a client, with this project's exact website addresses (the published
+// link from the publish settings when there are any; the documented defaults otherwise).
+async function geoClientStepsText() {
+  const pid = state.projectId, name = (state.brand.name || '').trim() || pid;
+  let sites = [`https://re.build91.in/${pid}/*`, `https://d9diw1qcxp0ak.cloudfront.net/${pid}/*`];
+  try {
+    const j = await (await fetch(`/api/publish/status?project=${encodeURIComponent(pid)}`, { cache: 'no-store' })).json();
+    const got = [j?.url, j?.fallbackUrl].filter((u) => typeof u === 'string' && /^https?:\/\//.test(u)).map((u) => u.replace(/\/?$/, '/*'));
+    if (got.length) sites = got;
+  } catch {}
+  const admin = ['http://localhost:8731/*'];
+  if (!/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) admin.push(`${location.origin}/*`);
+  return [
+    `Google key for "${name}" — the 3D site view (Build91)`,
+    '',
+    'Please create a NEW key just for this — not a key your own servers already use.',
+    '',
+    '1. Google Cloud Console: pick or create a project, and make sure billing is on.',
+    '2. APIs & Services → Library → enable "Map Tiles API".',
+    '3. APIs & Services → Credentials → Create credentials → API key. Then edit the key:',
+    '   • Application restrictions → Websites → add exactly these:',
+    ...[...sites, ...admin].map((u) => `       ${u}`),
+    '   • API restrictions → Restrict key → tick only "Map Tiles API".',
+    '4. Recommended: Map Tiles API → Quotas → set a daily limit;',
+    '   Billing → Budgets & alerts → a monthly budget with an email alert.',
+    '5. Send the key to Build91.',
+    '',
+    'Google bills roughly one request per visit to the site view. The key is visible in',
+    'visitors’ browsers by design — the restrictions above are what protect it.',
+  ].join('\n');
+}
+function setGeoKeyMsg(text, cls = '') { if (!els.geoKeyMsg) return; els.geoKeyMsg.textContent = text; els.geoKeyMsg.className = `geo-note${cls ? ' ' + cls : ''}`; }
+
+// ── Top-down view (for lining the plan up) ──
+function layoutRadiusM() {
+  const p = googlePlacementNow(); if (!p?.anchorPx || !p.metresPerPx) return 150;
+  let r = 0;
+  state.geom.forEach((gm) => gm.pts.forEach((pt) => { r = Math.max(r, Math.hypot(pt.x - p.anchorPx.x, pt.y - p.anchorPx.y)); }));
+  return r ? r * p.metresPerPx : 150;
+}
+function setGoogleTopDown(on) {
+  if (!isGoogleBackground() || !state.background.google?.site || !!geo.viewOverride === on) return;
+  cancelGeoTool();
+  bakeGooglePlacement();
+  const g = state.background.google;
+  if (on) {
+    geo.topDownView = { ...state.view };
+    geo.viewOverride = { lat: g.site.lat, lng: g.site.lng, heightM: Math.round(Math.min(3000, Math.max(150, layoutRadiusM() * 2.4))) };
+    reapplyGooglePlacement();
+    Object.assign(state.view, { lon: Math.PI, lat: -Math.PI / 2, fov: 60 });   // straight down, north up
+  } else {
+    geo.viewOverride = null;
+    reapplyGooglePlacement();
+    Object.assign(state.view, geo.topDownView || viewAimedAtSite()); geo.topDownView = null;
+  }
+  clampView(); updateGeoAdminUI();
+}
+
+// ── Two-point align and measure (clicks on the ground, via rayToGround) ──
+function startGeoTool(kind) {
+  if (geo.tool?.kind === kind) return cancelGeoTool();
+  cancelGeoTool();
+  geo.tool = kind === 'align' ? { kind, step: 0, pairs: [{}, {}] } : { kind, pts: [] };
+  if (kind === 'align') geoAlignShow();
+  setGeoToolHint(); updateGeoAdminUI();
+}
+function cancelGeoTool() {
+  if (!geo.tool) return;
+  if (geo.tool.kind === 'align') geoAlignPlanVisible(true, true);
+  geo.tool = null;
+  if (geo.picksEl) geo.picksEl.innerHTML = '';
+  setGeoToolHint(); updateGeoAdminUI();
+}
+// Plan steps show the plan clearly; ground steps hide it — so the admin clicks the plan's
+// corner, then the satellite's corner, never a blend of the two.
+function geoAlignPlanVisible(show, restore = false) {
+  state.plots.forEach((p) => { p.group.visible = show; });
+  if (!three?.ground) return;
+  three.ground.mesh.visible = show;
+  if (show && !restore) { if (geo.planOpacity == null) geo.planOpacity = three.ground.mat.opacity; three.ground.mat.opacity = Math.max(geo.planOpacity, 0.85); }
+  if (restore && geo.planOpacity != null) { three.ground.mat.opacity = geo.planOpacity; geo.planOpacity = null; }
+}
+function geoAlignShow() { geoAlignPlanVisible(geo.tool.step % 2 === 0); }
+// The plan pixel under a ground point — groundPoint run backwards.
+function groundToPlanPx(v) {
+  const A = state.anchor, t = state.transform, k = state.kGround * t.scale;
+  const c = Math.cos(-t.rotation), sn = Math.sin(-t.rotation), dx = (v.x - t.tx) / k, dz = (v.z - t.ty) / k;
+  return { x: A.x + dx * c - dz * sn, y: A.y + dx * sn + dz * c };
+}
+// A click on the view while a tool is on: consumed here (true), so it doesn't open a plot.
+function geoToolClick(e) {
+  const t = geo.tool; if (!t || !three) return false;
+  const v = rayToGround(e);
+  if (!v) { setGeoToolHint('Click on the ground — below the horizon.'); return true; }
+  if (t.kind === 'measure') {
+    if (t.pts.length >= 2) t.pts = [];
+    t.pts.push(v); setGeoToolHint();
+    return true;
+  }
+  const pair = t.pairs[t.step >> 1];
+  if (t.step % 2 === 0) pair.plan = groundToPlanPx(v); else pair.ground = v;
+  t.step++;
+  if (t.step < 4) { geoAlignShow(); setGeoToolHint(); } else finishTwoPointAlign();
+  return true;
+}
+// Plan → ground is one complex multiplication in groundPoint's terms: G = t + r·(P − A) with
+// r = scale·k·e^{iθ}. Two point pairs give r (from the two differences) and then t, exactly.
+function finishTwoPointAlign() {
+  const [p1, p2] = geo.tool.pairs, A = state.anchor, k = state.kGround;
+  const dP = { x: p2.plan.x - p1.plan.x, y: p2.plan.y - p1.plan.y }, dG = { x: p2.ground.x - p1.ground.x, y: p2.ground.z - p1.ground.z };
+  const den = dP.x * dP.x + dP.y * dP.y;
+  if (den < 4 || Math.hypot(dG.x, dG.y) < 1e-4) {
+    geo.tool.step = 0; geo.tool.pairs = [{}, {}]; geoAlignShow();
+    return setGeoToolHint('Those two spots were too close together — start again with two spots far apart.');
+  }
+  const r = { x: (dG.x * dP.x + dG.y * dP.y) / den, y: (dG.y * dP.x - dG.x * dP.y) / den };
+  const q = { x: p1.plan.x - A.x, y: p1.plan.y - A.y };
+  state.transform = { scale: Math.hypot(r.x, r.y) / k, rotation: Math.atan2(r.y, r.x),
+    tx: p1.ground.x - (r.x * q.x - r.y * q.y), ty: p1.ground.z - (r.x * q.y + r.y * q.x) };
+  geoAlignPlanVisible(true, true);
+  geo.tool = null; if (geo.picksEl) geo.picksEl.innerHTML = '';
+  bakeGooglePlacement(); reapplyGooglePlacement(); onAlignmentChanged();
+  const g = state.background.google;
+  setGeoToolHint(`Lined up: the plan is ${g.metresPerPx.toFixed(3)} m per plan pixel, turned ${(((g.bearingDeg % 360) + 360) % 360).toFixed(1)}° from north. Check a known length with Measure, then Save.`);
+  updateGeoAdminUI();
+}
+const geoGroundDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z) * geoViewHeight();   // flat ground: ground units × drone height
+const fmtGeoLen = (m) => `${m < 100 ? m.toFixed(1) : Math.round(m)} m (${(m * FT_PER_M).toFixed(m < 100 ? 1 : 0)} ft)`;
+function setGeoToolHint(msg) {
+  if (!els.geoToolHint) return;
+  const t = geo.tool;
+  if (msg == null) {
+    if (t?.kind === 'align') msg = ['1 of 4 · Click a spot you can recognise on the PLAN — a road or plot corner.',
+      '2 of 4 · Now click that same spot on the SATELLITE view (the plan is hidden for this click).',
+      '3 of 4 · Click a second spot on the PLAN, far from the first.',
+      '4 of 4 · Click that second spot on the SATELLITE view.'][t.step];
+    else if (t?.kind === 'measure') msg = t.pts.length === 2 ? `Distance: ${fmtGeoLen(geoGroundDist(t.pts[0], t.pts[1]))}. Click again to measure another.` : 'Measure · click two points on the ground.';
+    else msg = 'Move layout, Scale and Rotate in the Align panel work here too.';
+  }
+  els.geoToolHint.textContent = msg;
+}
+// The tools' marks, drawn over the view each frame: P1/G1/P2/G2, the measured line, and —
+// in the top-down view — where the drone is.
+function renderGeoPicks() {
+  const t = geo.tool, marks = [], lines = [];
+  if (t?.kind === 'align') t.pairs.forEach((pr, i) => {
+    if (pr.plan) marks.push({ v: groundPoint(pr.plan), label: `P${i + 1}`, color: '#e7cd7a' });
+    if (pr.ground) marks.push({ v: pr.ground, label: `G${i + 1}`, color: '#7dd3fc' });
+  });
+  if (t?.kind === 'measure') {
+    t.pts.forEach((v, i) => marks.push({ v, label: i ? 'B' : 'A', color: '#7dd3fc' }));
+    if (t.pts.length === 2) lines.push({ a: t.pts[0], b: t.pts[1], label: fmtGeoLen(geoGroundDist(t.pts[0], t.pts[1])) });
+  }
+  const vp = state.background.google?.viewpoint;
+  if (geo.viewOverride && vp) {
+    const H = geoViewHeight(), o = enuOffsetM(geo.viewOverride, vp);
+    marks.push({ v: new THREE.Vector3(o.east / H, -GROUND_H, -o.north / H), label: `Drone · ${Math.round(vp.heightM)} m up`, color: '#f0bd45' });
+  }
+  if (!marks.length) { if (geo.picksEl?.innerHTML) geo.picksEl.innerHTML = ''; return; }
+  if (!geo.picksEl) {
+    geo.picksEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    geo.picksEl.setAttribute('class', 'geo-picks');
+    els.pano.appendChild(geo.picksEl);
+  }
+  const w = els.pano.clientWidth, h = els.pano.clientHeight;
+  const scr = (v) => { const n = v.clone().project(three.camera); return n.z > 1 ? null : { x: (n.x + 1) / 2 * w, y: (1 - n.y) / 2 * h }; };
+  let html = '';
+  for (const l of lines) {
+    const a = scr(l.a), b = scr(l.b);
+    if (a && b) html += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#7dd3fc" stroke-width="2" stroke-dasharray="6 4"/><text x="${(a.x + b.x) / 2 + 8}" y="${(a.y + b.y) / 2 - 8}">${esc(l.label)}</text>`;
+  }
+  for (const m of marks) {
+    const q = scr(m.v);
+    if (q) html += `<circle cx="${q.x}" cy="${q.y}" r="7" fill="none" stroke="${m.color}" stroke-width="2.5"/><circle cx="${q.x}" cy="${q.y}" r="2" fill="${m.color}"/><text x="${q.x + 10}" y="${q.y - 9}">${esc(m.label)}</text>`;
+  }
+  geo.picksEl.innerHTML = html;
+}
+
+// ── The panel and the sidebar block ──
+function geoStatusText() {
+  if (!isGoogleBackground()) return '';
+  switch (geo.status) {
+    case 'ok': return `Showing Google’s view.${geo.viewOverride ? ' Top-down view — for lining up only.' : ''}`;
+    case 'loading': return 'Connecting to Google…';
+    case 'measuring': return 'Finding the ground under the site…';
+    case 'failed': case 'failing': return `Not showing: ${GEO_REASONS[geo.reason] || geo.reason || '…'}`;
+    default: return 'Starting…';
+  }
+}
+function updateGeoAdminUI() {
+  if (!state.admin) return;
+  const google = isGoogleBackground(), bad = geo.status === 'failed' || geo.status === 'failing', status = geoStatusText();
+  els.axBgPano?.classList.toggle('is-on', !google); els.axBgPano?.setAttribute('aria-pressed', String(!google));
+  els.axBgGoogle?.classList.toggle('is-on', google); els.axBgGoogle?.setAttribute('aria-pressed', String(google));
+  if (els.axPanoBlock) els.axPanoBlock.hidden = google;
+  if (els.axGeoBlock) els.axGeoBlock.hidden = !google;
+  if (els.axGeoStatus) { els.axGeoStatus.textContent = status; els.axGeoStatus.classList.toggle('is-set', google && !bad); }
+  if (!els.geoPanel || els.geoPanel.hidden) return;
+  els.geoStatus.textContent = status; els.geoStatus.classList.toggle('is-bad', bad);
+  const g = state.background.google, site = googlePlacementNow()?.site || g?.site, siteSet = !!site;   // live: follows Move layout
+  els.geoSiteNow.textContent = siteSet ? `Site: ${site.lat.toFixed(6)}, ${site.lng.toFixed(6)} — the plan's centre sits here.`
+    : 'No site yet: paste a Google Maps link to the site, or type its lat, lng.';
+  // Follows the site as it moves (Move layout, two-point align) — except while being typed in.
+  if (siteSet && document.activeElement !== els.geoSiteInput) els.geoSiteInput.value = `${site.lat.toFixed(6)}, ${site.lng.toFixed(6)}`;
+  const d = droneFromSite();
+  if (document.activeElement !== els.geoHeight) { els.geoHeight.value = d.heightM; els.geoHeightVal.textContent = `${Math.round(d.heightM)} m`; }
+  if (document.activeElement !== els.geoDist) els.geoDist.value = Math.round(d.dist);
+  if (document.activeElement !== els.geoDir) els.geoDir.value = String(GEO_DIRS.reduce((best, [, deg]) => (Math.abs(((d.bearing - deg + 540) % 360) - 180) < Math.abs(((d.bearing - best + 540) % 360) - 180) ? deg : best), 180));
+  [els.geoHeight, els.geoDist, els.geoDir, els.geoTopDown, els.geoAlign2, els.geoMeasure].forEach((x) => { if (x) x.disabled = !siteSet; });
+  els.geoTopDown.setAttribute('aria-pressed', String(!!geo.viewOverride));
+  els.geoAlign2.setAttribute('aria-pressed', String(geo.tool?.kind === 'align'));
+  els.geoMeasure.setAttribute('aria-pressed', String(geo.tool?.kind === 'measure'));
+  updateGeoReadout();
+}
+function updateGeoReadout() {
+  if (!els.geoReadout || !els.geoPanel || els.geoPanel.hidden) return;
+  const p = isGoogleBackground() ? googlePlacementNow() : null;
+  els.geoReadout.textContent = (p?.metresPerPx && p.site)
+    ? `Plan: ${p.metresPerPx.toFixed(3)} m per plan pixel · turned ${(((p.bearingDeg % 360) + 360) % 360).toFixed(1)}° from north · about ${Math.round(layoutRadiusM() * 2)} m across.`
+    : '';
+}
+async function openGeoPanel() {
+  if (!state.admin || !els.geoPanel || !isGoogleBackground()) return;
+  const g = ensureGoogleConfig();
+  els.geoPanel.hidden = false;
+  els.geoKey.value = g.apiKey || ''; setGeoKeyMsg('');
+  els.geoSiteInput.value = g.site ? `${g.site.lat.toFixed(6)}, ${g.site.lng.toFixed(6)}` : '';
+  setGeoToolHint(); updateGeoAdminUI();
+  els.geoClientSteps.textContent = await geoClientStepsText();
+}
+function closeGeoPanel() {
+  if (!els.geoPanel) return;
+  cancelGeoTool(); if (geo.viewOverride) setGoogleTopDown(false);
+  els.geoPanel.hidden = true;
+}
+function wireGeoAdmin() {
+  if (!state.admin || !els.geoPanel) return;
+  els.geoDir.innerHTML = GEO_DIRS.map(([name, deg]) => `<option value="${deg}">${name}</option>`).join('');
+  els.axBgPano?.addEventListener('click', () => setBackgroundKind('pano'));
+  els.axBgGoogle?.addEventListener('click', () => setBackgroundKind('google'));
+  els.axGeoSetup?.addEventListener('click', () => (els.geoPanel.hidden ? openGeoPanel() : closeGeoPanel()));
+  els.geoPanelClose.addEventListener('click', closeGeoPanel);
+  els.geoKeyShow.addEventListener('click', () => {
+    const show = els.geoKey.type === 'password';
+    els.geoKey.type = show ? 'text' : 'password'; els.geoKeyShow.textContent = show ? 'Hide' : 'Show';
+    els.geoKeyShow.setAttribute('aria-pressed', String(show));
+  });
+  els.geoKeyTest.addEventListener('click', async () => {
+    setGeoKeyMsg('Asking Google…');
+    const r = await testGoogleKey(els.geoKey.value.trim());
+    setGeoKeyMsg(r.text, r.ok ? 'is-ok' : 'is-bad');
+  });
+  els.geoKeyUse.addEventListener('click', () => {
+    const key = els.geoKey.value.trim(), g = ensureGoogleConfig();
+    if (key === (g.apiKey || '')) return setGeoKeyMsg('That key is already this project’s key.');
+    g.apiKey = key; onAlignmentChanged();
+    setGeoKeyMsg(key ? 'Key set for this project — Save to keep it.' : 'Key removed — Save to keep that.', key ? 'is-ok' : '');
+    stopGoogleLayer(); startGoogleLayer();
+  });
+  els.geoClientCopy.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(els.geoClientSteps.textContent); setGeoKeyMsg('Setup steps copied — paste them into a message to the client.', 'is-ok'); }
+    catch {
+      const range = document.createRange(); range.selectNodeContents(els.geoClientSteps);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      setGeoKeyMsg('Selected — press Ctrl+C to copy.');
+    }
+  });
+  const goSite = () => {
+    const ll = parseGeoLocation(els.geoSiteInput.value);
+    if (!ll) { els.geoSiteNow.textContent = 'Couldn’t read a location there — paste a Google Maps / Earth link, or type "lat, lng".'; return; }
+    setGoogleSite(ll);
+  };
+  els.geoSiteGo.addEventListener('click', goSite);
+  els.geoSiteInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') goSite(); });
+  els.geoHeight.addEventListener('input', () => { els.geoHeightVal.textContent = `${els.geoHeight.value} m`; setGoogleDrone({ ...droneFromSite(), heightM: +els.geoHeight.value }); });
+  els.geoDist.addEventListener('change', () => setGoogleDrone({ ...droneFromSite(), dist: Math.max(0, Math.min(5000, +els.geoDist.value || 0)) }));
+  els.geoDir.addEventListener('change', () => setGoogleDrone({ ...droneFromSite(), bearing: +els.geoDir.value }));
+  els.geoTopDown.addEventListener('click', () => setGoogleTopDown(!geo.viewOverride));
+  els.geoAlign2.addEventListener('click', () => startGeoTool('align'));
+  els.geoMeasure.addEventListener('click', () => startGeoTool('measure'));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && geo.tool) cancelGeoTool(); });
+  updateGeoAdminUI();
 }
 
 // ─── Site branding (client title bar: project name + tagline + logo) ──────────
@@ -1745,7 +2631,7 @@ function renderLoop() {
   // inside initThree, so that throw used to abort the whole boot — no plot data, no landmarks,
   // no tours, and a misleading "file://" notice. Now the frame is skipped and three.js recovers
   // when the context comes back; any other error still surfaces.
-  try { three.renderer.render(three.scene, three.camera); }
+  try { renderScene(); }                                  // the pano scene, or Google's tiles + the overlay (renderScene)
   catch (err) { if (!gpuContextLost()) throw err; }
   if (els.panel.classList.contains('open')) placePanel();   // keep the popover glued to its plot as the view moves
   if (els.landmarks && !els.landmarks.hidden) renderLandmarks();  // keep banners/pins/lines glued to the scene
@@ -1775,7 +2661,7 @@ function updateCompass() {
   // heading swings it to whatever the camera faces. `state.view.lon` is the camera YAW and
   // runs OPPOSITE a stored lon (see the two-conventions gotcha), hence the negation.
   const headingDeg = -state.view.lon * 180 / Math.PI;
-  const rot = headingDeg - (state.northDeg || 0);
+  const rot = headingDeg - effectiveNorthDeg();
   els.compassCone.setAttribute('transform', `rotate(${rot.toFixed(2)} 60 60)`);
 }
 // The camera yaw (state.view.lon) that makes the compass point at north — i.e. the exact
@@ -1784,7 +2670,7 @@ function updateCompass() {
 // AERIAL VIEW menu action so "reset to the full site view" also means "face north," not
 // just whatever direction the layout's centroid happens to sit in. Uncalibrated projects
 // (northDeg unset, the compass's own documented default) resolve this to lon 0.
-function northFacingLon() { return -(state.northDeg || 0) * Math.PI / 180; }
+function northFacingLon() { return -effectiveNorthDeg() * Math.PI / 180; }
 
 // The directional pad was removed 2026-09-10 (client no longer offers it — drag/flick is
 // the only look-around input now). `stepViewMotion`/`viewVel` survive because a drag's
@@ -1918,7 +2804,7 @@ function wireViewControls() {
     }
     if (pointers.size === 0) {
       el.classList.remove('grabbing');
-      if (wasClick) pick(e);
+      if (wasClick && !geoToolClick(e)) pick(e);    // a Google Earth tool (two-point align, measure) takes the click first
       // Let a flick coast instead of stopping dead the instant the finger lifts — the
       // single biggest thing that made panning feel rough. stepViewMotion decays it.
       if (wasDrag && !moveMode && dragFlick) {
@@ -4032,10 +4918,11 @@ function parseAlignment(d) {
   const data = { enabled: !!(dc && dc.source === 'sheet'), url: (sh && sh.url || '').toString(), gid: (sh && sh.gid != null ? String(sh.gid) : '') };
   const menuConfig = d && d.menuConfig ? d.menuConfig : null;
   const area = parseAreaConfig(d && d.area);
+  const background = parseBackground(d && d.background);            // pano | Google Earth (GoogleEarthView.md)
   // A `plotOverrides` block (2026-09-18 → 09-24, "admin edits outrank the sheet") is no longer
   // read: the sheet wins now, and every save wrote the same values into plots.csv anyway, so
   // nothing is lost. The key simply drops out of alignment.json on the next save.
-  return { transform, view, opacity, groundImage, panoImage, brand, audio, bootImage, northDeg, data, menuConfig, area, savedAt };
+  return { transform, view, opacity, groundImage, panoImage, brand, audio, bootImage, northDeg, data, menuConfig, area, background, savedAt };
 }
 async function loadAlignmentFile() {                    // committed file → {transform, view} | null
   try { const res = await loadProjectFile('alignment.json'); if (!res || !res.ok) return null; return parseAlignment(await res.json()); }
@@ -4054,9 +4941,13 @@ function readDraft() {
   catch { return null; }
 }
 function alignmentData() {
+  // In Google mode the live transform IS the Google placement (saved under `background`); the
+  // pano's own placement was parked at load and goes back out unchanged.
+  const tr = isGoogleBackground() ? (state.background.panoTransform || IDENTITY()) : state.transform;
+  const sv = geo.topDownView || state.view;          // in the admin's top-down view, the start view is the one it will return to
   return { version: 1, note: 'Build91 plot-map overlay alignment', savedAt: new Date().toISOString(),
-    transform: { tx: +state.transform.tx.toFixed(4), ty: +state.transform.ty.toFixed(4), scale: +state.transform.scale.toFixed(4), rotationDeg: +(state.transform.rotation * 180 / Math.PI).toFixed(2) },
-    view: { lonDeg: +(state.view.lon * 180 / Math.PI).toFixed(2), latDeg: +(state.view.lat * 180 / Math.PI).toFixed(2), fov: Math.round(state.view.fov) },
+    transform: { tx: +tr.tx.toFixed(4), ty: +tr.ty.toFixed(4), scale: +tr.scale.toFixed(4), rotationDeg: +(tr.rotation * 180 / Math.PI).toFixed(2) },
+    view: { lonDeg: +(sv.lon * 180 / Math.PI).toFixed(2), latDeg: +(sv.lat * 180 / Math.PI).toFixed(2), fov: Math.round(sv.fov) },
     opacity: +state.overlayOpacity.toFixed(2),
     ...(state.groundImage ? { groundImage: { file: state.groundImage.file, opacity: +(+state.groundImage.opacity).toFixed(2) } } : {}),
     ...(state.panoImage ? { panoImage: { file: state.panoImage.file } } : {}),
@@ -4066,6 +4957,7 @@ function alignmentData() {
     ...(state.northDeg ? { northDeg: +(+state.northDeg).toFixed(2) } : {}),
     ...(sheetData() ? { data: sheetData() } : {}),
     ...(areaData() ? { area: areaData() } : {}),
+    ...(backgroundData() ? { background: backgroundData() } : {}),
     ...(menuConfigData() ? { menuConfig: menuConfigData() } : {}) };
 }
 // Serialise the plot-data source (only when a sheet URL has been configured).
@@ -4098,7 +4990,7 @@ function parseAreaConfig(a) {
   })).filter((f) => f.id);
   return out;
 }
-function onAlignmentChanged() { if (!state.admin) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...alignmentData(), projectId: BOOT_PROJECT })); } catch {} scheduleSessionSave(); setAxStatus('Unsaved changes — click <strong>Save</strong> in the top bar to apply.'); }
+function onAlignmentChanged() { if (!state.admin) return; try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...alignmentData(), projectId: BOOT_PROJECT })); } catch {} scheduleSessionSave(); setAxStatus('Unsaved changes — click <strong>Save</strong> in the top bar to apply.'); if (isGoogleBackground()) updateGeoAdminUI(); }
 function setAxStatus(msg) { if (els.axStatus) els.axStatus.innerHTML = msg; }
 
 // ─── Working session (full in-browser snapshot of in-progress admin work) ─────
@@ -4587,7 +5479,8 @@ function showExportFlaggedModal(flagged) {
       const nodeId = btn.dataset.editNode, source = btn.dataset.editSource;
       finish(false);
       if (!nodeId) return;
-      if (source === 'amenity') { setAdminTab('amenities'); selectAmenity(nodeId); }
+      if (source === 'background') { setAdminTab('align'); openGeoPanel(); }
+      else if (source === 'amenity') { setAdminTab('amenities'); selectAmenity(nodeId); }
       else openNodeBuilderModal(nodeId);
     };
     els.exportFlaggedProceed.addEventListener('click', onProceed);
@@ -4850,6 +5743,7 @@ function wireAdmin() {
   els.axSessionClear?.addEventListener('click', clearSession);
   els.axPano.addEventListener('click', () => els.axPanoFile.click());
   els.axPanoFile.addEventListener('change', () => { const f = els.axPanoFile.files?.[0]; if (f) setPanoFromFile(f); els.axPanoFile.value = ''; });
+  wireGeoAdmin();                                    // aerial background choice + Google Earth setup panel
   els.axBrandName?.addEventListener('input', () => { state.brand.name = els.axBrandName.value; applyBrand(); onAlignmentChanged(); });
   els.axBrandTagline?.addEventListener('input', () => { state.brand.tagline = els.axBrandTagline.value; applyBrand(); onAlignmentChanged(); });
   els.axBrandLogo?.addEventListener('click', () => els.axBrandLogoFile.click());
@@ -4959,7 +5853,8 @@ function wireAdmin() {
     const f = els.axFile.files?.[0]; if (!f) return;
     try {
       const a = parseAlignment(JSON.parse(await f.text()));
-      state.transform = a.transform;
+      state.background.kind = 'pano'; state.transform = a.transform;   // un-park first: the file's transform is its pano placement
+      applyBackgroundConfig(a.background); refreshBackgroundLayer();
       if (a.opacity != null) state.overlayOpacity = a.opacity;
       if (a.groundImage) { loadGroundImage(assetUrl(a.groundImage.file), a.groundImage.opacity, a.groundImage.file); els.axPlanRow.hidden = false; els.axPlanOpacity.value = a.groundImage.opacity; els.axPlanOpacityVal.textContent = `${Math.round(a.groundImage.opacity * 100)}%`; }
       if (a.panoImage?.file) { state.panoImage = a.panoImage; state.panoBlob = null; state.panoName = null; loadPanoTexture(assetUrl(a.panoImage.file)).then(swapPano).catch(() => {}); updatePanoName(); }
@@ -8840,6 +9735,9 @@ function fireAutoOpen(target) {
 // visitor sees is already correct.
 let bootProgressDone = false;
 function hideBootCurtain() {
+  // A Google Earth background holds the curtain until its first view is sharp (or
+  // GEO_READY_MAX_MS passes, or it fails) — releaseGeoCurtain calls back in here.
+  if (geo.holdCurtain) { geo.curtainWaiting = true; return; }
   if (!bootProgressDone) {
     bootProgressDone = true;
     setBootProgress(100);
@@ -11515,7 +12413,7 @@ function collectOfflineAssets() {
   const isLocal = (u) => !!u && !/^[a-z][a-z0-9+.-]*:/i.test(u) && !u.startsWith('//');
   const add = (u, kind) => { if (isLocal(u) && !seen.has(u)) { seen.add(u); items.push({ url: u, kind }); } };
 
-  if (state.panoImage?.file) add(assetUrl(state.panoImage.file), 'image');
+  if (state.panoImage?.file && !isGoogleBackground()) add(assetUrl(state.panoImage.file), 'image');   // Google mode never shows the pano
   if (state.groundImage?.file) add(assetUrl(state.groundImage.file), 'image');
   if (state.brand?.logo) add(assetUrl(state.brand.logo), 'image');
   if (state.bootImage?.file) add(assetUrl(state.bootImage.file), 'image');
@@ -12301,6 +13199,7 @@ async function onOfflineRemove() {
       chosen = draft;
     }
     if (chosen) { state.transform = chosen.transform; state.savedView = chosen.view; if (chosen.opacity != null) state.overlayOpacity = chosen.opacity; }
+    applyBackgroundConfig(chosen?.background);                           // pano | Google Earth — before anything is placed
     if (chosen?.data) state.sheet = { url: chosen.data.url || '', gid: chosen.data.gid || '', enabled: !!chosen.data.enabled }; // plot-data source (Google Sheet | committed CSV)
     if (chosen?.area) state.area = chosen.area;                        // area unit + admin-defined size bands
     // site branding (title bar): alignment's brand (path) + session logo blob if any
@@ -12355,6 +13254,7 @@ async function onOfflineRemove() {
     // Versioned by the alignment's savedAt so the client can cache it (see fetchBlobWithProgress).
     const assetVer = (chosen && chosen.savedAt) || (file && file.savedAt) || '';
     if (!restored?.pano?.blob && chosen?.panoImage?.file) { state.panoImage = chosen.panoImage; panoSrc = assetUrl(chosen.panoImage.file, assetVer); }
+    if (isGoogleBackground()) panoSrc = null;            // Google Earth: a pano kept for switching back is never downloaded
     // draped site-plan PNG: session blob (survives reload) > committed alignment reference > none.
     // Previously only fetched AFTER the pano had already revealed the curtain (loadGroundImage
     // ran post-initThree, and always did its own from-scratch network fetch) — a large plan
@@ -12406,6 +13306,7 @@ async function onOfflineRemove() {
     setBootProgress(98);
     initThree(texture);
     wireAdmin();
+    startGoogleLayer();                                  // Google Earth projects: streams in behind the curtain (not awaited)
     updatePanoName();
     // A 'node'/no-op target already fired (or has nothing to fire) — the pano is now
     // showing the correct screen, so reveal it. 'landmarks'/'panotour' targets keep the

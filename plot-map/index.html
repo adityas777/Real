@@ -493,12 +493,27 @@
       </div>
       <button class="btn btn-import" id="axImport" type="button" title="Trace plots from a site-plan image or DXF">⊕
         Import / Trace plots…</button>
-      <div class="ax-pano">
-        <button class="btn btn-ghost" id="axPano" type="button"
-          title="Choose the 360° background panorama the client view uses (exported with the site files)">🖼 Background
-          pano…</button>
-        <input type="file" id="axPanoFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
-        <p class="ax-pano-name" id="axPanoName">Using the default panorama.</p>
+      <!-- Aerial background: a drone panorama, or Google's live 3D view of the site (GoogleEarthView.md) -->
+      <div class="ax-bg">
+        <span class="ax-bg-label">Aerial background</span>
+        <div class="ax-mode" role="group" aria-label="Aerial background">
+          <button class="ax-modebtn is-on" id="axBgPano" type="button" aria-pressed="true"
+            title="A 360° drone panorama you upload">Panorama photo</button>
+          <button class="ax-modebtn" id="axBgGoogle" type="button" aria-pressed="false"
+            title="Google's live 3D satellite view of the site — for projects with no drone shoot">Google Earth</button>
+        </div>
+        <div class="ax-pano" id="axPanoBlock">
+          <button class="btn btn-ghost" id="axPano" type="button"
+            title="Choose the 360° background panorama the client view uses (exported with the site files)">🖼 Background
+            pano…</button>
+          <input type="file" id="axPanoFile" accept="image/jpeg,image/png,image/webp,image/*" hidden />
+          <p class="ax-pano-name" id="axPanoName">Using the default panorama.</p>
+        </div>
+        <div class="ax-pano" id="axGeoBlock" hidden>
+          <button class="btn btn-ghost" id="axGeoSetup" type="button"
+            title="The Google key, the site, the drone and the tools for lining the plan up">🌍 Google Earth setup…</button>
+          <p class="ax-pano-name" id="axGeoStatus"></p>
+        </div>
       </div>
       <div class="ax-scale">
         <div class="ax-scale-head">
@@ -577,6 +592,69 @@
     </div>
     <p class="adminbar-sess" id="axSessionStatus" aria-live="polite">Work auto-saves in this browser as you go.</p>
     <p class="adminbar-foot" id="axStatus">Drag/scale/rotate, then click <strong>Save</strong> in the top bar to save all changes.</p>
+  </section>
+
+  <!-- ─── Google Earth setup (admin, floating — GoogleEarthView.md Phase 2) ─────
+       Not a modal on purpose: every change shows live in the view behind it. -->
+  <section class="geo-panel" id="geoPanel" aria-label="Google Earth setup" hidden>
+    <header class="geo-panel-head">
+      <strong>🌍 Google Earth setup</strong>
+      <button class="geo-panel-x" id="geoPanelClose" type="button" aria-label="Close">×</button>
+    </header>
+    <p class="geo-status" id="geoStatus" aria-live="polite"></p>
+    <div class="geo-sec">
+      <div class="geo-sec-title">1 · Google key <span class="geo-sec-note">this project's own, from the client</span></div>
+      <div class="geo-row">
+        <input class="geo-input" id="geoKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"
+          aria-label="Google key for this project" />
+        <button class="btn btn-ghost geo-btn" id="geoKeyShow" type="button" aria-pressed="false" title="Show or hide the key">Show</button>
+      </div>
+      <div class="geo-row">
+        <button class="btn btn-ghost geo-btn" id="geoKeyTest" type="button" title="Asks Google once whether this key works here">Test</button>
+        <button class="btn btn-primary geo-btn" id="geoKeyUse" type="button">Use this key</button>
+      </div>
+      <p class="geo-note" id="geoKeyMsg"></p>
+      <details class="geo-steps">
+        <summary>Setup steps to send the client</summary>
+        <pre class="geo-steps-text" id="geoClientSteps"></pre>
+        <button class="btn btn-ghost geo-btn" id="geoClientCopy" type="button">Copy</button>
+      </details>
+    </div>
+    <div class="geo-sec">
+      <div class="geo-sec-title">2 · Site</div>
+      <div class="geo-row">
+        <input class="geo-input" id="geoSiteInput" type="text" placeholder="Google Maps / Earth link, or lat, lng"
+          aria-label="Where the site is" />
+        <button class="btn btn-ghost geo-btn" id="geoSiteGo" type="button">Go</button>
+      </div>
+      <p class="geo-note" id="geoSiteNow"></p>
+    </div>
+    <div class="geo-sec">
+      <div class="geo-sec-title">3 · Drone <span class="geo-sec-note">where visitors look from</span></div>
+      <label class="geo-field">Height
+        <input type="range" id="geoHeight" min="50" max="1000" step="10" value="200" />
+        <output id="geoHeightVal">200 m</output>
+      </label>
+      <div class="geo-row geo-row-text">
+        <input class="geo-input geo-num" id="geoDist" type="number" min="0" max="5000" step="10" value="200"
+          aria-label="Distance from the site, in metres" /> m
+        <select class="geo-input" id="geoDir" aria-label="Direction from the site"></select> of the site
+      </div>
+      <p class="geo-note">The camera turns to face the site after each change. Frame the start view, then Save.</p>
+    </div>
+    <div class="geo-sec">
+      <div class="geo-sec-title">4 · Line up the plan</div>
+      <div class="geo-tools">
+        <button class="btn btn-ghost geo-btn" id="geoTopDown" type="button" aria-pressed="false"
+          title="Look straight down on the site to line the plan up">Top-down view</button>
+        <button class="btn btn-ghost geo-btn" id="geoAlign2" type="button" aria-pressed="false"
+          title="Click two spots on the plan and the same two on the satellite view">Two-point align</button>
+        <button class="btn btn-ghost geo-btn" id="geoMeasure" type="button" aria-pressed="false"
+          title="Click two points on the ground to see the distance">Measure</button>
+      </div>
+      <p class="geo-note geo-hint" id="geoToolHint">Move layout, Scale and Rotate in the Align panel work here too.</p>
+      <p class="geo-note" id="geoReadout"></p>
+    </div>
   </section>
 
   <!-- ─── Info panel ──────────────────────────────────────────────────────── -->
