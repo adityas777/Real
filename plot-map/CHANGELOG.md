@@ -5,6 +5,207 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-28 (Tour switches without a loading screen)
+
+On request (laxmi): switching furnished ↔ unfurnished showed the loading screen. It should be as smooth as the
+curtain open/close.
+- **Why the curtain was smooth:** the curtain's other state is a linked room, so neighbour prefetch had it ready and the
+  switch was a pure crossfade. The other render of the current room was never prefetched.
+- **Fix:** `prefetchTourNeighbours` now also warms the other variant of the current room, after the neighbours are
+  loaded, so walking on is never slowed.
+- **Every move inside a tour** (room, view, version) now keeps the current room on screen until the next one is ready,
+  then crossfades. It uses `showTourLoader(…, { mini: true })`, which never shows the dimmed veil.
+  - Only a download slower than 700 ms (`TOUR_MINI_DELAY`) shows a small corner spinner (`.tour-loader.is-mini`).
+  - Entering a tour from the plot map keeps its existing veil.
+- **Verified** in headless Chrome on a throwaway laxmi copy (since deleted), 318 1-BHK:
+  - Three version switches showed no loader.
+  - The network log shows `n1-b`/`n2-b` fetched right after arriving in each room, before the switch.
+Files: `app.js`, `styles.css`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Tours-only projects: no leaving to a black screen)
+
+On request, from laxmi, where AERIAL VIEW is switched off: going Back out of a tour showed an empty black pano.
+When the project has no enabled AERIAL VIEW (`tourHasAerialHome`):
+- The ✕ EXIT TOUR rows are hidden (`withExitTourRow` and the root list).
+- Back from a tour's rooms goes to the main menu with the tour still on screen and its row highlighted.
+- Any visitor exit (`exitTourToHome`) opens the menu's top item instead of the empty view.
+
+Projects with an aerial view behave as before.
+Verified in headless Chrome on a throwaway copy of laxmi (since deleted):
+- Rehab Lobby → Back gives the main menu with REHAB LOBBY highlighted.
+- 574 → Back keeps the 574 room on screen (screenshot).
+- No Exit rows appear.
+Files: `app.js`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Tours: a "Main menu" switch per tour, and folders of tours)
+
+**Problem (laxmi):** the menu only had SALES LOBBY and REHAB LOBBY, but opening either one listed all 5 tours.
+`virtualTourPickerNode` built the in-tour list from every tour in tour.json.
+
+**Fix, per the owner's spec:**
+- **A Menu switch per tour** in the Tour tab (`setTourOnMainMenu`).
+  - ON adds a `panotour` row for the tour to the main menu (above the MENU IMAGE if it's last).
+  - OFF removes that row.
+  - The switch reads "Folder" when the tour sits only in a folder.
+- **Folders of tours:** ＋ Add Item → Virtual Tour now has "Also put these tours in it". Ticking tours turns the new item into a folder
+  with one row per tour (`renderWizardTourExtras`, `wizardState.extraTourIds`, new `#wizardTourExtras` in index.html).
+- **The in-tour drawer follows placement** (`tourMenuGroup`):
+  - a main-menu tour shows only its rooms;
+  - a folder tour shows that folder's tours, then its rooms, and Back returns to the folder (`tourGroup` flag);
+  - unplaced tours use the built-in VIRTUAL TOUR list, which now lists only unplaced tours (`autoListedTours`).
+- The open tour's row is highlighted.
+- **Verified:** in headless Chrome on a throwaway copy of laxmi (since deleted).
+  - Sales/Rehab Lobby list no other tours.
+  - The switch added "413 1-BHK" to the menu.
+  - The wizard made a "FLATS" folder of 318/413/574, and inside it the drawer showed only those 3 tours, then 574's rooms. Back returned to the folder, and switching to 318 worked.
+Files: `app.js`, `index.html`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Boss review: marker shadows, no mid-route distance pill)
+
+- **Removed the "🚗 3.7 km · 8 min" pill** from the middle of a route. It was confusing: it read as the length of the road it sat on,
+  not the whole trip. The landmark's banner still shows the total. Removed `routeMetaText`, `routeEls.mid`
+  and the mid-point calculation from `renderRoutes`.
+- **3D shadows on road-name markers:**
+  - a **cast shadow** on the ground: the same stem and card shapes, flattened and slanted (`skewX(-48) scale(1 0.34)`) and blurred;
+  - a **contact shadow** under the road dot;
+  - a deeper two-layer **drop shadow** under the card;
+  - a top-to-bottom **shaded face** (`#lmRoadSignFace`), a lit top edge and a faint text emboss.
+- **Verified** in headless Chrome on eleganzav2's AIMS Raipur route, viewing only. No mid pill is in the DOM, all 4 markers
+  render, and zoomed screenshots show the cast shadows.
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Road names as 3D map markers)
+
+On the owner's reference, each road-name label is now a 3D point marker. A white card with a grey underside
+(thickness) and a drop shadow floats `ROAD_SIGN_LIFT` (26) px above the road. A thin glowing stem
+(gradient `#lmRoadSignStem`) runs down to a small glowing dot on the road. The dot is the fixed
+anchor from `routeSignAnchors`, so the marker still stays put when zooming.
+Verified in headless Chrome on eleganzav2's AIMS Raipur route (4 named roads), viewing only.
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Road names: fixed on the road, map-style labels)
+
+- **Labels no longer move or disappear when zooming.** The first version picked a spot on screen
+  every frame and dropped a label that crowded the others, so labels jumped around or vanished.
+  Each label now has a fixed spot: the halfway point of its stretch, measured along the road on
+  the sphere (`routeSignAnchors`, cached). It is projected every frame and shown whenever that spot
+  is on screen.
+- **New look**, from the owner's reference image: a flat white map label with dark text sitting on the line
+  (`.lm-road-sign-bg`/`-text`). This replaces the green 3D sign on a post and its gradient `<defs>`.
+- **Verified** in headless Chrome on eleganzav2, viewing only (nothing saved). On the Tatiband Chowk
+  route, all 3 labels show at the normal view and after zooming in, each within 1 px of the road
+  line (screenshots).
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Routes: turn arrows back, 3D road-name signs)
+
+- **Turn arrows restored** on top of the road look, with the same Google-Maps maneuver arrows as before
+  (`ROUTE_TURN_*` constants, `.lm-route-turn` CSS).
+- **Road-name signs:** a route point can carry a road name. It's stored in `landmarks.json` as
+  `route[i].road`, and in memory as `name`. The name holds from that point to the next named point.
+  A small green 3D sign stands on the road at the middle of each named stretch: a gradient face,
+  a white rim, a darker board behind it for thickness, a top shine, a post, and a shadow on the
+  road. It skips spots near turn arrows, the distance pill and other signs.
+- **Admin:** clicking a route dot without dragging selects it (orange ring), and the landmark
+  editor shows "Road name from point N onward". Named dots are green. Dragging a dot keeps its name. Deleting a
+  named dot passes the name to the next dot.
+- **Verified:** in headless Chrome, using a throwaway copy of eleganzav2 (since deleted).
+  - Client: the signs and turn arrows show on the road (screenshot).
+  - Admin: clicking a dot opened the name box, typing drew the sign, and `road` was saved to disk.
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Routes drawn as a road instead of a blue navigation line)
+
+On the owner's reference photo, a route now looks like a road. It has dark asphalt (`#34373b`),
+thin white edge lines (the white casing shows about 1 px each side) and a dashed white centre line (new
+`lm-route-centre` path, with dashes in screen px). The blue colour, chevrons and turn arrows are gone:
+their code, `ROUTE_CHEVRON_PX`/`ROUTE_TURN_*` and their CSS were removed. Pills and end dots moved from
+blue to the same dark grey. Checked in headless Chrome on eleganzav2 (screenshot). Hiding the route
+when its banner is off screen still works.
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Routes: hide off-screen routes, Google-Maps turn arrows)
+
+- A visitor's route now shows only while its landmark's banner is on screen. When you pan
+  away, the route hides; pan back and it returns without replaying the draw-in.
+  `renderLandmarks` records the drawn banners in `routeBannerOnScreen`, and `renderRoutes` checks it.
+  The admin editing a route still always sees it.
+- The turn badges (disc + arrow) are replaced with maneuver arrows like Google Maps: a white shaft with a dark-blue
+  edge that bends with the road through the turn (`ROUTE_TURN_ARM_PX` either side) and ends in an
+  arrowhead pointing the new way.
+- Verified: headless Chrome on eleganzav2. Tapping the route shows 2 turn arrows; panning away turns the route off, and panning back brings it back.
+Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+---
+
+## 2026-09-28 (Routes look like Google Maps: turn arrows, chevrons, labels, draw-in)
+
+On request, added Google-Maps-style detail to landmark routes. Everything is placed in screen
+space every frame (`renderRoutes`), so it keeps its size at any zoom:
+- **Turn badges:** a white disc with a blue arrow facing the new direction, at every drawn point
+  where the road bends more than 35° on screen (`ROUTE_TURN_DEG`).
+- **Chevrons:** white `›` marks every 64 px along the line, pointing towards the landmark. They
+  replace the moving dashes.
+- **Labels:** a "🚗 3.7 km · 8 min" pill mid-route from the landmark's own distance and drive
+  time (`routeMetaText`), and the project's name under the start dot.
+- **Draw-in:** when a visitor opens a route, the road grows from the project to the landmark
+  (`pathLength="1"`), then the arrows and labels fade in. Turned off for reduced motion.
+- The admin editing view shows no labels, so the handles have room.
+
+`routeSamples` now tags drawn points (`ctrl`), and the SVG pieces are pooled (`routePool`).
+Files: `app.js`, `styles.css`.
+
+---
+
+## 2026-09-28 (Landmark routes, Phase 1: draw a road route from the project to a landmark)
+
+Google-Maps-style route lines on the aerial pano. In the admin Landmarks tab a selected
+landmark has **Route from the project → ✏ Draw route**. Click along the road, then Done or Esc.
+Afterwards: drag a dot, double-click or right-click a dot to delete it, click the line to
+insert a point, Undo while drawing, Clear. Stored as `route` in `landmarks.json` (directions
+like the hotspot; 3 decimals; left out when empty) and in the admin session. Drawn as an SVG
+under the landmark layer: white casing, blue road, dashes flowing towards the landmark, and
+end dots; a smooth Catmull-Rom curve through the points. Visitors: tapping a route-bearing
+banner shows its route (desktop hover previews it); tapping empty ground hides it.
+Verified headless on a throwaway copy of eleganzav2 (since deleted, never uploaded):
+- **admin:** 4 clicks → 4 points; a dot follows a 50 px drag; clicking the line inserts a
+  point (5); double-click deletes one (4); the route is saved to `landmarks.json`;
+- **client:** banner tap shows the route, a sky tap hides it.
+Not yet checked on a phone. Files: `app.js`, `styles.css`, `README.md`, `CLAUDE.md`.
+
+Also: the local server kept "crashing" because it was started inside a tool shell and was
+killed with it. It's now started as a detached process (PowerShell `Start-Process`).
+
+---
+
+## 2026-09-28 (Doc: what the Google Earth background costs)
+
+New `GOOGLE-EARTH-COSTS.md`, linked from GoogleEarthView.md §5 (G5). Covers Google's
+Photorealistic 3D Tiles billing (one event per root request, 3-hour free session), the India
+price list (7,000 free a month, then $3.30 per 1,000) next to the global one, when the current
+code makes a billed request (every page load; not tours; admin Test / Use key / Find site /
+switch), monthly examples, Build91's own cost (~$0), cost risks, and client cost controls.
+Biggest finding: every page open is billed even when the aerial view is never shown (R-1).
+Docs only, no code change.
+
+---
+
 ## 2026-09-27 (Google Earth background: Phases 2 + 3 — admin setup and shipping; Phase 0 go)
 
 On request, after the owner tried Google's real imagery at their site with their own key:

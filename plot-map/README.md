@@ -440,6 +440,31 @@ separate.
   border) so you can still drag and edit them. New landmarks start shown, and so does
   every landmark in a project saved before this option existed — which means the quickest
   way to curate a long list is **✕ Hide all**, then ✓ the handful you want up-front.
+- **🛣 Route from the project** (2026-09-28): a Google-Maps-style blue road line from the
+  project to that landmark.
+  1. Select the landmark and press **✏ Draw route**.
+  2. Click along the road on the pano, **starting at the project** and ending at the landmark.
+     Drag to look around while you do; zoom in for roads near the horizon.
+  3. Press **✓ Done** (or Esc).
+  - Afterwards, whenever that landmark is selected: **drag** a dot to move it,
+    **double-click** or **right-click** a dot to delete it, and **click the line** to add a
+    point there.
+  - **↶ Undo point** while drawing; **Clear** deletes the whole route.
+  - **Visitors** see the route when they **tap the landmark's banner** (desktop: also on
+    hover). Tapping empty sky hides it. The route draws itself from the project to the
+    landmark and shows:
+    - drawn as a **road**: dark asphalt, white edge lines, and a dashed white centre line;
+    - **turn arrows** wherever the road bends;
+    - **road-name labels** on the road, like a map (see below);
+    - the **project's name** at the start.
+  - The route shows only while its landmark's banner is on screen; pan away and it hides.
+  - **Road names:** click a dot on the route (don't drag it), then type the road's name in
+    **Road name from point N onward**. The name applies from that dot up to the next named dot.
+    A white 3D marker with the name floats above the middle of that stretch on a thin stem, pinned to
+    the road and casting a shadow on the ground, and stays there when you zoom or pan. Named dots show green, and the
+    selected one has an orange ring. Clear the box to remove the label.
+  - Tip: put a point at every real turn in the road, so the line follows the real road.
+  - The line always draws on top of the photo, even where a building would hide the real road.
 - Add **any number** of landmarks; edit or delete them anytime.
 - **Save landmarks… / Load…** write/read a `landmarks.json`; **Export site files…**
   also writes it, and it's kept in the auto-saved working session.
@@ -545,6 +570,23 @@ standing in:
 > **After saving in admin, the client may need one reload** to pick the change up — and if
 > you had the client open already, reload it. (Project data is fetched fresh whenever
 > you're online; it's only cached for offline use.)
+
+**Where each tour appears in the menu (simple rule):**
+- **Main menu switch:** each tour in the **Tour** tab has a small **Menu** switch.
+  - **ON:** the tour gets its own row on the client's main menu. You can drag that row anywhere in the menu builder afterwards.
+  - **OFF:** the tour is only listed under the built-in **🧭 VIRTUAL TOUR** row (if that row is switched on).
+- **A folder of tours** (like one sub-menu per flat type): **＋ Add Item → 🧭 Virtual Tour**, pick a tour, then tick
+  **"Also put these tours in it"** for the others. The item becomes a folder with one row per tour.
+  The switch then reads **Folder** for tours that are only in a folder.
+- **Inside a tour**, the visitor's menu only shows that tour's own place:
+  - a main-menu tour shows its rooms;
+  - a tour in a folder shows the folder's tours, then that tour's rooms.
+
+  Tours you never placed no longer appear there.
+
+**A project with no aerial view** (AERIAL VIEW switched off, tours only): visitors never drop onto an
+empty screen. There's no ✕ Exit Tour row, and **Back** inside a tour goes to the main menu while the
+tour stays on screen.
 
 **Put it on the client menu:** open the menu builder, add an item, choose the
 **🧭 360° Tour** type, and pick your tour from the list. (This is different from the

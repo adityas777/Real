@@ -525,6 +525,51 @@ Top-down, by section header:
   under that size is a lossless passthrough, not a deliberate quality cut — see gotchas),
   `finishTrace`, `openTrace`/`loadCurrentLayoutIntoTrace`
   (pre-loads the live layout for editing), `wireTrace`; **`parseDXF`**.
+- **Landmark routes** (2026-09-28, Phase 1, manual): section "Landmark routes", just above
+  `applyLandmarkVisibility`.
+  - **Data:** `lm.route`, an ordered list of DIRECTIONS `{lon,lat}` (like the hotspot), not
+    ground-plane points: far roads run along the horizon, where the plots' flat-ground
+    projection breaks.
+  - **Drawing:** `routeSamples` (Catmull-Rom on the unit sphere, ¼° steps, cached per route)
+    and `renderRoutes`, called at the end of `renderLandmarks`, so it runs every frame. The SVG
+    `.lm-routes` is the first child of `#landmarks`, under the pins and banners. A stretch
+    behind the camera breaks the path instead of streaking across.
+  - **Which route shows:** `routeTarget`. In the admin Landmarks tab it's `routeDraw`, else
+    `lmSel`, and it's editable. For visitors it's `routeHover`, else `routeShow`, and only
+    while that landmark is shown.
+  - **Admin:** `routeToolClick` (in `wireViewControls` after `geoToolClick`, before `pick`)
+    adds a point while `state.routeDraw` is set. `onRouteHandlePointerDown`/`startRouteDrag`
+    drag a point; `onRouteLinePointerDown` inserts into the nearest segment and drags it;
+    `deleteRoutePoint` handles double-click and right-click. The controls are `routeField` in
+    `refreshLmList`. Esc, another landmark, or another tab ends drawing (`stopRouteDraw`).
+  - **Visitor:** `.lm-banner.has-route` is tappable. `pick()` toggles `state.routeShow`, and a
+    tap on empty ground clears it. Desktop hover sets `routeHover`.
+  - **Look:** all computed in screen space inside `renderRoutes`, in pooled SVG nodes
+    (`routePool`):
+    - road look: white edge casing, dark asphalt `lm-route-line`, dashed white `lm-route-centre`
+      (dashes in screen px). The chevrons were dropped on the owner's request;
+    - turn arrows (maneuver style: a shaft following the road `ROUTE_TURN_ARM_PX` either side,
+      plus an arrowhead) at drawn points (`ctrl`) bending more than `ROUTE_TURN_DEG`;
+    - road-name labels: a point's `name` names the road from there to the next named point. A 3D map
+      marker (`.lm-road-sign`: white card with a grey underside, lifted `ROAD_SIGN_LIFT` px on a glowing
+      stem, gradient `#lmRoadSignStem` in the SVG defs) whose dot sits on the road at a FIXED spot: the halfway
+      sample of the stretch by arc length on the sphere (`routeSignAnchors`, cached per route and
+      names). It is only projected each frame, never moved or dropped for crowding, so zoom and pan
+      don't shift it. Admin: a click on a handle without dragging sets `state.routeSelPt`
+      (`routeSelPoint`), and `routeField` shows the name box. A drag keeps the name
+      (`Object.assign`), and a deleted point passes its name on to the next point.
+      Shadows: a cast shadow (`.lm-road-sign-cast`, the same stem + card squashed with
+      `skewX(-48) scale(1 0.34)` and blurred), a contact shadow under the dot, a drop shadow under
+      the card, and a shaded face (`#lmRoadSignFace`);
+    - the brand-name pill at the start (`setRoutePill`, text width measured once per string). The
+      mid-route "🚗 distance · time" pill (`routeMetaText`) was REMOVED on the boss's review: it read
+      as the length of the road it sat on, not the whole trip. Don't bring it back;
+    - draw-in via `.is-drawin` on the SVG, with `pathLength="1"` on the casing and line.
+      `routeShownId` replays it only when a visitor opens a different route.
+    - a visitor's route is hidden while its banner is off screen: `renderLandmarks` fills
+      `routeBannerOnScreen` with the ids it drew, and `renderRoutes` checks it (not while editing).
+  - **Gotcha:** amenity icons sit above the landmarks layer, so a click on the line exactly
+    under one goes to the amenity.
 - **Landmarks:** `LM_ICONS`, `dirFromLonLat`/`lonLatFromDir`, `lmBannerHTML`,
   `rebuildLandmarkDOM` (marks `.has-render` banners interactive + wires hover/tap card),
   `projectDir`/`renderLandmarks` (banners sit at their TRUE projected x — deliberately not
@@ -620,7 +665,11 @@ Top-down, by section header:
   angle then a jarring cut. **Texture lifecycle:** `tourTex` LRU (`TOUR_CACHE_MAX = 5`,
   bumped from 3 on 2026-09-16 — see gotchas for the VRAM trade-off) +
   `tourTouch`/`tourEvict`/`loadTourNodeTex`/`prefetchTourNeighbours` (one hop, within the
-  open tour's own room graph) — download weight and GPU residency are separate problems
+  open tour's own room graph, then — after those settle — the OTHER variant of the current room,
+  so furnished ↔ unfurnished is a pure crossfade like the curtain toggle, 2026-09-28). **Moves
+  inside a tour never show the loading veil** (`showTourLoader(…, { mini: true })`: the room stays
+  on screen, and only a download slower than `TOUR_MINI_DELAY` shows a small corner spinner,
+  `.tour-loader.is-mini`); only a fresh entry from the plot map keeps the full veil — download weight and GPU residency are separate problems
   (see gotchas). **`prefetchNeighbourTours(tourId)`** (2026-09-16, on request) does the
   same one level up: an asymmetric +2/-1 window over `state.tours`' own order (the exact
   order the tour-list picker shows), warming just the START node of each neighbour tour,
@@ -669,6 +718,17 @@ Top-down, by section header:
   put an exit on. `withExitTourRow(children)` appends the row `if (state.tourView)`,
   shared by `virtualTourPickerNode` and `tourRoomPickerNode` so it's never duplicated
   logic across the two.
+  **Where a tour lives in the menu (2026-09-28, on request).** The tour-list level above the rooms
+  used to list EVERY tour in tour.json. Now it's `tourMenuGroup(tourId)`, which is based on where the tour is placed:
+  - a `panotour` row at root (the Tour tab's **Main menu** switch: `tourOnMainMenu`/`setTourOnMainMenu`) → no tour level. Its rooms show only if there are 2+, and Back exits;
+  - a folder of tours (＋ Add Item → Virtual Tour, then tick more tours in `#wizardTourExtras` / `renderWizardTourExtras` → a `kind:'parent'` of `panotour` rows) → that folder's tour rows. They're flagged `tourGroup` so `isTourMenuNode` treats the level as a tour level, and Back from the rooms lands on it instead of exiting;
+  - unplaced → the built-in VIRTUAL TOUR list, which now holds only `autoListedTours()`, i.e. tours not placed anywhere (`menuTourPlacements`).
+
+  An open tour's main-menu row is `.is-active`, and folder rows highlight by `content.tourId` in `refreshTourRoomMenu`. `renderAdminMenuTree` calls `refreshTourList` so the switches track menu edits. If a tour sits in both a folder and the main menu, the first placement found wins (root when it's listed first).
+  **No aerial view ⇒ never leave the tours** (2026-09-28). When the AERIAL VIEW builtin is off or missing (`tourHasAerialHome`), exiting a tour would show an empty black pano. In that case:
+  - `withExitTourRow` and the root EXIT TOUR row are suppressed;
+  - the submenu Back button pops to the main menu with the tour still open (it doesn't call `closePanoTour`);
+  - `exitTourToHome` (every visitor-facing exit) opens the top menu item via `fireAutoOpen(computeAutoOpenTarget())` after closing.
   **Menu launch (D-12):** content type **`panotour`** stores `content.tourId` and
   dispatches to `openClientPanoTour` — distinct from `tour`, which iframes an *external*
   3DVista/Kuula URL/file. Wizard: 🧭 card + `renderWizardTourPicker` (warns on a tour with
@@ -1052,7 +1112,9 @@ stored `sample/foo.jpg` loads as `projects/<id>/foo.jpg`). Formats:
   like any other node; `ensureBuiltinNodes()` injects them if missing and self-heals if
   one is ever lost.
 - **`landmarks.json`** — `{ version, landmarks:[{ label,distance,driveTime,icon,
-  category, featured, render?{file}, hotspot{lonDeg,latDeg}, banner{lonDeg,latDeg} }] }`.
+  category, featured, render?{file}, hotspot{lonDeg,latDeg}, banner{lonDeg,latDeg},
+  route?[{lonDeg,latDeg,road?}…] }] }`. A point's `road` is the road name from that point on. **`route`** (2026-09-28): 2+ points, 3 decimals. It's left
+  out when empty, so projects without routes are byte-identical.
   **`category`** (added 2026-09-07) is an explicit group name and is **authoritative** —
   `isLandmarkMatchCategory` short-circuits on it, so the icon/keyword rules below it only
   apply to landmarks that carry none. Needed because a landmark's icon can imply a

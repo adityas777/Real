@@ -1504,6 +1504,29 @@ body:not(.is-admin) .zoom-status-group .area-filter-sel.is-floating {
   white-space: nowrap;
 }
 
+/* "Main menu" switch on each tour (setTourOnMainMenu): ON = its own row on the client menu. */
+.ax-tour-menusw { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; flex: 0 0 auto; }
+.ax-tour-menusw input { position: absolute; opacity: 0; width: 0; height: 0; }
+.ax-tour-menusw-track {
+  position: relative; width: 26px; height: 15px; border-radius: 8px;
+  background: rgba(255, 255, 255, .18); transition: background .15s;
+}
+.ax-tour-menusw-track::after {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%;
+  background: #fff; transition: transform .15s;
+}
+.ax-tour-menusw.is-on .ax-tour-menusw-track { background: var(--gold, #d4af37); }
+.ax-tour-menusw.is-on .ax-tour-menusw-track::after { transform: translateX(11px); }
+.ax-tour-menusw input:focus-visible + .ax-tour-menusw-track { outline: 2px solid var(--gold); outline-offset: 1px; }
+.ax-tour-menusw-text { font-size: 10px; font-weight: 700; color: var(--text-mute); text-transform: uppercase; letter-spacing: .3px; }
+.ax-tour-menusw.is-on .ax-tour-menusw-text { color: var(--gold, #d4af37); }
+
+/* Add Item → Virtual Tour: tick more tours to make the item a folder of them. */
+.wizard-tour-extras { margin-top: 10px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 8px; display: flex; flex-direction: column; gap: 4px; }
+.wizard-tour-extras-head { font-size: 11.5px; font-weight: 700; margin-bottom: 2px; }
+.wizard-tour-extras-head span { font-weight: 400; opacity: .7; }
+.wizard-tour-extra { display: flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer; }
+
 .ax-tour-edit {
   margin-top: 8px;
   padding-top: 8px;
@@ -7454,6 +7477,17 @@ body.tour-map-on .compass {
   background-color: #0b0d12;
 }
 
+.tour-loader.is-mini {
+  /* A move inside a tour (see TOUR_MINI_DELAY): no veil over the room, just a small spinner low
+     in the corner, only when a download is slow. */
+  background-color: transparent;
+  place-items: end end;
+  padding: 0 18px 22px 0;
+}
+.tour-loader.is-mini .tour-loader-box { padding: 8px; border-radius: 50%; gap: 0; }
+.tour-loader.is-mini .tour-loader-spin { width: 20px; height: 20px; border-width: 2.5px; }
+.tour-loader.is-mini .tour-loader-txt { display: none; }
+
 .tour-loader-box {
   display: flex;
   flex-direction: column;
@@ -9116,3 +9150,100 @@ body.is-admin .tour-hs.is-hidden-here .tour-hs-lbl {
   stroke-width: 3px;
   fill: #fff;
 }
+/* ─── Landmark routes (app.js "Landmark routes") ───────────────────────────────
+   A Google-Maps-style road line from the project to a landmark: white casing, blue road,
+   and light dashes that flow from the project towards the landmark. Screen-space widths,
+   so the line keeps its thickness at every zoom. Drawn in an SVG under the landmark pins,
+   leader lines and banners. */
+.lm-routes {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  overflow: visible; pointer-events: none;
+  transition: opacity .25s ease;
+}
+.lm-routes.is-off { opacity: 0; }
+.lm-routes.is-off * { pointer-events: none !important; }
+.lm-route-casing, .lm-route-line, .lm-route-centre, .lm-route-hit {
+  fill: none; stroke-linecap: round; stroke-linejoin: round;
+}
+/* A road, like the reference photo: white edge lines (the casing shows 1.2 px each side of the
+   asphalt), dark asphalt, and a dashed white centre line. */
+.lm-route-casing { stroke: #f4f4f2; stroke-width: 10.5; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .6)); }
+.lm-route-line { stroke: #34373b; stroke-width: 8; }
+.lm-route-centre { stroke: #ffffff; stroke-width: 1.3; stroke-dasharray: 7 6; stroke-linecap: butt; opacity: .95; }
+/* Turn arrow (Google Maps' maneuver arrow): a white shaft bending with the road through the
+   turn, with a dark-blue edge, ending in an arrowhead that points the new way. Edges are drawn
+   first and wider, so shaft and head read as one outlined shape. */
+.lm-route-turn { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
+.lm-turn-edge, .lm-turn-shaft { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.lm-turn-edge { stroke: #0b3d91; stroke-width: 7.5; }
+.lm-turn-shaft { stroke: #ffffff; stroke-width: 4; }
+.lm-turn-head-edge { fill: #0b3d91; stroke: #0b3d91; stroke-width: 3.5; stroke-linejoin: round; }
+.lm-turn-head { fill: #ffffff; stroke: #ffffff; stroke-width: .6; stroke-linejoin: round; }
+/* Road-name marker, a 3D map pin (owner's reference): a white card floating above the road on a
+   thin glowing stem, with a grey underside showing its thickness and a soft shadow; a small
+   glowing dot marks the exact spot on the road. */
+.lm-road-sign-glow { fill: rgba(255, 255, 255, .45); filter: blur(1.6px); }
+.lm-road-sign-dot { fill: #ffffff; filter: drop-shadow(0 0 2.5px rgba(255, 255, 255, .95)); }
+.lm-road-sign-stem { fill: url(#lmRoadSignStem); filter: drop-shadow(0 0 2px rgba(255, 255, 255, .9)); }
+/* The marker's cast shadow on the ground (see renderRoutes): stem + card flattened and slanted,
+   blurred, fading with height the way a real shadow softens away from its contact point. */
+.lm-road-sign-cast { opacity: .42; filter: blur(1.8px); }
+.lm-road-sign-cast rect { fill: #000000; }
+.lm-road-sign-contact { fill: rgba(0, 0, 0, .55); filter: blur(1px); }
+.lm-road-sign-edge { fill: #9aa2ad; filter: drop-shadow(0 4px 5px rgba(0, 0, 0, .55)) drop-shadow(0 1px 1px rgba(0, 0, 0, .35)); }
+.lm-road-sign-bg { fill: url(#lmRoadSignFace); stroke: rgba(20, 30, 45, .14); stroke-width: 1; }
+.lm-road-sign-shine { fill: rgba(255, 255, 255, .95); }
+.lm-road-sign-text {
+  font: 700 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #1b2430;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, .9));
+  text-anchor: middle; dominant-baseline: central; letter-spacing: .1px;
+}
+/* Pills: "🚗 3.7 km · 8 min" on the route, the project's name at the start. */
+.lm-route-pill-bg { fill: #ffffff; stroke: rgba(0, 0, 0, .18); stroke-width: 1; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .4)); }
+.lm-route-pill-text {
+  font: 700 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif; fill: #2b2e33;
+  text-anchor: middle; dominant-baseline: central;
+}
+.lm-route-pill.is-from .lm-route-pill-bg { fill: #34373b; stroke: #ffffff; stroke-width: 1.5; }
+.lm-route-pill.is-from .lm-route-pill-text { fill: #ffffff; font-size: 11px; }
+/* Draw-in when a visitor opens a route: the road grows from the project to the landmark (the
+   paths carry pathLength="1", so 1 = the whole route whatever its size on screen), then the
+   centre line, end dot and labels fade in. */
+.lm-routes.is-drawin .lm-route-casing,
+.lm-routes.is-drawin .lm-route-line { stroke-dasharray: 1 1; animation: lm-route-drawin .9s cubic-bezier(.3, .6, .3, 1) both; }
+.lm-routes.is-drawin .lm-route-centre,
+.lm-routes.is-drawin .lm-route-turns,
+.lm-routes.is-drawin .lm-route-signs,
+.lm-routes.is-drawin .lm-route-end,
+.lm-routes.is-drawin .lm-route-labels { animation: lm-route-fadein .35s ease-out .75s both; }
+@keyframes lm-route-drawin { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes lm-route-fadein { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .lm-routes.is-drawin .lm-route-casing, .lm-routes.is-drawin .lm-route-line,
+  .lm-routes.is-drawin .lm-route-centre, .lm-routes.is-drawin .lm-route-turns, .lm-routes.is-drawin .lm-route-signs,
+  .lm-routes.is-drawin .lm-route-end, .lm-routes.is-drawin .lm-route-labels { animation: none; }
+}
+.lm-route-start { fill: #ffffff; stroke: #34373b; stroke-width: 3.5; }
+.lm-route-end { fill: #34373b; stroke: #ffffff; stroke-width: 2.5; }
+/* Admin (Landmarks tab): click the line to add a point; drag the dots. */
+.lm-route-hit { stroke: transparent; stroke-width: 18; }
+.lm-routes.is-editing .lm-route-hit { pointer-events: stroke; cursor: copy; }
+.lm-route-handle {
+  fill: #ffffff; stroke: #1a73e8; stroke-width: 2.5;
+  pointer-events: auto; cursor: grab;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5));
+}
+.lm-route-handle:active { cursor: grabbing; }
+.lm-route-handle.is-first { fill: #1a73e8; stroke: #ffffff; }
+.lm-route-handle.is-last { fill: var(--gold, #d4af37); stroke: #ffffff; }
+.lm-route-handle.is-named { fill: #17804a; stroke: #ffffff; }
+.lm-route-handle.is-sel { stroke: #ff9800; stroke-width: 3.5; }
+#pano.is-route-drawing, #pano.is-route-drawing canvas { cursor: crosshair; }
+/* A banner with a route is tappable in the client (pick() shows the route). */
+.lm-banner.has-route { pointer-events: auto; cursor: pointer; }
+/* The route controls in the landmark editor. */
+.ax-route-count { display: block; font-size: 11.5px; color: var(--text-dim, #8b949e); font-weight: 500; margin: 2px 0 6px; }
+.ax-route-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.ax-route-btns .btn { font-size: 11.5px; padding: 5px 10px; }
+.ax-route-hint { font-size: 11px; color: var(--text-dim, #8b949e); font-weight: 400; margin-top: 6px; line-height: 1.4; }
+.ax-route-count, .ax-route-hint, .ax-route-btns .btn { text-transform: none; letter-spacing: normal; }

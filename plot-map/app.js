@@ -287,7 +287,7 @@ const state = {
   // at one base size on every screen, scaled only by the zoom — see landmarkZoomScale and
   // renderLandmarks. Off by default, remembered per browser.
   steadyLandmarks: (() => { try { return localStorage.getItem('b91-steady-landmarks') === '1'; } catch { return false; } })(),
-  landmarks: [], lmSel: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
+  landmarks: [], lmSel: null, routeDraw: null, routeShow: null, routeHover: null, adminTab: 'align', // horizon landmarks; selected id; which admin tab is showing
   amenities: [], amSel: null, amCardOpen: null,  // in-layout amenities (icon pins + render); selected id; open card id
   tours: [], tourSel: null, tourNodeSel: null,   // authored virtual tours (tour.json); admin: selected tour id + node id
   menuImageTarget: null,
@@ -2804,7 +2804,7 @@ function wireViewControls() {
     }
     if (pointers.size === 0) {
       el.classList.remove('grabbing');
-      if (wasClick && !geoToolClick(e)) pick(e);    // a Google Earth tool (two-point align, measure) takes the click first
+      if (wasClick && !geoToolClick(e) && !routeToolClick(e)) pick(e);    // a Google Earth tool (two-point align, measure) or route drawing takes the click first
       // Let a flick coast instead of stopping dead the instant the finger lifts — the
       // single biggest thing that made panning feel rough. stepViewMotion decays it.
       if (wasDrag && !moveMode && dragFlick) {
@@ -3375,8 +3375,23 @@ function showLandmarksForSection() {
 // A tour actually takes over the viewer, so SOME level of the drawer must always carry an
 // explicit way out while one is open — appended to whichever synthetic list is actually
 // being shown (see each call site below) rather than duplicated as its own concept.
+// NO AERIAL VIEW (2026-09-28, on request — laxmi is tours only, AERIAL VIEW switched off): leaving
+// a tour would land on an empty black pano. So in such a project the visitor never leaves the
+// tours: no "✕ Exit Tour" rows, Back from a tour's rooms goes to the main menu with the tour still
+// on screen, and if a tour is closed anyway (exitTourToHome) the menu's top item opens instead.
+function tourHasAerialHome(list = getMenuTree()) {
+  for (const n of list) {
+    if (n.builtin === 'aerial') return n.enabled !== false;
+    if (n.kind === 'parent' && Array.isArray(n.children) && tourHasAerialHome(n.children)) return true;
+  }
+  return false;
+}
+function exitTourToHome() {
+  closePanoTour();
+  if (!state.admin && !tourHasAerialHome()) fireAutoOpen(computeAutoOpenTarget());
+}
 function withExitTourRow(children) {
-  if (!state.tourView) return children;
+  if (!state.tourView || !tourHasAerialHome()) return children;
   return [...children, { id: '__exit_tour__', kind: 'child', contentType: 'exittour', title: '✕ Exit Tour', content: {} }];
 }
 // The synthetic "folder" listing every TOUR (one row each) — only needed as its own menu
@@ -3391,8 +3406,67 @@ function virtualTourPickerNode() {
   return {
     id: '__virtualtour_picker__',
     title: 'VIRTUAL TOUR',
-    children: withExitTourRow(state.tours.map((t) => ({ id: `virtualtour-${t.id}`, kind: 'child', contentType: 'panotour', title: t.name || 'Untitled tour', content: { tourId: t.id } })))
+    children: withExitTourRow(autoListedTours().map((t) => ({ id: `virtualtour-${t.id}`, kind: 'child', contentType: 'panotour', title: t.name || 'Untitled tour', content: { tourId: t.id } })))
   };
+}
+// WHERE A TOUR LIVES IN THE MENU (2026-09-28, on request). The in-tour menu used to list EVERY
+// tour in tour.json, so opening "Sales Lobby" also showed tours the admin had never put in the
+// menu. Now each tour shows only where the admin placed it:
+//  - ON the main menu (the Tour tab's "Main menu" switch = an authored `panotour` row at root):
+//    inside it, the drawer shows its rooms (if more than one), and Back returns to the main menu;
+//  - in a FOLDER (＋ Add Item → Virtual Tour with several tours ticked): the drawer shows that
+//    folder's tours, like the reference site's per-flat sub-menus;
+//  - nowhere (switch OFF, in no folder): listed by the built-in VIRTUAL TOUR row, as before —
+//    which now lists only these unplaced tours (autoListedTours), not every tour.
+// Every authored `panotour` row in the tree, with the folder it sits in (null = main menu).
+function menuTourPlacements(list = getMenuTree(), parent = null, out = []) {
+  for (const n of list) {
+    if (n.kind === 'child' && n.contentType === 'panotour' && n.content?.tourId && n.enabled !== false) out.push({ node: n, parent });
+    if (n.kind === 'parent' && Array.isArray(n.children)) menuTourPlacements(n.children, n, out);
+  }
+  return out;
+}
+function autoListedTours() {
+  const placed = new Set(menuTourPlacements().map((p) => p.node.content.tourId));
+  return state.tours.filter((t) => !placed.has(t.id));
+}
+function tourOnMainMenu(tourId) {
+  return getMenuTree().some((n) => n.kind === 'child' && n.contentType === 'panotour' && n.content?.tourId === tourId);
+}
+// The Tour tab's "Main menu" switch: ON adds a row for the tour at the top level of the menu
+// (the admin can drag it anywhere afterwards, like any item); OFF removes the top-level row(s)
+// for it. A copy of the tour inside a folder is never touched by this switch.
+function setTourOnMainMenu(tourId, on) {
+  const t = state.tours.find((x) => x.id === tourId); if (!t) return;
+  const tree = getMenuTree();
+  if (on && !tourOnMainMenu(tourId)) {
+    const node = { id: `node_${Date.now()}_${Math.floor(Math.random() * 1000)}`, kind: 'child', contentType: 'panotour',
+      title: (t.name || 'VIRTUAL TOUR').trim(), content: { url: '', fileName: '', fileBlob: null, tourId } };
+    // Above the MENU IMAGE if it sits at the very end (it is meant to stay last, under CONTACT US).
+    const last = tree[tree.length - 1];
+    if (last && last.builtin === 'menuimage') tree.splice(tree.length - 1, 0, node); else tree.push(node);
+  } else if (!on) {
+    for (let i = tree.length - 1; i >= 0; i--) {
+      const n = tree[i];
+      if (n.kind === 'child' && n.contentType === 'panotour' && n.content?.tourId === tourId) tree.splice(i, 1);
+    }
+  }
+  state.menuConfig.tree = tree;
+  onAlignmentChanged(); renderAdminMenuTree(); renderClientSidebar(); refreshTourList();
+}
+// The list the drawer shows for an open tour's own level: its folder's tours, or (unplaced)
+// the built-in auto list; null when it sits on the main menu or has no siblings to switch to.
+function tourMenuGroup(tourId) {
+  const at = menuTourPlacements().find((p) => p.node.content.tourId === tourId);
+  if (at) {
+    if (!at.parent) return null;
+    const kids = at.parent.children.filter((k) => k.kind === 'child' && k.contentType === 'panotour' && k.enabled !== false);
+    // `tourGroup` makes it a tour level for isTourMenuNode, so Back from its rooms lands here
+    // (the tour stays open) instead of exiting the tour.
+    return kids.length > 1 ? { id: at.parent.id, title: at.parent.title, tourGroup: true, children: withExitTourRow(kids) } : null;
+  }
+  const auto = autoListedTours();
+  return auto.length > 1 && auto.some((t) => t.id === tourId) ? virtualTourPickerNode() : null;
 }
 // The per-ROOM analogue, one level deeper: once a SPECIFIC tour is open AND it actually
 // has more than one room to choose between, its rooms are browsable straight from the
@@ -3413,7 +3487,7 @@ function tourRoomPickerNode(tour) {
   };
 }
 function isTourMenuNode(node) {
-  return !!node && (node.id === '__tour_room_picker__' || node.id === '__virtualtour_picker__');
+  return !!node && (node.id === '__tour_room_picker__' || node.id === '__virtualtour_picker__' || !!node.tourGroup);
 }
 // `moveCamera:false` re-applies only the highlight/dim styling for the current
 // selection — used when the landmark DOM is rebuilt (see rebuildLandmarkDOM), where the
@@ -3795,11 +3869,23 @@ function pick(e) {
   const marker = hitEl?.closest?.('.am-marker');
   if (marker) { for (const [aid, m] of amDom) if (m === marker) { openAmCard(aid); return; } }
   // a render-bearing landmark banner is tappable too (mobile) — opens the same card sticky
-  const lmb = hitEl?.closest?.('.lm-banner.has-render');
-  if (lmb && !(state.admin && state.adminTab === 'landmarks')) { for (const [lid, d] of lmDom) if (d.banner === lmb) { openLmCard(lid, { hover: false }); return; } }
+  // A banner with a route shows it (tapping the same one again hides it); one with a render still
+  // opens its card too.
+  const lmb = hitEl?.closest?.('.lm-banner.has-render, .lm-banner.has-route');
+  if (lmb && !(state.admin && state.adminTab === 'landmarks')) {
+    for (const [lid, d] of lmDom) {
+      if (d.banner !== lmb) continue;
+      if (lmb.classList.contains('has-route')) { state.routeShow = (state.routeShow === lid && !lmb.classList.contains('has-render')) ? null : lid; renderLandmarks(); }
+      if (lmb.classList.contains('has-render')) openLmCard(lid, { hover: false });
+      return;
+    }
+  }
   const id = rayHit(e);
   if (id) { stopCameraMotion(); openPanel(id); }
-  else { if (els.panel.classList.contains('open')) closePanel(); if (els.amCard?.classList.contains('open')) closeAmCard(); }
+  else {
+    if (els.panel.classList.contains('open')) closePanel(); if (els.amCard?.classList.contains('open')) closeAmCard();
+    if (state.routeShow) { state.routeShow = null; renderLandmarks(); }   // tap on empty ground clears a shown route
+  }
 }
 // Clicking a plot stops the camera where it is (2026-09-25, on request): a flick still coasting or
 // a fly-in still running kept moving the view under the popup, which then slid off its plot. The
@@ -5036,7 +5122,7 @@ function buildSession() {                                // a complete snapshot 
     brandLogo: state.brand.logoBlob ? { name: state.brand.logoName || 'logo.web.png', blob: state.brand.logoBlob } : null,
     siteAudio: state.audio.blob ? { name: state.audio.name || 'audio.mp3', blob: state.audio.blob } : null,
     bootImage: state.bootImage.blob ? { name: state.bootImage.name || 'loading.web.jpg', blob: state.bootImage.blob } : null,
-    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, category: l.category || null, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner } })),
+    landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, category: l.category || null, featured: l.featured !== false, render: l.render, renderBlob: l.renderBlob || null, hotspot: { ...l.hotspot }, banner: { ...l.banner }, route: (l.route || []).map((p) => ({ ...p })) })),
     amenities: state.amenities.map((a) => ({ id: a.id, name: a.name, icon: a.icon, facing: a.facing, size: a.size, dimensions: a.dimensions, price: a.price, block: a.block, tour_url: a.tour_url, notes: a.notes, render: a.render, renderBlob: a.renderBlob || null, hotspot: { ...a.hotspot } })),
     tours: state.tours.map((t) => ({ id: t.id, name: t.name, startNode: t.startNode, variantLabels: tourVariantLabels(t),
       nodes: t.nodes.map((n) => ({ id: n.id, name: n.name, pano: n.pano, panoBlob: n.panoBlob || null,
@@ -6764,6 +6850,16 @@ function rebuildLandmarkDOM() {
       });
       banner.addEventListener('mouseleave', () => { if (state.cardHoverMode) scheduleHideCard(); });
     }
+    // A landmark with a route: its banner becomes tappable in the client (pick() shows the
+    // route), and hovering it on desktop previews the route.
+    if ((lm.route || []).length >= 2) {
+      banner.classList.add('has-route');
+      banner.addEventListener('mouseenter', () => {
+        if (!window.matchMedia('(hover: hover)').matches || (state.admin && state.adminTab === 'landmarks')) return;
+        state.routeHover = lm.id; renderLandmarks();
+      });
+      banner.addEventListener('mouseleave', () => { if (state.routeHover === lm.id) { state.routeHover = null; renderLandmarks(); } });
+    }
     const sel = lm.id === state.lmSel; pin.classList.toggle('is-sel', sel); banner.classList.toggle('is-sel', sel); line.classList.toggle('is-sel', sel);
     lmDom.set(lm.id, { line, pin, banner });
   });
@@ -6925,7 +7021,9 @@ function renderLandmarks() {
     boxes.push({ l, r, t, b: t + h });
     drawn.push(p);
   }
-  for (const { d, hp, bp } of drawn) {
+  routeBannerOnScreen.clear();
+  for (const { d, hp, bp, lm } of drawn) {
+    routeBannerOnScreen.add(lm.id);
     d.line.setAttribute('x1', hp.x); d.line.setAttribute('y1', hp.y); d.line.setAttribute('x2', bp.x); d.line.setAttribute('y2', bp.y);
     // Same fix as renderAmenities: a sub-pixel compositor transform instead of left/top, which
     // snapped pin and banner to whole pixels independently and made them shimmer while the
@@ -6936,6 +7034,7 @@ function renderLandmarks() {
     // positioning transform and threw every highlighted banner into the top-left corner.
     d.banner.style.transform = `translate3d(${bp.x}px, ${bp.y}px, 0) translate(-50%, -50%) scale(calc(var(--lm-s, 1) * var(--lm-z, 1)))`;
   }
+  renderRoutes(W, H, cam);
 }
 // The part of the pano a landmark banner may occupy: clear of the client's menu strip on the left
 // and of the status/filter pills that sit along the top on a landscape phone. Measured live, so it
@@ -6971,6 +7070,380 @@ function syncSteadyLandmarkBtn() {
                : 'Stop landmark markers resizing as the view moves';
   b.setAttribute('aria-label', b.title);
 }
+// ─── Landmark routes (Phase 1, 2026-09-28) ───────────────────────────────────────
+// A Google-Maps-style road line from the project to a landmark, drawn over the aerial pano.
+// Stored on the landmark as `route`: an ordered list of DIRECTIONS ({lon, lat}, the same
+// convention as the landmark's own hotspot), not ground-plane points like plots — a route to a
+// school 3 km away runs mostly along the horizon, where the flat-ground projection the plots use
+// no longer holds. The admin clicks points along the road (Landmarks tab → Draw route); the line
+// is a smooth curve through them (Catmull-Rom on the unit sphere) and every point stays
+// draggable. Visitors see a landmark's route when they tap (or, on desktop, hover) its banner.
+// The pano has no depth, so a route always draws on top of buildings and trees — same as a
+// route in Google Earth. Phase 2 (auto-drawing from a routing service) would only change how
+// the points are produced, not this storage or drawing.
+const ROUTE_STEP_DEG = 0.25;                              // curve sampling: one point per ¼° of arc
+// The road look (2026-09-28, from the owner's reference photo): an asphalt strip, not a blue
+// navigation line. Dark grey road, thin white edge lines (a white casing peeking out 1 px each
+// side), and a dashed white centre line. The centre dashes are in SCREEN px (the centre path has
+// no pathLength), so they keep their rhythm at any zoom. (Blue line + chevrons + turn arrows was
+// the first look; the owner asked for the road instead, then for the turn arrows back.) Also:
+//  - a turn arrow (Google Maps' maneuver arrow: a shaft that bends with the road, ending in an
+//    arrowhead) at every drawn point where the road bends by more than ROUTE_TURN_DEG on screen;
+//  - road-name labels: a route point may carry `name`, the road's name from that point until the
+//    next named point. A 3D map marker (a white card on a stem) stands on the road at the
+//    middle of each named stretch. That spot is fixed on the sphere (routeSignAnchors), so the
+//    marker stays put on the road while zooming and panning (the first version re-picked a spot
+//    on screen every frame and dropped labels that crowded, so they jumped or vanished on zoom);
+//  - the project's name beside the start dot. (A "🚗 3.7 km · 8 min" pill mid-route was removed
+//    on review, 2026-09-28: it read as if it were the distance of the road it sat on, not the
+//    whole trip. The landmark's banner already shows the total.)
+//  - a draw-in when a visitor opens a route: the road grows from the project to the landmark
+//    (pathLength="1", so the animation is right whatever the projected length), then the centre
+//    line and labels fade in.
+const ROUTE_TURN_DEG = 35, ROUTE_TURN_CLEAR_PX = 26, ROUTE_TURN_ARM_PX = 18, ROAD_SIGN_LIFT = 26;
+let routeSvg = null, routeEls = null, routeDrag = null, routeShownId = null;
+// Landmarks whose banner renderLandmarks actually drew this frame. A visitor's route shows only
+// while its landmark's banner is on screen (2026-09-28): panned away from the landmark, a line
+// running off to nowhere reads as a stray road. It comes back (without replaying the draw-in)
+// when the banner does. The admin editing a route always sees it.
+const routeBannerOnScreen = new Set();
+function ensureRouteSvg() {
+  if (routeSvg && routeSvg.isConnected) return routeSvg;
+  routeSvg = document.createElementNS(SVGNS, 'svg'); routeSvg.setAttribute('class', 'lm-routes');
+  const mk = (tag, cls, parent = routeSvg) => { const n = document.createElementNS(SVGNS, tag); n.setAttribute('class', cls); parent.appendChild(n); return n; };
+  // Order = paint order: edge casing, asphalt, centre dashes, turn arrows, end dots, road signs,
+  // labels, then (admin) an invisible wide stroke to click on for inserting a point, then the handles.
+  // The road-name marker's stem fades out towards the road (one gradient; one route SVG per page).
+  // The card face gets a soft top-to-bottom shade so it reads as lit from above.
+  routeSvg.innerHTML = '<defs><linearGradient id="lmRoadSignStem" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0" stop-color="#ffffff" stop-opacity="1"/><stop offset="1" stop-color="#ffffff" stop-opacity=".35"/></linearGradient>'
+    + '<linearGradient id="lmRoadSignFace" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0" stop-color="#ffffff"/><stop offset=".6" stop-color="#f7f8fa"/><stop offset="1" stop-color="#e3e7ec"/></linearGradient></defs>';
+  routeEls = {
+    casing: mk('path', 'lm-route-casing'), line: mk('path', 'lm-route-line'),
+    centre: mk('path', 'lm-route-centre'), turns: mk('g', 'lm-route-turns'),
+    start: mk('circle', 'lm-route-start'), end: mk('circle', 'lm-route-end'),
+    signs: mk('g', 'lm-route-signs'), labels: mk('g', 'lm-route-labels'),
+    hit: mk('path', 'lm-route-hit'), handles: mk('g', 'lm-route-handles'),
+  };
+  routeEls.casing.setAttribute('pathLength', '1'); routeEls.line.setAttribute('pathLength', '1');
+  routeEls.start.setAttribute('r', 7); routeEls.end.setAttribute('r', 5);
+  const pill = (cls) => { const g = mk('g', `lm-route-pill ${cls}`, routeEls.labels); mk('rect', 'lm-route-pill-bg', g); mk('text', 'lm-route-pill-text', g); return g; };
+  routeEls.from = pill('is-from');
+  routeEls.hit.addEventListener('pointerdown', onRouteLinePointerDown);
+  els.landmarks.insertBefore(routeSvg, els.landmarks.firstChild);   // under the pins, lines and banners
+  return routeSvg;
+}
+// Which landmark's route is on screen, and whether it's being edited.
+function routeTarget() {
+  const editing = state.admin && state.adminTab === 'landmarks';
+  const id = editing ? (state.routeDraw || state.lmSel) : (state.routeHover || state.routeShow);
+  const lm = id ? state.landmarks.find((l) => l.id === id) : null;
+  if (!lm) return null;
+  const pts = lm.route || [];
+  if (editing) return (pts.length || state.routeDraw === lm.id) ? { lm, editing: true } : null;
+  if (pts.length < 2 || !isLandmarkShown(lm, state.selectedCategory || 'ALL')) return null;
+  return { lm, editing: false };
+}
+// The smooth curve through the route's points, as unit directions. Each sample carries the
+// segment it belongs to (so a click on the line knows where to insert) and, for the samples
+// that ARE a drawn point, that point's index (`ctrl`, where turn badges go). Cached per route.
+function routeSamples(lm) {
+  const pts = lm.route || [];
+  const key = pts.map((p) => `${p.lon.toFixed(4)},${p.lat.toFixed(4)}`).join(';');
+  if (lm._routeKey === key && lm._routeSamples) return lm._routeSamples;
+  const P = pts.map((p) => dirFromLonLat(p.lon, p.lat)), out = [];
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(P.length - 1, i + 2)];
+    const steps = Math.max(2, Math.min(120, Math.ceil((p1.angleTo(p2) * 180 / Math.PI) / ROUTE_STEP_DEG)));
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps, t2 = t * t, t3 = t2 * t;
+      const v = new THREE.Vector3()
+        .addScaledVector(p0, -0.5 * t3 + t2 - 0.5 * t)
+        .addScaledVector(p1, 1.5 * t3 - 2.5 * t2 + 1)
+        .addScaledVector(p2, -1.5 * t3 + 2 * t2 + 0.5 * t)
+        .addScaledVector(p3, 0.5 * t3 - 0.5 * t2).normalize();
+      out.push({ dir: v, seg: i, ctrl: s === 0 ? i : -1 });
+    }
+  }
+  if (P.length) out.push({ dir: P[P.length - 1], seg: Math.max(0, P.length - 2), ctrl: P.length - 1 });
+  lm._routeKey = key; lm._routeSamples = out;
+  return out;
+}
+// Where each road-name label sits: for every named stretch (a point with `name` up to the next
+// named point), the sample halfway along that stretch measured on the SPHERE (arc length), so the
+// spot is a fixed place on the road, independent of zoom and view. Cached per route + names.
+function routeSignAnchors(lm) {
+  const pts = lm.route || [];
+  const samples = routeSamples(lm);                       // also refreshes lm._routeKey
+  const key = lm._routeKey + '|' + pts.map((p) => p.name || '').join('|');
+  if (lm._signKey === key && lm._signAnchors) return lm._signAnchors;
+  const out = [];
+  pts.forEach((pt, i) => {
+    if (!pt.name || i >= pts.length - 1) return;
+    let j = i + 1; while (j < pts.length - 1 && !pts[j].name) j++;
+    const lastSeg = j - 1;
+    const st = samples.filter((q) => q.seg >= i && q.seg <= lastSeg);
+    if (st.length < 2) return;
+    const cum = [0];
+    for (let k = 1; k < st.length; k++) cum.push(cum[k - 1] + st[k].dir.angleTo(st[k - 1].dir));
+    const half = cum[cum.length - 1] / 2;
+    out.push({ dir: st[Math.max(0, cum.findIndex((c) => c >= half))].dir, name: pt.name });
+  });
+  lm._signKey = key; lm._signAnchors = out;
+  return out;
+}
+// Keep a <g>'s children at `n`, making new ones with `make` (reused, not rebuilt, every frame).
+function routePool(g, n, make) {
+  while (g.childNodes.length < n) g.appendChild(make());
+  while (g.childNodes.length > n) g.lastChild.remove();
+  return g.childNodes;
+}
+function setRoutePill(g, text, x, y) {
+  const t = g.lastChild, r = g.firstChild;
+  if (!text || x == null) { g.style.display = 'none'; return; }
+  g.style.display = '';
+  if (g.dataset.text !== text) {                          // measure only when the words change
+    t.textContent = text; g.dataset.text = text;
+    let w = 0; try { w = t.getComputedTextLength(); } catch {}
+    g.dataset.w = String(w > 0 ? w : text.length * 6.6);
+  }
+  const w = +g.dataset.w + 18, h = 22;
+  r.setAttribute('x', (-w / 2).toFixed(1)); r.setAttribute('y', (-h / 2).toFixed(1));
+  r.setAttribute('width', w.toFixed(1)); r.setAttribute('height', h); r.setAttribute('rx', h / 2);
+  t.setAttribute('x', 0); t.setAttribute('y', 0.5);
+  g.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+}
+function renderRoutes(W, H, cam) {
+  const svg = ensureRouteSvg(), E = routeEls, tgt = routeTarget();
+  svg.classList.toggle('is-editing', !!tgt?.editing);
+  if (!tgt) { svg.classList.add('is-off'); routeShownId = null; return; }
+  const { lm, editing } = tgt, pts = lm.route || [];
+  if (!editing && !routeBannerOnScreen.has(lm.id)) { svg.classList.add('is-off'); return; }
+  svg.classList.remove('is-off');
+  // A visitor opening a route (not the admin editing it): replay the draw-in.
+  if (!editing && routeShownId !== lm.id) {
+    svg.classList.remove('is-drawin'); void svg.getBoundingClientRect(); svg.classList.add('is-drawin');
+  }
+  routeShownId = editing ? null : lm.id;
+
+  // Projected curve, split into runs where it goes behind the camera (a break, not a streak).
+  const runs = []; let run = null;
+  for (const s of routeSamples(lm)) {
+    const p = projectDir(s.dir, cam, W, H);
+    if (!p) { run = null; continue; }
+    if (!run) runs.push(run = []);
+    run.push({ x: p.x, y: p.y, ctrl: s.ctrl, seg: s.seg });
+  }
+  const d = runs.map((r) => r.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join('')).join('');
+  ['casing', 'line', 'centre', 'hit'].forEach((k) => E[k].setAttribute('d', d));
+
+  // Turn arrows at drawn points where the road bends on screen.
+  const turns = [];
+  const along = (r, i, dir, px) => {                     // the run point about `px` away from r[i]
+    let j = i, acc = 0;
+    while (j + dir >= 0 && j + dir < r.length && acc < px) { acc += Math.hypot(r[j + dir].x - r[j].x, r[j + dir].y - r[j].y); j += dir; }
+    return j === i ? null : r[j];
+  };
+  // The run's points from r[i] out to about `px` along it (in `dir`), r[i] itself excluded.
+  const stretch = (r, i, dir, px) => {
+    const out = []; let j = i, acc = 0;
+    while (j + dir >= 0 && j + dir < r.length && acc < px) { acc += Math.hypot(r[j + dir].x - r[j].x, r[j + dir].y - r[j].y); j += dir; out.push(r[j]); }
+    return out;
+  };
+  if (pts.length >= 3) for (const r of runs) r.forEach((p, i) => {
+    if (p.ctrl <= 0 || p.ctrl >= pts.length - 1) return;
+    const a = along(r, i, -1, 16), b = along(r, i, +1, 16);
+    if (!a || !b) return;
+    const inAng = Math.atan2(p.y - a.y, p.x - a.x), outAng = Math.atan2(b.y - p.y, b.x - p.x);
+    let turn = (outAng - inAng) * 180 / Math.PI; turn = ((turn + 540) % 360) - 180;
+    if (Math.abs(turn) < ROUTE_TURN_DEG) return;
+    if (turns.some((t) => Math.hypot(t.x - p.x, t.y - p.y) < ROUTE_TURN_CLEAR_PX)) return;
+    // The shaft FOLLOWS the road through the bend: ROUTE_TURN_ARM_PX in, a bit more out.
+    const back = stretch(r, i, -1, ROUTE_TURN_ARM_PX).reverse(), fwd = stretch(r, i, +1, ROUTE_TURN_ARM_PX + 6);
+    if (fwd.length < 1 || back.length < 1) return;
+    const shaft = [...back, p, ...fwd], tip = shaft[shaft.length - 1], pre = shaft[shaft.length - 2];
+    turns.push({ x: p.x, y: p.y, shaft, tip, ang: Math.atan2(tip.y - pre.y, tip.x - pre.x) });
+  });
+  const tn = routePool(E.turns, turns.length, () => {
+    const g = document.createElementNS(SVGNS, 'g'); g.setAttribute('class', 'lm-route-turn');
+    g.innerHTML = '<path class="lm-turn-edge"></path><path class="lm-turn-head-edge"></path><path class="lm-turn-shaft"></path><path class="lm-turn-head"></path>';
+    return g;
+  });
+  turns.forEach((t, i) => {
+    const [edge, headEdge, shaftEl, head] = tn[i].childNodes;
+    // The shaft stops short of the tip so its round cap doesn't poke through the arrowhead.
+    const L = 7, c = Math.cos(t.ang), s = Math.sin(t.ang);
+    const sp = t.shaft.slice(0, -1).concat([{ x: t.tip.x - c * L * 0.6, y: t.tip.y - s * L * 0.6 }]);
+    const sd = sp.map((q, k) => `${k ? 'L' : 'M'}${q.x.toFixed(1)} ${q.y.toFixed(1)}`).join('');
+    edge.setAttribute('d', sd); shaftEl.setAttribute('d', sd);
+    const tx = t.tip.x + c * L * 0.55, ty = t.tip.y + s * L * 0.55, bx = t.tip.x - c * L * 0.75, by = t.tip.y - s * L * 0.75;
+    const hd = `M${tx.toFixed(1)} ${ty.toFixed(1)}L${(bx - s * L).toFixed(1)} ${(by + c * L).toFixed(1)}L${(bx + s * L).toFixed(1)} ${(by - c * L).toFixed(1)}Z`;
+    headEdge.setAttribute('d', hd); head.setAttribute('d', hd);
+  });
+
+  // End dots.
+  const endXY = [];
+  for (const [c, pt] of [[E.start, pts[0]], [E.end, pts[pts.length - 1]]]) {
+    const p = pt && pts.length >= 2 ? projectDir(dirFromLonLat(pt.lon, pt.lat), cam, W, H) : null;
+    c.style.display = p ? '' : 'none'; endXY.push(p);
+    if (p) { c.setAttribute('cx', p.x.toFixed(1)); c.setAttribute('cy', p.y.toFixed(1)); }
+  }
+  // The project's name just below the start dot. Not while editing — the handles need the room.
+  const inView = (p) => p && p.x > 40 && p.x < W - 40 && p.y > 20 && p.y < H - 20;
+  const s0 = endXY[0];
+  setRoutePill(E.from, editing ? '' : ((state.brand.name || '').trim() || 'Project'), inView(s0) ? s0.x : null, s0 ? s0.y + 22 : 0);
+
+  // Road-name labels, each at its fixed spot on the road (routeSignAnchors), shown whenever that
+  // spot is on screen: never moved or dropped to make room, so zooming doesn't shift them.
+  // Drawn as a 3D map marker (owner's reference): a white card lifted ROAD_SIGN_LIFT px above
+  // the road with a grey underside for thickness, a thin glowing stem down to the road, and a
+  // small glowing dot where the stem meets it. The dot, not the card, is the fixed point.
+  // Shadows (on review, "add 3D shadow effects"): the whole marker also CASTS a shadow on the
+  // ground — the same stem + card shapes in a <g> that is squashed flat onto the road (scaleY)
+  // and slanted away from the light (skewX), then blurred — plus a contact shadow under the
+  // dot, a soft drop shadow under the card, and a shaded face.
+  const signs = [];
+  for (const an of routeSignAnchors(lm)) {
+    const q = projectDir(an.dir, cam, W, H);
+    if (q && q.x > -60 && q.x < W + 60 && q.y > -20 && q.y < H + 20) signs.push({ x: q.x, y: q.y, name: an.name });
+  }
+  const sn = routePool(E.signs, signs.length, () => {
+    const g = document.createElementNS(SVGNS, 'g'); g.setAttribute('class', 'lm-road-sign');
+    g.innerHTML = '<g class="lm-road-sign-cast" transform="skewX(-48) scale(1 0.34)"><rect class="lm-cast-stem"></rect><rect class="lm-cast-card"></rect></g>'
+      + '<ellipse class="lm-road-sign-contact" rx="5" ry="1.8"></ellipse>'
+      + '<ellipse class="lm-road-sign-glow" rx="6" ry="2.6"></ellipse><circle class="lm-road-sign-dot" r="2.2"></circle>'
+      + '<rect class="lm-road-sign-stem"></rect><rect class="lm-road-sign-edge"></rect><rect class="lm-road-sign-bg"></rect>'
+      + '<rect class="lm-road-sign-shine"></rect><text class="lm-road-sign-text"></text>';
+    return g;
+  });
+  signs.forEach((sg, i) => {
+    const g = sn[i], [cast, , , , stem, edge, bg, shine, text] = g.childNodes, [castStem, castCard] = cast.childNodes;
+    if (g.dataset.text !== sg.name) {                      // measure and lay out only when the words change
+      text.textContent = sg.name; g.dataset.text = sg.name;
+      let w = 0; try { w = text.getComputedTextLength(); } catch {}
+      const bw = (w > 0 ? w : sg.name.length * 7) + 18, bh = 22, top = -ROAD_SIGN_LIFT - bh;
+      const set = (el, a) => { for (const k in a) el.setAttribute(k, a[k]); };
+      set(stem, { x: -0.8, y: -ROAD_SIGN_LIFT, width: 1.6, height: ROAD_SIGN_LIFT });
+      set(edge, { x: (-bw / 2).toFixed(1), y: top + 2.5, width: bw.toFixed(1), height: bh, rx: 4 });   // thickness
+      set(bg, { x: (-bw / 2).toFixed(1), y: top, width: bw.toFixed(1), height: bh, rx: 4 });
+      set(shine, { x: (-bw / 2 + 2).toFixed(1), y: top + 1.2, width: (bw - 4).toFixed(1), height: 1.4, rx: 0.7 });   // lit top edge
+      set(castStem, { x: -0.8, y: -ROAD_SIGN_LIFT, width: 1.6, height: ROAD_SIGN_LIFT });
+      set(castCard, { x: (-bw / 2).toFixed(1), y: top, width: bw.toFixed(1), height: bh + 2.5, rx: 4 });
+      set(text, { x: 0, y: (top + bh / 2 + 0.5).toFixed(1) });
+    }
+    g.setAttribute('transform', `translate(${sg.x.toFixed(1)} ${sg.y.toFixed(1)})`);
+  });
+
+  // Admin: one draggable handle per point (reused, not rebuilt, as the count changes).
+  // A plain click on a handle (no drag) selects that point, for naming the road from there.
+  const want = editing ? pts.length : 0;
+  const hs = routePool(E.handles, want, () => {
+    const h = document.createElementNS(SVGNS, 'circle'); h.setAttribute('class', 'lm-route-handle'); h.setAttribute('r', 6);
+    h.addEventListener('pointerdown', onRouteHandlePointerDown);
+    h.addEventListener('dblclick', (e) => { e.stopPropagation(); deleteRoutePoint(+h.dataset.i); });
+    h.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); deleteRoutePoint(+h.dataset.i); });
+    return h;
+  });
+  for (let i = 0; i < want; i++) {
+    const h = hs[i], p = projectDir(dirFromLonLat(pts[i].lon, pts[i].lat), cam, W, H);
+    h.dataset.i = i; h.style.display = p ? '' : 'none';
+    if (p) { h.setAttribute('cx', p.x.toFixed(1)); h.setAttribute('cy', p.y.toFixed(1)); }
+    h.classList.toggle('is-first', i === 0); h.classList.toggle('is-last', i === want - 1 && want > 1);
+    h.classList.toggle('is-sel', routeSelPoint(lm) === i);
+    h.classList.toggle('is-named', !!pts[i].name);
+  }
+}
+// The route point selected for naming (admin), or -1. Kept as {id, i} and checked on use, so a
+// deleted point or a switch to another landmark simply drops it.
+function routeSelPoint(lm) {
+  const s = state.routeSelPt;
+  return s && lm && s.id === lm.id && s.i < (lm.route || []).length ? s.i : -1;
+}
+function routeEditLm() { return state.landmarks.find((l) => l.id === (state.routeDraw || state.lmSel)) || null; }
+function dirAtPointer(e) { three.raycaster.setFromCamera(ndcOf(e), three.camera); return lonLatFromDir(three.raycaster.ray.direction); }
+function routeChanged() { renderLandmarks(); refreshRouteStatus(); onLandmarksChanged(); }
+// Draw mode: a plain click on the pano adds the next point. Called from wireViewControls
+// ahead of pick(), like the Google Earth tools; true = the click was used here.
+function routeToolClick(e) {
+  if (!(state.admin && state.adminTab === 'landmarks' && state.routeDraw) || !three) return false;
+  const lm = routeEditLm(); if (!lm) { stopRouteDraw(); return false; }
+  (lm.route || (lm.route = [])).push(dirAtPointer(e));
+  routeChanged();
+  return true;
+}
+function onRouteHandlePointerDown(e) {
+  if (!(state.admin && state.adminTab === 'landmarks')) return;
+  if (e.button === 2) return;                             // right-click deletes (contextmenu)
+  e.preventDefault(); e.stopPropagation();                // keep #pano from capturing the pointer
+  startRouteDrag(+e.currentTarget.dataset.i);
+}
+// Click on the line (admin): insert a point there, in the right segment, and drag it at once.
+function onRouteLinePointerDown(e) {
+  if (!(state.admin && state.adminTab === 'landmarks') || e.button === 2) return;
+  const lm = routeEditLm(); if (!lm || (lm.route || []).length < 2) return;
+  e.preventDefault(); e.stopPropagation();
+  const at = dirAtPointer(e), v = dirFromLonLat(at.lon, at.lat);
+  let best = null;
+  for (const s of routeSamples(lm)) { const a = s.dir.angleTo(v); if (!best || a < best.a) best = { a, seg: s.seg }; }
+  lm.route.splice(best.seg + 1, 0, at);
+  routeChanged();
+  startRouteDrag(best.seg + 1);
+}
+function startRouteDrag(i) {
+  routeDrag = { i, moved: false };
+  window.addEventListener('pointermove', onRouteDragMove);
+  window.addEventListener('pointerup', endRouteDrag, { once: true });
+}
+function onRouteDragMove(e) {
+  const lm = routeEditLm(); if (!routeDrag || !lm || !lm.route?.[routeDrag.i]) return;
+  Object.assign(lm.route[routeDrag.i], dirAtPointer(e)); routeDrag.moved = true;   // keeps its road name
+  renderLandmarks();
+}
+function endRouteDrag() {
+  window.removeEventListener('pointermove', onRouteDragMove);
+  const moved = routeDrag?.moved, i = routeDrag?.i; routeDrag = null;
+  if (moved) routeChanged();
+  else if (i != null) {                                    // a click, not a drag: select it for naming
+    const lm = routeEditLm(); if (!lm) return;
+    state.routeSelPt = { id: lm.id, i };
+    refreshLmList(); renderLandmarks();
+    document.querySelector('.ax-route-name input')?.focus();
+  }
+}
+function deleteRoutePoint(i) {
+  const lm = routeEditLm(); if (!lm?.route?.[i]) return;
+  // A deleted point's road name passes to the next point, so the road keeps its name.
+  const [gone] = lm.route.splice(i, 1);
+  if (gone.name && lm.route[i] && !lm.route[i].name) lm.route[i].name = gone.name;
+  state.routeSelPt = null;
+  routeChanged();
+}
+function startRouteDraw(id) {
+  state.routeDraw = id; selectLandmark(id);
+  els.pano?.classList.add('is-route-drawing');
+  setAxStatus('Drawing a route: click along the road, <strong>starting at the project</strong> and ending at the landmark. Drag to look around; drag a white dot to move it; double-click (or right-click) a dot to delete it; click the line to add a point. Press <strong>Done</strong> or Esc when finished.');
+  refreshLmList(); renderLandmarks();
+}
+function stopRouteDraw() {
+  if (!state.routeDraw) return;
+  const lm = state.landmarks.find((l) => l.id === state.routeDraw);
+  if (lm && (lm.route || []).length < 2) lm.route = [];   // a single point isn't a route
+  state.routeDraw = null;
+  els.pano?.classList.remove('is-route-drawing');
+  refreshLmList(); renderLandmarks(); onLandmarksChanged();
+}
+function refreshRouteStatus() {
+  const lm = routeEditLm(), el = document.querySelector('.ax-route-count');
+  if (el && lm) el.textContent = routeCountText(lm);
+}
+function routeCountText(lm) {
+  const n = (lm.route || []).length;
+  if (state.routeDraw === lm.id) return n ? `${n} point${n === 1 ? '' : 's'} — keep clicking along the road` : 'Click the start of the route, at the project';
+  return n >= 2 ? `${n} points` : 'No route yet';
+}
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.routeDraw) stopRouteDraw(); });
+
 function applyLandmarkVisibility() {
   // 📌 also flattens the banner shadow (see styles.css): it is the only depth cue on a banner
   // against plain sky, and it is what makes a perfectly level label look like it is leaning.
@@ -7013,6 +7486,7 @@ function onLmDragMove(e) {
 function endLmDrag() { window.removeEventListener('pointermove', onLmDragMove); lmDrag = null; onLandmarksChanged(); }
 
 function selectLandmark(id) {
+  if (state.routeDraw && state.routeDraw !== id) stopRouteDraw();   // picking another landmark ends drawing
   state.lmSel = id;
   lmDom.forEach((d, lid) => { const on = lid === id; d.pin.classList.toggle('is-sel', on); d.banner.classList.toggle('is-sel', on); d.line.classList.toggle('is-sel', on); });
   refreshLmList();
@@ -7020,7 +7494,7 @@ function selectLandmark(id) {
 function addLandmark() {
   const fwd = three ? new THREE.Vector3(0, 0, -1).applyQuaternion(three.camera.quaternion) : new THREE.Vector3(0, 0, 1);
   const hs = lonLatFromDir(fwd);
-  const lm = { id: 'lm' + (++lmSeq), label: '', distance: '', driveTime: '', icon: 'place', featured: true, render: null, renderBlob: null, hotspot: hs, banner: { lon: hs.lon, lat: Math.max(-80, Math.min(80, hs.lat + 12)) } };
+  const lm = { id: 'lm' + (++lmSeq), label: '', distance: '', driveTime: '', icon: 'place', featured: true, render: null, renderBlob: null, hotspot: hs, banner: { lon: hs.lon, lat: Math.max(-80, Math.min(80, hs.lat + 12)) }, route: [] };
   state.landmarks.push(lm); rebuildLandmarkDOM(); selectLandmark(lm.id); onLandmarksChanged();
   setAxStatus('Landmark added — drag its pin onto a spot, drag the banner to place it, and fill the label/distance/time.');
 }
@@ -7028,6 +7502,9 @@ function deleteLandmark(id) {
   const lm = state.landmarks.find((l) => l.id === id); if (lm?._url) { try { URL.revokeObjectURL(lm._url); } catch {} }
   state.landmarks = state.landmarks.filter((l) => l.id !== id);
   if (state.lmSel === id) state.lmSel = null;
+  if (state.routeDraw === id) { state.routeDraw = null; els.pano?.classList.remove('is-route-drawing'); }
+  if (state.routeShow === id) state.routeShow = null;
+  if (state.routeHover === id) state.routeHover = null;
   rebuildLandmarkDOM(); refreshLmList(); onLandmarksChanged();
 }
 // The tick/cross toggle in the admin list. Unticking never removes anything -- the
@@ -7136,13 +7613,51 @@ function refreshLmList() {
         const name = document.createElement('span'); name.className = 'ax-am-render-name'; name.textContent = lm.render ? lm.render.replace(/^sample\//, '') : 'none';
         row.append(btn, fileInp, name); w.appendChild(row); return w;
       };
-      ed.append(field('Label', 'label', 'e.g. Kempegowda Airport'), field('Distance', 'distance', 'e.g. 12 km'), field('Drive time', 'driveTime', 'e.g. 20 min'), iconField(), renderField());
+      // Route from the project to this landmark (see "Landmark routes"). Drawing is a mode; once
+      // drawn, the points stay draggable whenever this landmark is selected.
+      const routeField = () => {
+        const w = document.createElement('div'); w.className = 'ax-lm-field ax-route';
+        w.append(document.createTextNode('Route from the project'));
+        const count = document.createElement('span'); count.className = 'ax-route-count'; count.textContent = routeCountText(lm);
+        const row = document.createElement('div'); row.className = 'ax-route-btns';
+        const btn = (text, title, fn, cls = 'btn btn-ghost') => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = text; b.title = title; b.addEventListener('click', (e) => { e.stopPropagation(); fn(); }); row.appendChild(b); return b; };
+        const has = (lm.route || []).length >= 2;
+        if (state.routeDraw === lm.id) {
+          btn('↶ Undo point', 'Remove the last point', () => { if ((lm.route || []).length) { lm.route.pop(); routeChanged(); } });
+          btn('✓ Done', 'Stop drawing (Esc)', stopRouteDraw, 'btn btn-primary');
+        } else {
+          btn(has ? '✏ Add more points' : '✏ Draw route', has ? 'Keep clicking to extend the route from its end' : 'Click along the road on the pano, from the project to this landmark', () => startRouteDraw(lm.id));
+          if (has) btn('Clear', 'Delete this route', () => { lm.route = []; routeChanged(); refreshLmList(); });
+        }
+        const hint = document.createElement('div'); hint.className = 'ax-route-hint';
+        hint.textContent = has || state.routeDraw === lm.id
+          ? 'Drag a dot to move it · double-click or right-click a dot to delete it · click the line to add a point · click a dot to name the road from there.'
+          : 'Visitors see the route when they tap this landmark’s banner.';
+        w.append(count, row, hint);
+        // Road names: the selected dot's name box, and the names already given.
+        const si = routeSelPoint(lm);
+        if (has && si >= 0) {
+          const nm = document.createElement('label'); nm.className = 'ax-route-name';
+          nm.append(document.createTextNode(`Road name from point ${si + 1} onward`));
+          const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = 40; inp.placeholder = 'e.g. VIP Road (blank = no sign)';
+          inp.value = lm.route[si].name || '';
+          inp.addEventListener('click', (e) => e.stopPropagation());
+          inp.addEventListener('input', () => { const v = inp.value.trim(); if (v) lm.route[si].name = v; else delete lm.route[si].name; renderLandmarks(); });
+          inp.addEventListener('change', () => { onLandmarksChanged(); refreshLmList(); });
+          nm.appendChild(inp); w.appendChild(nm);
+        }
+        const named = (lm.route || []).map((p, i) => (p.name ? `${p.name} (from point ${i + 1})` : '')).filter(Boolean);
+        if (has && named.length) { const l = document.createElement('div'); l.className = 'ax-route-hint'; l.textContent = 'Roads: ' + named.join(' · '); w.appendChild(l); }
+        return w;
+      };
+      ed.append(field('Label', 'label', 'e.g. Kempegowda Airport'), field('Distance', 'distance', 'e.g. 12 km'), field('Drive time', 'driveTime', 'e.g. 20 min'), iconField(), renderField(), routeField());
       li.appendChild(ed);
     }
     els.axLmList.appendChild(li);
   });
 }
 function setAdminTab(tab) {
+  if (tab !== 'landmarks' && state.routeDraw) stopRouteDraw();
   state.adminTab = tab;
   els.axTabAlign.hidden = tab !== 'align'; els.axTabLandmarks.hidden = tab !== 'landmarks'; if (els.axTabAmenities) els.axTabAmenities.hidden = tab !== 'amenities'; if (els.axTabTour) els.axTabTour.hidden = tab !== 'tour';
   els.axTabBtnAlign.classList.toggle('is-on', tab === 'align'); els.axTabBtnLandmarks.classList.toggle('is-on', tab === 'landmarks'); els.axTabBtnAmenities?.classList.toggle('is-on', tab === 'amenities'); els.axTabBtnTour?.classList.toggle('is-on', tab === 'tour');
@@ -7162,21 +7677,23 @@ function parseLandmarks(d) {
   const ver = (d && d.savedAt) || '';                    // cache-bust token for committed render images
   return arr.map((l, i) => {
     const render = (l.render && l.render.file) ? l.render.file : (typeof l.render === 'string' ? l.render : null);
-    return { id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', category: (l.category || '').toString().toUpperCase() || null, featured: l.featured !== false, render, renderBlob: l.renderBlob || null, _ver: ver, hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot) };
+    return { id: l.id || 'lm' + (i + 1), label: (l.label || '').toString(), distance: (l.distance || '').toString(), driveTime: (l.driveTime || l.drive || '').toString(), icon: LM_ICONS[l.icon] ? l.icon : 'place', category: (l.category || '').toString().toUpperCase() || null, featured: l.featured !== false, render, renderBlob: l.renderBlob || null, _ver: ver, hotspot: normLL(l.hotspot), banner: normLL(l.banner || l.hotspot),
+      route: Array.isArray(l.route) ? l.route.map((p) => { const q = normLL(p); if (q && p.road) q.name = String(p.road).slice(0, 40); return q; }).filter(Boolean) : [] };
   }).filter((l) => l.hotspot && l.banner);
 }
 function buildLandmarksData() {
   return { version: 1, note: 'Build91 landmark hotspots', savedAt: new Date().toISOString(),
     landmarks: state.landmarks.map((l) => ({ id: l.id, label: l.label, distance: l.distance, driveTime: l.driveTime, icon: l.icon, featured: l.featured !== false,
       ...(l.category ? { category: l.category } : {}),
-      ...(l.render ? { render: { file: l.render } } : {}), hotspot: { lonDeg: +l.hotspot.lon.toFixed(2), latDeg: +l.hotspot.lat.toFixed(2) }, banner: { lonDeg: +l.banner.lon.toFixed(2), latDeg: +l.banner.lat.toFixed(2) } })) };
+      ...(l.render ? { render: { file: l.render } } : {}), hotspot: { lonDeg: +l.hotspot.lon.toFixed(2), latDeg: +l.hotspot.lat.toFixed(2) }, banner: { lonDeg: +l.banner.lon.toFixed(2), latDeg: +l.banner.lat.toFixed(2) },
+      ...((l.route || []).length >= 2 ? { route: l.route.map((p) => ({ lonDeg: +p.lon.toFixed(3), latDeg: +p.lat.toFixed(3), ...(p.name ? { road: p.name } : {}) })) } : {}) })) };
 }
 async function loadLandmarksFile() {
   try { const r = await loadProjectFile('landmarks.json'); if (!r || !r.ok) return null; return parseLandmarks(await r.json()); } catch { return null; }
 }
 function setLandmarks(list) {
   state.landmarks.forEach((l) => { if (l._url) { try { URL.revokeObjectURL(l._url); } catch {} } });
-  state.landmarks = list || []; state.lmSel = null;
+  state.landmarks = list || []; state.lmSel = null; state.routeDraw = null; state.routeShow = null; state.routeHover = null;
   lmSeq = state.landmarks.reduce((m, l) => { const n = parseInt(String(l.id).replace(/\D/g, ''), 10); return Math.max(m, isFinite(n) ? n : 0); }, 0);
   rebuildLandmarkDOM(); refreshLmList(); applyLandmarkVisibility(); renderLandmarkCategoryNav();
 }
@@ -8273,7 +8790,7 @@ async function setTourVariant(v) {
     return;
   }
   tv.busy = true; refreshTourRoomMenu();
-  showTourLoader(tourVariantLabels(tour)[TOUR_VARIANTS.indexOf(v)]);   // only appears if the download is slow
+  showTourLoader(tourVariantLabels(tour)[TOUR_VARIANTS.indexOf(v)], { mini: true });   // a corner spinner, only if the download is slow
   try {
     const tex = await loadTourNodeTex(tour, node, v);
     if (!state.tourView) return;                          // exited while loading
@@ -8399,8 +8916,22 @@ function refreshTourList() {
     const count = document.createElement('span'); count.className = 'ax-tour-count'; count.textContent = `${t.nodes.length} node${t.nodes.length === 1 ? '' : 's'}`;
     const del = document.createElement('button'); del.className = 'ax-lm-del'; del.type = 'button'; del.textContent = '×'; del.title = 'Delete tour';
     del.addEventListener('click', (e) => { e.stopPropagation(); deleteTour(t.id); });
-    head.append(name, count, del); li.appendChild(head);
-    li.addEventListener('click', (e) => { if (e.target.closest('.ax-tour-edit,.ax-lm-del,input,button')) return; selectTour(t.id === state.tourSel ? null : t.id); });
+    // "Main menu" switch (see setTourOnMainMenu): ON = its own row on the client's main menu.
+    const onMenu = tourOnMainMenu(t.id);
+    const inFolder = !onMenu && menuTourPlacements().find((pl) => pl.parent && pl.node.content.tourId === t.id);
+    const sw = document.createElement('label'); sw.className = 'ax-tour-menusw' + (onMenu ? ' is-on' : '');
+    sw.title = onMenu ? 'Shown on the main menu — switch off to remove it from there'
+      : (inFolder ? `In the folder “${(inFolder.parent.title || '').trim()}” — switch on to also show it on the main menu`
+        : 'Not on the main menu (listed under the built-in Virtual Tour row, if that is on) — switch on to give it its own row');
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = onMenu;
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', () => setTourOnMainMenu(t.id, cb.checked));
+    const knob = document.createElement('span'); knob.className = 'ax-tour-menusw-track';
+    const lbl = document.createElement('span'); lbl.className = 'ax-tour-menusw-text'; lbl.textContent = inFolder ? 'Folder' : 'Menu';
+    sw.append(cb, knob, lbl);
+    sw.addEventListener('click', (e) => e.stopPropagation());
+    head.append(name, count, sw, del); li.appendChild(head);
+    li.addEventListener('click', (e) => { if (e.target.closest('.ax-tour-edit,.ax-lm-del,.ax-tour-menusw,input,button')) return; selectTour(t.id === state.tourSel ? null : t.id); });
     if (t.id === state.tourSel) {
       const ed = document.createElement('div'); ed.className = 'ax-tour-edit';
       if (!t.nodes.length) { const p = document.createElement('p'); p.className = 'ax-tour-hint'; p.textContent = 'No nodes yet — Add node to upload a 360° panorama.'; ed.appendChild(p); }
@@ -8797,12 +9328,20 @@ function loadTourNodeTex(tour, node, v) {
 }
 // Prefetch every node one hop away, so the next click is instant. Fire-and-forget.
 function prefetchTourNeighbours(tour, nodeId) {
-  // Only the variant currently being viewed — warming both would double every tour's
-  // download for a toggle the visitor may never touch.
+  // Neighbours: only the variant currently being viewed — warming both for every neighbour
+  // would double every tour's download for a toggle the visitor may never touch.
   const v = curTourVariant();
-  tour.links.filter((k) => k.from === nodeId).forEach((k) => {
-    const n = tour.nodes.find((x) => x.id === k.to);
-    if (n) loadTourNodeTex(tour, n, v).catch(() => {});
+  const hops = tour.links.filter((k) => k.from === nodeId).map((k) => tour.nodes.find((x) => x.id === k.to)).filter(Boolean);
+  Promise.allSettled(hops.map((n) => loadTourNodeTex(tour, n, v))).then(() => {
+    // Then the OTHER version of the room the visitor is standing in (2026-09-28, on request:
+    // "no loading screen when switching furnished ↔ unfurnished, as smooth as the curtains").
+    // The curtain twin is a linked node, so it was always warm and its switch was a pure
+    // crossfade; the other render of this room never was, so the switch waited on a download.
+    // One texture, queued after the neighbours so walking on is never slowed by it.
+    const here = tour.nodes.find((x) => x.id === nodeId);
+    if (!here || !state.tourView || state.tourView.nodeId !== nodeId) return;
+    const other = otherVariant(curTourVariant());
+    if (nodeHasVariant(here, other) && nodeHasVariant(here, curTourVariant())) loadTourNodeTex(tour, here, other).catch(() => {});
   });
 }
 // Cross-TOUR prefetch (2026-09-16, on request): the room-hop prefetch above only ever
@@ -8933,13 +9472,16 @@ function openClientPanoTour(tourId, title, { anchorRooms = true } = {}) {
   // A tour with only one room has nothing to pick between — same "one thing inside is
   // never a choice" rule as an ordinary folder — so its own room-list level is skipped
   // entirely, not just rendered with a single (pointless, already-highlighted) entry.
+  // The tour level above the rooms is the tour's own GROUP in the menu (tourMenuGroup): its
+  // folder's tours, or the built-in list of unplaced tours — never every tour in the project.
   const roomChoiceNeeded = anchorRooms && tourRooms(tour).length > 1;
+  const group = tourMenuGroup(tour.id);
   if (roomChoiceNeeded) {
-    state.menuNavStack = state.tours.length > 1 ? [virtualTourPickerNode(), tourRoomPickerNode(tour)] : [tourRoomPickerNode(tour)];
-  } else if (state.tours.length > 1) {
-    // Multiple tours but nothing to choose WITHIN this one ⇒ stay at the tour list (still
-    // lets the visitor switch tours) rather than drilling one level deeper for no reason.
-    state.menuNavStack = [virtualTourPickerNode()];
+    state.menuNavStack = group ? [group, tourRoomPickerNode(tour)] : [tourRoomPickerNode(tour)];
+  } else if (group) {
+    // Several tours in its group but nothing to choose WITHIN this one ⇒ stay at the tour list
+    // (still lets the visitor switch tours) rather than drilling one level deeper for no reason.
+    state.menuNavStack = [group];
   } else {
     // The only tour AND only one room in it: no picker level makes sense at all — back to
     // the root menu, which gets its own "Exit Tour" row appended while touring (see
@@ -9019,6 +9561,11 @@ const TOUR_FADE_MS = 460;
 // Built on demand (not declared in index.html) so a cached page can't strand it. Deliberately
 // separate from #bootCurtain — the site's own loading screen is unchanged.
 const TOUR_LOADER_DELAY = 180;
+// MOVES INSIDE A TOUR show no loading screen at all (2026-09-28, on request — "every transition
+// should be as smooth as the curtains"): the room being left stays fully on screen until the next
+// image is ready, then the usual crossfade runs. Only a download slower than TOUR_MINI_DELAY shows
+// a small spinner in a corner (`mini`: no dim, no text), so a tap never looks ignored.
+const TOUR_MINI_DELAY = 700;
 // Settles once boot has put the tours in place (or given up). The loading screen lifts BEFORE
 // tours load — anandman fetches its Google Sheet first, and tour.json arrived 5.2s after the
 // screen lifted in testing — so a visitor who tapped VIRTUAL TOUR in that window was told
@@ -9030,7 +9577,7 @@ let tourLoaderEl = null, tourLoaderTimer = null;
 // `immediate` = entering a tour (or a tap made before tours loaded): shown at once as a heavier
 // dim over the CURRENT screen, which stays visible behind it. Otherwise it's the light veil,
 // and only if the load turns out to be slow.
-function showTourLoader(label, { immediate = false } = {}) {
+function showTourLoader(label, { immediate = false, mini = false } = {}) {
   if (!els.pano) return;
   if (!tourLoaderEl) {
     tourLoaderEl = document.createElement('div');
@@ -9044,11 +9591,12 @@ function showTourLoader(label, { immediate = false } = {}) {
   const reveal = () => {
     tourLoaderEl.querySelector('.tour-loader-txt').textContent = label ? `Loading ${label}…` : 'Loading…';
     tourLoaderEl.classList.toggle('is-fading', immediate);
+    tourLoaderEl.classList.toggle('is-mini', mini && !immediate);
     tourLoaderEl.classList.remove('is-dark');
     void tourLoaderEl.offsetWidth;                        // commit the start state so the fade runs
     tourLoaderEl.classList.add('is-on');
   };
-  if (immediate) reveal(); else tourLoaderTimer = setTimeout(reveal, TOUR_LOADER_DELAY);
+  if (immediate) reveal(); else tourLoaderTimer = setTimeout(reveal, mini ? TOUR_MINI_DELAY : TOUR_LOADER_DELAY);
 }
 // The handoff on entering a tour: the dimmed last screen dips to dark (~quarter second) so the
 // swap from plot map to room happens unseen, then hideTourLoader fades the dark into the room.
@@ -9082,7 +9630,7 @@ async function tourGoTo(nodeId, { instant = false, holdView = false } = {}) {
   tv.busy = true; refreshTourRoomMenu();
   // `instant` is a fresh entry from the plot map: veil at once, since the plot map is already
   // gone. Any other move only shows it if the download is actually slow.
-  showTourLoader(node.name, { immediate: instant });
+  showTourLoader(node.name, { immediate: instant, mini: !instant });
   try {
     const tex = await loadTourNodeTex(tour, node, curTourVariant());
     if (!state.tourView) return;                            // exited while loading
@@ -9324,7 +9872,9 @@ function refreshTourRoomMenu() {
   const activeTourId = `virtualtour-${tv.tourId}`;
   container.querySelectorAll('.cat-btn[data-node-id]').forEach((btn) => {
     const id = btn.dataset.nodeId;
-    btn.classList.toggle('is-active', id === activeRoomId || id === activeTourId);
+    // A folder's tour rows are real menu nodes (not `virtualtour-…`), so match on their tourId.
+    const isTourRow = findNodeInfo(id)?.node?.content?.tourId === tv.tourId;
+    btn.classList.toggle('is-active', id === activeRoomId || id === activeTourId || isTourRow);
   });
 }
 
@@ -9588,13 +10138,15 @@ function renderClientSidebar() {
         const title = (node.title || 'ITEM').trim().toUpperCase();
         const drills = menuRowOpensSubmenu(node);
         const arrow = drills ? ' <span class="cat-btn-arrow">›</span>' : '';
-        const activeCls = node.id === activeAerialId ? ' is-active' : '';
+        // A tour on the main menu stays highlighted while the visitor is inside it.
+        const inThisTour = state.tourView && node.contentType === 'panotour' && node.content?.tourId === state.tourView.tourId;
+        const activeCls = (node.id === activeAerialId || inThisTour) ? ' is-active' : '';
         return `<button class="cat-btn ${drills ? 'cat-btn-sub' : ''}${activeCls}" type="button" data-node-id="${esc(node.id)}">${esc(title)}${arrow}</button>`;
       }).join('')
       // A single-tour, single-room project has nowhere else to put an exit — see
       // openClientPanoTour's `state.menuNavStack = []` case — so it's appended straight
       // onto the root list itself, the one level that's always shown.
-      + (state.tourView ? `<button class="cat-btn" type="button" data-node-id="__exit_tour__">✕ EXIT TOUR</button>` : '')
+      + (state.tourView && tourHasAerialHome() ? `<button class="cat-btn" type="button" data-node-id="__exit_tour__">✕ EXIT TOUR</button>` : '')
       // "⬇ SAVE FOR OFFLINE" / "⟳ UPDATE OFFLINE COPY" — the ONE way into offline use
       // (2026-09-24: nothing about offline is shown unasked any more). See offlineMenuRowHtml.
       + offlineMenuRowHtml();
@@ -9762,7 +10314,7 @@ function wireClientSidebarButtons() {
       if (!nodeId) return;
       // The one synthetic row that can appear at ROOT level (see renderClientSidebar) —
       // a single-tour, single-room project has no picker level to carry it otherwise.
-      if (nodeId === '__exit_tour__') { closePanoTour(); return; }
+      if (nodeId === '__exit_tour__') { exitTourToHome(); return; }
       if (nodeId === '__offline_save__') { openOfflinePanel(); return; }
       const nodeInfo = findNodeInfo(nodeId);
       if (!nodeInfo) return;
@@ -9843,7 +10395,7 @@ function openNodeContent(node, nodeInfo = null, { autoOpen = false } = {}) {
     } else if (cType === 'menuimage') {
       // Drawn into the menu, never opened — see renderClientSidebar. Nothing to do.
     } else if (cType === 'exittour') {
-      closePanoTour();
+      exitTourToHome();
     } else if (cType === 'virtualtour') {
       // Built-in row (see ensureBuiltinNodes) — the client-side analogue of LANDMARKS'
       // category picker, but for state.tours: no tours ⇒ a plain notice; exactly one ⇒
@@ -9853,12 +10405,17 @@ function openNodeContent(node, nodeInfo = null, { autoOpen = false } = {}) {
       // admin's own ordering) so the visitor sees something immediately, same as LANDMARKS
       // showing "ALL LANDMARKS" the instant its category list appears. Picking a different
       // tour from that list is what drills one level deeper into ITS OWN room list.
+      // Only tours NOT placed in the menu (see tourMenuGroup): one the admin put on the main
+      // menu or in a folder has its own row there and isn't repeated here.
+      const auto = autoListedTours();
       if (!state.tours.length) {
         showNotice('This project has no virtual tours yet. Add one in the admin <strong>Tour</strong> tab.');
-      } else if (state.tours.length === 1) {
-        openClientPanoTour(state.tours[0].id, state.tours[0].name);
+      } else if (!auto.length) {
+        showNotice('Every tour already has its own place in the menu.');
+      } else if (auto.length === 1) {
+        openClientPanoTour(auto[0].id, auto[0].name);
       } else {
-        openClientPanoTour(state.tours[0].id, state.tours[0].name, { anchorRooms: false });
+        openClientPanoTour(auto[0].id, auto[0].name, { anchorRooms: false });
       }
     } else if (cType === 'tour') {
       openClientTourModal(node.title || 'Virtual Tour', content);
@@ -10546,6 +11103,9 @@ function renderBuiltinTourList() {
 }
 
 function renderAdminMenuTree() {
+  // The Tour tab's per-tour "Main menu" switches read the menu tree, so any menu change
+  // (added, moved, deleted item) refreshes them too.
+  refreshTourList();
   const treeEl = $('projMenuBuilderDropdown');
   if (!treeEl) return;
 
@@ -11257,6 +11817,7 @@ function openNodeBuilderModal(nodeId = null, defaultParentId = 'root', presetKin
     fileName: node?.content?.fileName || '',
     selectedFiles: [],
     tourId: node?.content?.tourId || '',           // 'panotour' items reference a tour.json tour
+    extraTourIds: [],                              // more tours ticked → the item becomes a folder of them
     contact: Object.assign({ title: '', about: '', phone: '', email: '', image: '', imageName: '', imageBlob: null }, node?.contact || {}),
     galleryImages: (node?.content?.images && Array.isArray(node.content.images)) ? [...node.content.images] : []
   };
@@ -11487,6 +12048,7 @@ function renderWizardTourPicker() {
     wizardState.tourId = sel.value === WIZARD_NEW_TOUR ? createWizardTour() : sel.value;
     renderWizardTourPicker();
   };
+  renderWizardTourExtras();
   if (!tours.length) {
     if (hint) hint.innerHTML = 'No tours yet — pick <strong>＋ Create a new tour</strong>, then upload its panoramas in the admin sidebar’s <strong>Tour</strong> tab.';
     return;
@@ -11498,6 +12060,24 @@ function renderWizardTourPicker() {
     else if (!t.links.length) hint.innerHTML = `⚠️ No hotspots linked yet: visitors can still jump between the ${tourRooms(t).length} rooms from the strip, but cannot walk between them.`;
     else hint.textContent = `${tourRooms(t).length} rooms · ${t.links.length} hotspot link${t.links.length === 1 ? '' : 's'}.`;   // views aren't rooms
   }
+}
+
+// "Put more tours in this item" (2026-09-28, on request): ticking other tours here turns the new
+// item into a FOLDER holding the chosen tour plus the ticked ones, one row each — the reference
+// site's per-flat sub-menu. Only when creating (an existing item is edited as itself).
+function renderWizardTourExtras() {
+  const box = $('wizardTourExtras'); if (!box) return;
+  const primary = $('wizardTourSelect')?.value;
+  const others = (state.tours || []).filter((t) => t.id !== primary);
+  if (wizardState.mode === 'edit' || !others.length) { box.hidden = true; box.innerHTML = ''; return; }
+  const keep = new Set(wizardState.extraTourIds || []);
+  box.hidden = false;
+  box.innerHTML = '<div class="wizard-tour-extras-head">Also put these tours in it <span>(makes a folder, one row per tour)</span></div>'
+    + others.map((t) => `<label class="wizard-tour-extra"><input type="checkbox" value="${esc(t.id)}"${keep.has(t.id) ? ' checked' : ''}> ${esc((t.name || 'Untitled tour').trim())}</label>`).join('');
+  box.querySelectorAll('input').forEach((cb) => cb.addEventListener('change', () => {
+    wizardState.extraTourIds = [...box.querySelectorAll('input:checked')].map((x) => x.value);
+  }));
+  wizardState.extraTourIds = [...box.querySelectorAll('input:checked')].map((x) => x.value);
 }
 
 function renderPlacementPicker() {
@@ -11852,6 +12432,20 @@ function initCustomMenuAdminAndClient() {
           const pick = $('wizardTourSelect')?.value;
           nodeData.content.tourId = pick === WIZARD_NEW_TOUR ? createWizardTour()
             : (pick || wizardState.tourId || existingContent.tourId || '');
+          // More tours ticked (renderWizardTourExtras): the item becomes a folder of tour rows,
+          // titled with the name typed for it; each row carries its tour's own name.
+          const extras = !activeEditingNodeId ? (wizardState.extraTourIds || []).filter((id) => id !== nodeData.content.tourId) : [];
+          if (extras.length) {
+            const row = (tid, i) => {
+              const t = state.tours.find((x) => x.id === tid);
+              return { id: `node_${Date.now()}_${i}_${Math.floor(Math.random() * 1000)}`, kind: 'child', contentType: 'panotour',
+                title: ((t && t.name) || 'VIRTUAL TOUR').trim(), content: { url: '', fileName: '', fileBlob: null, tourId: tid } };
+            };
+            const primaryId = nodeData.content.tourId;
+            nodeData.kind = 'parent';
+            delete nodeData.contentType; delete nodeData.content;
+            nodeData.children = [primaryId, ...extras].map(row);
+          }
         }
       } else if (kind === 'contact') {
         const existingNode = activeEditingNodeId ? findNodeInfo(activeEditingNodeId)?.node : null;
@@ -12004,7 +12598,8 @@ function initCustomMenuAdminAndClient() {
       const wasTourNode = isTourMenuNode(state.menuNavStack[state.menuNavStack.length - 1]);
       state.menuNavStack.pop();
       const stillTourNode = state.menuNavStack.length > 0 && isTourMenuNode(state.menuNavStack[state.menuNavStack.length - 1]);
-      if (state.tourView && wasTourNode && !stillTourNode) { closePanoTour(); return; }
+      // No aerial view to go back to (tourHasAerialHome): the main menu, tour still open.
+      if (state.tourView && wasTourNode && !stillTourNode && tourHasAerialHome()) { closePanoTour(); return; }
       renderClientSidebar();
     }
   });
