@@ -501,6 +501,12 @@ _jobs = {}
 _jobs_lock = threading.Lock()
 
 
+def any_running():
+    """Is a publish or unpublish running for any project? (server.py's /api/idle.)"""
+    with _jobs_lock:
+        return any(j.snapshot()["running"] for j in _jobs.values())
+
+
 def job_state(pid):
     j = _jobs.get(pid)
     return j.snapshot() if j else None

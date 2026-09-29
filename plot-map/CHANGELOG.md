@@ -5,6 +5,32 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-29 (Hosted admin: EC2 sleep/wake)
+
+The admin can now be hosted on AWS and pay only while in use (3–4 sessions a week). A wake-up
+link starts the server, and it stops itself when idle. The hands-on guide is `deploy/ec2/README.md`.
+- **`server.py`:**
+  - `GET /api/health`, the "server is up" check;
+  - `GET /api/idle`, loopback only: `idleSeconds` since the last real request, and `busy` while any upload, download or publish runs;
+  - `note_activity()` ignores the admin's own polling (`PASSIVE_ROUTES`), so an open tab doesn't block sleep.
+- **New helpers:** `assets_s3.any_busy()` and `publish_s3.any_running()`.
+- **`deploy/ec2/`:**
+  - `Caddyfile.template`: HTTPS and basic auth, with `/api/health` open, 300 MB bodies and 15 min timeouts;
+  - `plotmap.service`: `server.py` bound to 127.0.0.1;
+  - `idle-shutdown.sh` with its timer and service: stops the instance after 60 idle minutes, never while busy, and also if `server.py` stops answering for that long;
+  - `setup.sh`: one-command Ubuntu setup;
+  - `wake-lambda/lambda_function.py`: Function URL + key; starts the instance, shows a self-refreshing waiting page, then redirects to the admin; optional Route 53 re-pointing;
+  - `iam/` policies;
+  - `.gitattributes` forcing LF.
+- **Verified locally:**
+  - `/api/health` and `/api/idle` on a test port: polling doesn't reset idle, and a page load does.
+  - The idle script (with a stubbed shutdown) stays up when recent, and stops when idle or when the server is down.
+  - The Lambda was checked against a mocked EC2 for bad key, stopped, running-not-ready, ready (302 with the project) and stopping.
+- **Not tested:** on real AWS.
+Files: `server.py`, `assets_s3.py`, `publish_s3.py`, `deploy/ec2/*`, `CLAUDE.md`, `ADMIN-DATA-SYNC.md`.
+
+---
+
 ## 2026-09-29 (Contact page: a blank email hides the email row)
 
 On request: remove the email from eleganzav2's contact page. Its contact item already had an empty

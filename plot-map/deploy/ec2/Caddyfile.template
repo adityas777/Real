@@ -1,0 +1,40 @@
+# Build91 admin — Caddy in front of server.py (see README.md in this folder).
+# setup.sh fills in __DOMAIN__, __ADMIN_USER__ and __ADMIN_HASH__ and installs this as
+# /etc/caddy/Caddyfile. Caddy gets and renews the HTTPS certificate on its own.
+#
+# server.py's save/rename/delete API has NO login of its own, so every request goes through
+# the username/password below — except /api/health, which the wake-up page polls to know when
+# the server is ready. It answers {"ok":true} and nothing else.
+
+__DOMAIN__ {
+	encode gzip
+
+	# A Save sends whole panoramas as base64 JSON; allow big bodies and slow uploads.
+	request_body {
+		max_size 300MB
+	}
+
+	@health path /api/health
+	handle @health {
+		reverse_proxy 127.0.0.1:8731
+	}
+
+	handle {
+		basic_auth {
+			__ADMIN_USER__ __ADMIN_HASH__
+		}
+		reverse_proxy 127.0.0.1:8731 {
+			transport http {
+				read_timeout 15m
+				write_timeout 15m
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/plotmap-access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

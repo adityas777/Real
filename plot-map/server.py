@@ -21,6 +21,11 @@ them. Each project is a directory under ./projects/<project-id>/.
   GET  /api/publish/progress?project=<id>
                                  → that background job's live progress
   POST /api/unpublish            → body { project, password } — takes it off the web
+  GET  /api/health               → {"ok":true} — "the server is up" (sleep/wake hosting's
+                                   wake-up page; Caddy lets it through without the login)
+  GET  /api/idle                 → from this machine only: seconds since the last real use and
+                                   whether an upload/download/publish is running — asked by
+                                   deploy/ec2/idle-shutdown.sh, which stops the EC2 host when idle
 
 Safety: project ids and file names are sanitised and every write is confined to the
 projects/ root (no path traversal). It binds to 0.0.0.0 so other devices on the LAN can
@@ -42,6 +47,7 @@ import re
 import socket
 import sys
 import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import deploy_s3
@@ -695,6 +701,16 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         route = self.path.split("?", 1)[0]
+        note_activity(route)
+        # Sleep/wake hosting (deploy/ec2, 2026-09-29). /api/health answers the wake-up page and
+        # Caddy without a login and says nothing about the projects; /api/idle is what the
+        # idle-shutdown timer asks, and only from this machine itself.
+        if route == "/api/health":
+            return self._send_json(200, {"ok": True})
+        if route == "/api/idle":
+            if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                return self._send_json(404, {"ok": False, "error": "not found"})
+            return self._send_json(200, idle_status())
         if route == "/api/projects":
             projects = []
             if os.path.isdir(PROJECTS_DIR):
@@ -1039,6 +1055,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?", 1)[0]
+        note_activity(route)
         if route == "/api/rename":
             return self.do_rename()
         if route == "/api/delete":
@@ -1328,6 +1345,40 @@ class Handler(SimpleHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
+
+# ─── Idle tracking (sleep/wake hosting, see deploy/ec2/README.md) ────────────────────────────────
+# The EC2 host stops itself after IDLE_MINUTES with no real use (deploy/ec2/idle-shutdown.sh asks
+# /api/idle). "Real use" is any request EXCEPT the ones the admin page makes on its own while a
+# tab just sits open (the upload widget, download and publish polling) and the health/idle checks
+# themselves — otherwise a forgotten tab would keep the server, and the bill, running forever.
+# Separately, `busy` is true while any upload, download or publish is still running: the host must
+# never stop in the middle of one, however long the admin has been away.
+PASSIVE_ROUTES = {"/api/health", "/api/idle", "/api/assets/jobs", "/api/assets/pull-status",
+                  "/api/publish/status", "/api/publish/progress"}
+_last_activity = time.time()
+
+
+def note_activity(route):
+    global _last_activity
+    if route not in PASSIVE_ROUTES:
+        _last_activity = time.time()
+
+
+def idle_status():
+    busy = []
+    try:
+        import assets_s3
+        if assets_s3.any_busy():
+            busy.append("cloud sync")
+    except Exception:
+        pass
+    try:
+        if publish_s3.any_running():
+            busy.append("publish")
+    except Exception:
+        pass
+    return {"ok": True, "idleSeconds": int(time.time() - _last_activity), "busy": bool(busy), "busyWith": busy}
+
 
 def lan_ip():
     """Best-effort LAN address to print (no packets actually sent)."""

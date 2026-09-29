@@ -1,0 +1,20 @@
+# Build91 admin server (server.py). Installed by setup.sh as /etc/systemd/system/plotmap.service.
+# Starts on every boot, i.e. every time the wake-up link starts the instance, and restarts
+# itself if it ever crashes. It listens on 127.0.0.1 only: Caddy is the one public entrance.
+[Unit]
+Description=Build91 plot-map admin server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=plotmap
+Group=plotmap
+WorkingDirectory=/opt/plotmap/plot-map
+Environment=HOST=127.0.0.1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 server.py 8731
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

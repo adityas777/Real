@@ -284,6 +284,15 @@ def busy(pid):
         return bool(pj and pj.get("state") == "running")
 
 
+def any_busy():
+    """Is ANY project uploading, waiting to upload, or downloading? (server.py's /api/idle: the
+    sleep/wake host must not stop mid-transfer.)"""
+    with _jobs_lock:
+        if any(j["state"] in ("queued", "uploading") for j in _push_jobs):
+            return True
+        return any(pj.get("state") == "running" for pj in _pull_jobs.values())
+
+
 # ─── Plan: what opening this project needs ────────────────────────────────────────────────────
 
 def plan(pid, _inside=False):

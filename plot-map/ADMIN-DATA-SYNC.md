@@ -230,6 +230,8 @@ Decided by `is_synced_path` / `_local_files` in `assets_s3.py`:
 | `GET /api/assets/jobs` | `{ok, jobs:[{id, project, label, state:queued\|uploading\|done\|error, createdAt, startedAt, endedAt, filesTotal, filesDone, bytesTotal, bytesDone, current, uploaded, keptNewer, error}]}` newest first |
 | `POST /api/assets/retry?id=` | `{ok, job}` |
 | `GET /api/projects` | `{projects:[local ids], cloud:[ids only in S3]}` (cloud list cached 60 s) |
+| `GET /api/health` | `{ok:true}` — sleep/wake hosting's "server is up" (deploy/ec2) |
+| `GET /api/idle` | loopback only: `{ok, idleSeconds, busy, busyWith}` — `busy` = `assets_s3.any_busy()` (any upload queued/uploading or download running) or a publish running; the EC2 host's idle-shutdown never stops while busy |
 
 Any `/api/assets/*` failure: `{ok:false, configured:<bool>, error}` with HTTP 200 (so the page can
 read it). Times are the **server's** clock (seconds).
@@ -271,7 +273,8 @@ project, starts `pollUploads`).
   needs: `bucket`, `region`, `distributionId`, `publicBaseUrl` and a `password` (unused by sync),
   plus optional `awsProfile`. A config that fails that check makes sync report
   `configured:true` with the error. AWS credentials come from the machine's AWS profile and never
-  reach a browser.
+  reach a browser. On the hosted EC2 admin (deploy/ec2) `awsProfile` is `""`, so boto3 uses the
+  instance's IAM role and no keys are stored on the server.
 - Prefix: `BASE_PREFIX = "ZEROX-PROJECTS-FINAL/"`.
 - First-time upload of existing projects: `python assets_s3.py --all` or
   `python assets_s3.py <id> …` (same rules as a Save).

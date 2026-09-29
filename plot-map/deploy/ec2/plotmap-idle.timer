@@ -1,0 +1,10 @@
+# Checks every 5 minutes whether the admin has gone idle (plotmap-idle.service).
+[Unit]
+Description=Check every 5 minutes whether the Build91 admin is idle
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

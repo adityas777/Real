@@ -1,0 +1,10 @@
+# Run once by plotmap-idle.timer: stop the instance if the admin has been idle (see
+# idle-shutdown.sh). Change IDLE_MINUTES here to make it wait longer or shorter.
+[Unit]
+Description=Stop the Build91 admin server when it has been idle
+
+[Service]
+Type=oneshot
+Environment=IDLE_MINUTES=60
+Environment=MIN_UPTIME_MINUTES=20
+ExecStart=/usr/local/bin/plotmap-idle-shutdown

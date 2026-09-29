@@ -50,6 +50,17 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
 - **Client:** `http://localhost:8731/?project=<id>` · **Admin:** `http://localhost:8731/?admin=1&project=<id>`
 - No install/build step. **Server-side save** (admin Export / Save…) is how you publish;
   it writes straight into the project dir (no more manual folder copying / downloads).
+- **Hosted admin (sleep/wake on EC2, 2026-09-29):** `deploy/ec2/` holds everything, and
+  `deploy/ec2/README.md` is the hands-on deploy guide.
+  - The request flow: a Lambda wake-up link starts a stopped EC2 instance → Caddy (HTTPS + basic auth) → `server.py` on `127.0.0.1:8731`.
+  - `idle-shutdown.sh`, run every 5 min by a systemd timer, stops the instance after `IDLE_MINUTES` (60).
+  - `server.py` support:
+    - `GET /api/health` (no auth at Caddy);
+    - `GET /api/idle`, loopback only, returning `{idleSeconds, busy, busyWith}`;
+    - `note_activity(route)` on every request, except `PASSIVE_ROUTES` (the admin page's own polling, so a forgotten tab doesn't keep it awake);
+    - `assets_s3.any_busy()` / `publish_s3.any_running()`, so the instance never stops mid-transfer.
+  - **If you add a new endpoint the admin POLLS on a timer, add it to `PASSIVE_ROUTES`.**
+  - On the server, `publish.config.json` has `awsProfile: ""`, so boto3 uses the instance role.
 
 ## Architecture (the projection model)
 
