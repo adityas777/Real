@@ -5,6 +5,23 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-29 (Contact page: a blank email hides the email row)
+
+On request: remove the email from eleganzav2's contact page. Its contact item already had an empty
+email, but `openClientContactModal` fell back to the demo address `anandameleganza@gmail.com` whenever
+the email was blank.
+- A contact that has an `email` field now shows exactly that value, and when it's blank the
+  whole email row (`#clientContactEmailContainer`) is hidden.
+- The demo fallback applies only when the field is missing entirely.
+- In `styles.css`:
+  - `.contact-info-row[hidden]` beats the row's `display: flex !important`;
+  - the row before a hidden last row loses its divider.
+- To show an email again: add it in the Contact item's editor.
+- Verified in headless Chrome on eleganzav2: the email row computes to `display: none`, and only the address and phone show.
+Files: `app.js`, `styles.css`.
+
+---
+
 ## 2026-09-28 (Tour switches without a loading screen)
 
 On request (laxmi): switching furnished ↔ unfurnished showed the loading screen. It should be as smooth as the

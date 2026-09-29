@@ -10901,9 +10901,15 @@ function openClientContactModal(c = {}) {
     phone.href = `tel:${num.replace(/\s+/g, '')}`;
   }
   if (email) {
-    const mail = c.email || 'anandameleganza@gmail.com';
+    // A contact saved from the wizard always carries `email`; left blank there, the email row is
+    // hidden (2026-09-29, on request) rather than falling back to the demo address, which made
+    // an address the admin had deliberately removed keep showing. The fallback stays only for a
+    // contact node with no email field at all.
+    const mail = ('email' in c) ? (c.email || '').trim() : 'anandameleganza@gmail.com';
     email.textContent = mail;
-    email.href = `mailto:${mail}`;
+    email.href = mail ? `mailto:${mail}` : '';
+    const row = $('clientContactEmailContainer');
+    if (row) row.hidden = !mail;
   }
   if (img) {
     const defaultImg = state.panoImage?.file ? assetUrl(state.panoImage.file) : 'projects/sample/Demo.web.jpg';

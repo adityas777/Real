@@ -5932,6 +5932,15 @@ body.is-admin .cat-drawer {
   border-bottom: 1px solid rgba(28, 25, 23, 0.09) !important;
 }
 
+/* A row with nothing to show (e.g. no email set) is hidden by openClientContactModal; the
+   `display: flex !important` above would otherwise override the hidden attribute. */
+.contact-info-row[hidden] {
+  display: none !important;
+}
+.contact-info-row:has(+ .contact-info-row[hidden]:last-child) {
+  border-bottom: none !important;
+}
+
 .contact-info-row:last-child {
   border-bottom: none !important;
 }
