@@ -22,3 +22,8 @@ plot-map/tools/*
 # This one rule also covers what used to need its own line: big media, _originals/, the
 # per-machine .b91-sync.json record, half-downloaded *.part files.
 plot-map/projects/
+
+# The admin usage log (server.py → usage-log.csv; summarise with usage_report.py). Per machine.
+plot-map/usage-log.csv
+plot-map/LINKS.txt
+plot-map/*.log

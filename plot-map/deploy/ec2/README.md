@@ -6,6 +6,11 @@ by a link, so you pay for only the few hours it actually runs.
 
 Everything needed is in this folder. Plan about **45–60 minutes** the first time.
 
+> **Decision (2026-09-30):**
+> - **Now:** the admin runs on an **office computer** for a one-month trial (`../office/README.md`).
+> - **Later:** if usage grows, it moves here, using **Option A (Elastic IP)** in step 3. Follow Option A and skip everything marked "option B".
+> - **Expected cost:** about **$7.20/month + 18% GST ≈ $8.50** (~₹720) on t3.small with a 20 GB disk. The office trial's `usage_report.py` shows the hours it would really run.
+
 ---
 
 ## How it works
@@ -85,15 +90,15 @@ The server reaches S3 through an IAM role, so no AWS keys are ever stored on it.
 
 Launch it and note the **Instance ID** (`i-0…`).
 
-## Step 3 — A fixed web address (pick A or B)
+## Step 3 — A fixed web address (Option A chosen)
 
 The server's public IP changes every time it starts, so `admin.build91.in` needs one of these.
 
-**Option A — Elastic IP (simplest, ~$3.65/month)**
+**Option A — Elastic IP (the chosen option, ~$3.65/month)**
 1. **EC2 → Elastic IPs → Allocate** → then **Actions → Associate** with `plotmap-admin`.
 2. In the DNS of `build91.in`, add an **A record**: `admin` → that Elastic IP.
 
-**Option B — Route 53 updates the address on every wake-up (~$0.50/month)**
+**Option B — Route 53 updates the address on every wake-up (~$0.50/month)** *(not used, kept for reference)*
 Only if `build91.in` (or a subdomain delegated to Route 53) is managed in Route 53.
 1. Note the **Hosted zone ID** of the zone containing `admin.build91.in`.
 2. Create an **A record** `admin.build91.in` → the instance's current public IP, **TTL 60**.

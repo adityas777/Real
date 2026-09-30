@@ -701,7 +701,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         route = self.path.split("?", 1)[0]
-        note_activity(route)
+        note_activity(route, self.client_address[0])
         # Sleep/wake hosting (deploy/ec2, 2026-09-29). /api/health answers the wake-up page and
         # Caddy without a login and says nothing about the projects; /api/idle is what the
         # idle-shutdown timer asks, and only from this machine itself.
@@ -1055,7 +1055,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?", 1)[0]
-        note_activity(route)
+        note_activity(route, self.client_address[0])
         if route == "/api/rename":
             return self.do_rename()
         if route == "/api/delete":
@@ -1357,11 +1357,37 @@ PASSIVE_ROUTES = {"/api/health", "/api/idle", "/api/assets/jobs", "/api/assets/p
                   "/api/publish/status", "/api/publish/progress"}
 _last_activity = time.time()
 
+# Usage log (2026-09-30, on request: "observe usage for 1 month" before deciding on EC2). One CSV
+# line per MINUTE of real use per computer — minute, the computer's address, the first request of
+# that minute — appended to usage-log.csv beside this file (git-ignored). Same notion of "real use"
+# as the idle clock. `python usage_report.py` turns it into days, sessions and hours.
+USAGE_LOG = os.path.join(ROOT, "usage-log.csv")
+_usage_seen = set()
+_usage_lock = threading.Lock()
 
-def note_activity(route):
+
+def note_activity(route, client=""):
     global _last_activity
-    if route not in PASSIVE_ROUTES:
-        _last_activity = time.time()
+    if route in PASSIVE_ROUTES:
+        return
+    _last_activity = time.time()
+    minute = time.strftime("%Y-%m-%d %H:%M")
+    client = (client or "").replace("::ffff:", "")
+    key = (minute, client)
+    with _usage_lock:
+        if key in _usage_seen:
+            return
+        if len(_usage_seen) > 5000:
+            _usage_seen.clear()
+        _usage_seen.add(key)
+        try:
+            new = not os.path.exists(USAGE_LOG)
+            with open(USAGE_LOG, "a", encoding="utf-8") as fh:
+                if new:
+                    fh.write("minute,computer,first_request\n")
+                fh.write(f"{minute},{client},{route.replace(',', ' ')}\n")
+        except OSError:
+            pass                                 # a usage log must never break the admin
 
 
 def idle_status():

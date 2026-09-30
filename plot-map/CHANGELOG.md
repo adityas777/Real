@@ -5,6 +5,59 @@ Newest entries at the top. Each entry: what changed, why, and files touched.
 
 ---
 
+## 2026-09-30 (Handover: one double-click gives every link)
+
+The developer is leaving; a non-IT colleague will run the admin. `start-admin.bat` now calls
+`start-admin.ps1`, which:
+- checks Python, boto3 and Pillow;
+- starts `server.py` **hidden** if port 8731 is closed;
+- starts the Cloudflare quick tunnel hidden, or reuses a running one that answers;
+- writes **`Build91 LINKS.txt`** to the Desktop, with CLIENT and ADMIN links for every local project, each as Internet (tunnel), Office network (LAN IP) and This computer, plus usage notes; it also writes a copy to `plot-map/LINKS.txt`;
+- opens that file in Notepad;
+- creates the Desktop shortcuts *Build91 - Start Admin* / *Build91 - Stop Admin* once.
+
+**Tunnel robustness:** each start uses a fresh log file, reads the LATEST address, and accepts it only once
+it answers. A first version picked up a dead address and returned 530.
+
+**`stop-admin.bat`:** stops `python … server.py` processes and cloudflared only.
+
+**Also:**
+- `Build91 - HOW TO GET THE LINKS.txt` on this PC's Desktop: plain-language steps.
+- `deploy/office/README.md`: Every-day section rewritten.
+- `.gitattributes`: `*.ps1` uses CRLF. `.gitignore`: `plot-map/LINKS.txt`. The .ps1 stays ASCII for Windows PowerShell 5.1.
+
+**Verified on this PC:**
+- Stop gave 0 server and 0 tunnel processes.
+- Start brought up the server and a tunnel; the file listed 17 projects.
+- The tunnel client and admin links (eleganzav2, laxmi), localhost admin and LAN client all returned 200.
+Files: `start-admin.bat`, `start-admin.ps1`, `stop-admin.bat`, `deploy/office/README.md`, `.gitattributes`, `../.gitignore`, `CLAUDE.md`.
+
+---
+
+## 2026-09-30 (Office hosting trial: start-admin.bat, usage log; EC2 Option A chosen)
+
+Boss's decision: make the EC2 plan ready for Option A, but first run the admin on an office PC with a fixed IP for a month.
+It's internal only, mainly Kriti. Watch the usage, then decide on EC2.
+- **`start-admin.bat`** (double-click):
+  - checks Python and installs boto3/Pillow once if they're missing;
+  - finds the PC's office IPv4 (the adapter with a default gateway);
+  - prints the localhost admin, office-IP admin and client links, then opens the browser;
+  - runs `server.py 8731` in the window;
+  - if port 8731 is already listening, it only shows the links;
+  - `PROJECT` at the top sets a default project.
+- **`allow-office-access.bat`:** self-elevates and adds the firewall rule "Build91 Admin (port 8731)", TCP inbound, `remoteip=localsubnet`, Private/Domain only.
+- **Usage log:** `server.py` `note_activity` now takes the client address and appends `minute,computer,first_request` to `usage-log.csv`, at most once per minute per computer, using the same PASSIVE_ROUTES rule. `usage_report.py [YYYY-MM]` gives days, sessions (a 30-min gap starts a new one), active hours, per-computer totals and "EC2 would run ~N h".
+- **Docs:** `deploy/office/README.md` (setup, daily use, month-end report, security). `deploy/ec2/README.md` now marks Option A as chosen, with the cost.
+- **Housekeeping:** `.gitattributes`: `*.bat` uses CRLF. `.gitignore`: `plot-map/usage-log.csv`.
+- **Verified** with a copy of the .bat on port 8799, browser opening disabled:
+  - The first run started the server; `/api/health` answered ok, and the links showed 192.168.1.45.
+  - The second run detected it was already running.
+  - With `PROJECT` set, `&project=` printed correctly.
+  - The usage log recorded a page load once, and polling and health checks weren't logged. The report printed correctly.
+Files: `start-admin.bat`, `allow-office-access.bat`, `server.py`, `usage_report.py`, `deploy/office/README.md`, `deploy/ec2/README.md`, `.gitattributes`, `../.gitignore`, `CLAUDE.md`.
+
+---
+
 ## 2026-09-29 (Hosted admin: EC2 sleep/wake)
 
 The admin can now be hosted on AWS and pay only while in use (3–4 sessions a week). A wake-up

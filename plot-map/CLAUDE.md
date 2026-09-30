@@ -60,6 +60,12 @@ place landmarks), and a **view-only client**. It's the "storefront" that links o
     - `note_activity(route)` on every request, except `PASSIVE_ROUTES` (the admin page's own polling, so a forgotten tab doesn't keep it awake);
     - `assets_s3.any_busy()` / `publish_s3.any_running()`, so the instance never stops mid-transfer.
   - **If you add a new endpoint the admin POLLS on a timer, add it to `PASSIVE_ROUTES`.**
+- **Current hosting (decided 2026-09-30):** a one-month trial on an **office PC** (fixed LAN IP, internal only, mainly Kriti). Guide: `deploy/office/README.md`.
+  - `start-admin.bat` → `start-admin.ps1` (ASCII, CRLF): starts `server.py` and the cloudflared quick tunnel HIDDEN, reusing either if it's already up; writes Desktop `Build91 LINKS.txt` (every project × client/admin × internet/office/localhost); makes the Desktop Start/Stop shortcuts. `stop-admin.bat` stops server.py and cloudflared. A tunnel address is accepted only once it answers, using the latest address from a fresh log.
+  - `allow-office-access.bat`: one-time firewall rule, TCP 8731, local subnet only, Private/Domain profiles.
+  - The `.bat` files must stay ASCII with CRLF line endings (`plot-map/.gitattributes`).
+  - `server.py` appends one line per active minute per client to `usage-log.csv` (git-ignored). `note_activity` uses the same "real use" rule as the idle clock, and `usage_report.py [YYYY-MM]` summarises it.
+  - If usage grows, move to EC2 **Option A** (Elastic IP).
   - On the server, `publish.config.json` has `awsProfile: ""`, so boto3 uses the instance role.
 
 ## Architecture (the projection model)
